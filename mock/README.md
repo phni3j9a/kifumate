@@ -7,7 +7,8 @@ UI/UXを決めるための検討用モックです。決まったものは実装
 
 | ファイル | 内容 |
 | --- | --- |
-| `src/analysis-variants.html` | 解析画面のデザイン3案（A 和モダン／B 明るいミニマル／C ポップ）の比較ページ |
+| `src/analysis-pop.html` | 解析画面のポップ案（C案をもとに盤面と形勢グラフを作り込んだ版）。いまの本線 |
+| `src/analysis-variants.html` | 解析画面のデザイン3案（A 和モダン／B 明るいミニマル／C ポップ）の比較ページ。方向性を選ぶための記録 |
 | `data/sample-game.json` | サンプル棋譜と各局面の解析データ |
 | `tools/gen_sample_game.py` | サンプルデータの生成スクリプト（Python + cshogi） |
 | `tools/build.py` | `src` にデータを埋め込んで `dist` に書き出す |
@@ -16,9 +17,9 @@ UI/UXを決めるための検討用モックです。決まったものは実装
 
 ## 見かた
 
-`dist/analysis-variants.standalone.html` をブラウザで開きます。
-幅の広い画面では3案が横に並び、狭い画面では1案ずつ切り替えて表示します。
+`dist/analysis-pop.standalone.html`（または `dist/analysis-variants.standalone.html`）をブラウザで開きます。
 スマホで開くと、枠なしで画面いっぱいに表示されます。
+3案の比較ページは、幅の広い画面では3案が横に並び、狭い画面では1案ずつ切り替えて表示します。
 
 ## 作り直しかた
 

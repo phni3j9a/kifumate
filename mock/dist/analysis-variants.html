@@ -346,8 +346,8 @@ body[data-plan="paid"] .lki{display:none}
 .vc .tbs{display:flex;align-items:flex-end;gap:4px;padding-left:16px;position:relative;z-index:1;margin-bottom:-2px}
 .vc .tbx{height:24px;display:flex;align-items:center;gap:4px;padding:0 10px;border:var(--ol);border-radius:10px 10px 0 0;background:#FFE9A8;font:900 11px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
 .vc .tbx.on{height:27px;background:#fff;color:var(--ink);border-bottom-color:#fff}
-.vc .tbx.lk{border-style:dashed;border-bottom-style:solid;background:transparent;font-weight:700;font-size:10.5px}
-.vc .tbx.lk .ic{width:12px;height:12px;stroke-width:2.2}
+.vc .tbx.lkt{border-style:dashed;border-bottom-style:solid;background:transparent;font-weight:700;font-size:10.5px}
+.vc .tbx.lkt .ic{width:12px;height:12px;stroke-width:2.2}
 .vc .hint{display:flex;align-items:center;gap:7px;width:100%;padding:5px 10px;border:var(--ol);border-radius:12px;background:#FFE1DE;text-align:left;font:700 11.5px/1.3 var(--f-maru);white-space:nowrap}
 .vc .hint[data-k="dub"]{background:#FFECD3}
 .vc .hint b{font-weight:900;font-size:13px}
@@ -886,7 +886,7 @@ function candsC(p) {
     const w = pct(wrSelf(r.o));
     h += '<div class="cs"><div class="tbs">';
     rows.forEach((x, i) => { h += `<button type="button" class="tbx${i === S.sel ? ' on' : ''}" data-cand="${i}">${x.rank === 0 ? 'おすすめ' : x.rank > 0 ? x.rank + 1 + '位' : '本譜'}</button>`; });
-    if (lockedCount(p)) h += `<span class="tbx lk"><svg class="ic"><use href="#i-lock"/></svg>2位・3位は精密解析で</span>`;
+    if (lockedCount(p)) h += `<span class="tbx lkt"><svg class="ic"><use href="#i-lock"/></svg>2位・3位は精密解析で</span>`;
     h += `</div><div class="bc"><span class="m">${mv(r.ja, 'c')}${r.game && r.rank >= 0 ? '<u>本譜</u>' : ''}${r.mk}</span><span class="p">${pvTxt(r, 'c') || '　'}</span><span class="w" style="background:conic-gradient(var(--you) 0 ${w}%, var(--opp) 0)"><b>${w}%</b><span>勝率</span></span></div></div>`;
   }
   if (p === N) h += `<div class="end">${winnerSide === SELF ? 'あなたの勝ち！' : '相手の勝ち'}（${esc(M.endReason)}）</div>`;
