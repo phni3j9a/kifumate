@@ -26,7 +26,7 @@ UI/UXを決めるための検討用モックです。決まったものは実装
 python3 mock/tools/build.py
 ```
 
-サンプルデータから作り直す場合は、先に `python3 mock/tools/gen_sample_game.py` を実行します（`pip install cshogi` が必要）。
+サンプルデータから作り直す場合は、先に `mock/tools/gen_sample_game.py` で自己対局・解析・検証を行います（`pip install cshogi` が必要。手順はスクリプト冒頭の「使い方」を参照）。時間制限つきの探索なので、再実行しても完全に同じデータにはなりません。
 
 ## サンプルデータについて
 

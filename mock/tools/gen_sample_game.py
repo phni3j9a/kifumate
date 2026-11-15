@@ -8,12 +8,14 @@ cshogi（盤面・合法手生成・KI2表記・詰み探索）の上で動く�
 これはモックの見た目を確認するためのデータであり、実際の将棋エンジン
 （やねうら王＋水匠）の出力ではない。
 
-使い方:
-  python3 gen_sample_game.py bench                  # 探索速度の確認
-  python3 gen_sample_game.py selfplay OUT.json [seed_from seed_to]
-  python3 gen_sample_game.py show GAMES.json        # 候補対局の一覧
-  python3 gen_sample_game.py analyze GAMES.json IDX OUT.json
-  python3 gen_sample_game.py verify OUT.json
+使い方（sample-game.json は seed 101 の対局を深さ6・1局面30秒上限で解析したもの）:
+  python3 gen_sample_game.py bench                              # 探索速度の確認
+  python3 gen_sample_game.py selfplay GAMES.json 101 117        # 自己対局（4並列）。点数順に保存
+  python3 gen_sample_game.py show GAMES.json                    # 候補対局の一覧
+  python3 gen_sample_game.py analyze GAMES.json 0 OUT.json 6 30 # 全局解析して OUT.json と OUT.json.raw.json を出力
+  python3 gen_sample_game.py rebuild OUT.json                   # raw から JSON だけ作り直す
+  python3 gen_sample_game.py verify OUT.json                    # 自己検証
+時間制限つきの探索と並列実行のため、再実行しても完全に同じ結果になるとは限らない。
 """
 import json
 import math
@@ -1110,9 +1112,12 @@ def build_json(g, raw, out_path):
             cands_out.append((cp, None, mvs[i], mvs[i:i + 5]))
             best_mover = sign * cp
             k = 0
-            for rawv, u, line in raw[i]["cands"]:
-                if u == usis[i] or abs(rawv) > MATE_BOUND:
-                    continue
+            alts = [c for c in raw[i]["cands"] if c[1] != usis[i] and abs(c[0]) < MATE_BOUND]
+            non_king = [c for c in alts if move_from_piece_type(b.move_from_usi(c[1])) != 8
+                        or move_is_drop(b.move_from_usi(c[1]))]
+            if non_king:
+                alts = non_king          # 仕掛けの局面で玉を動かす候補は不自然なので外す
+            for rawv, u, line in alts:
                 k += 1
                 val = min(int(rawv), best_mover - 18 * k - rng.randint(0, 14))
                 val = max(val, best_mover - 600)
@@ -1207,12 +1212,45 @@ def build_json(g, raw, out_path):
         elif is_best and len(prev["cands"]) >= 2:
             second = mover_sign * prev["cands"][1]["cp"]
             recapture = i >= 2 and positions[i - 1]["move"]["to"] == cur_p["move"]["to"]
-            if (before - second >= 300 and abs(before) < 2000 and prev["mate"] is None
-                    and not recapture and not in_check_at[i - 1]):
+            # 好手: 最善手と一致し、2番手より 250cp 以上良い「駒を取らない手」。
+            # 取り返し・王手回避・大差で負けている側の手は除く
+            if (before - second >= 250 and -1000 <= before < 2000 and prev["mate"] is None
+                    and not recapture and not in_check_at[i - 1] and not move_cap(mvs[i - 1])):
                 good.append((before - second, i))
+    # 好手は多くても3つ。差の大きい順に、先手・後手の双方から選ぶ
     good.sort(reverse=True)
-    for _, i in good[:3]:
+    print("好手候補:", [(i, positions[i]["move"]["ja"], gap) for gap, i in good])
+    picked = []
+    for side in (1, 0):                       # 奇数手=先手 を先に1つ
+        for gap, i in good:
+            if i % 2 == side and i not in picked:
+                picked.append(i)
+                break
+    for gap, i in good:
+        if len(picked) >= 3:
+            break
+        if i not in picked:
+            picked.append(i)
+    for i in picked:
         positions[i]["mark"] = "好手"
+
+    # 証明つきの詰み（1手詰・3手詰）を逃した手に印を付ける
+    for i in range(1, N + 1):
+        ts = positions[i - 1]["tsume"]
+        if ts and positions[i]["move"]["usi"] != ts["line"][0]["usi"]:
+            positions[i]["missedTsume"] = ts["len"]
+
+    # 同じ値が続く区間に小さな揺らぎを入れる（実エンジンの出力に近い見た目にするため。
+    # 指し手評価は揺らぎを入れる前の値で確定済み）
+    for i in range(JOSEKI_END, N):
+        pz = positions[i]
+        if pz["mate"] is not None or abs(pz["cp"]) > 2800:
+            continue
+        j = rng.randint(-11, 11)
+        pz["cp"] += j
+        for c in pz["cands"]:
+            if c["mate"] is None and abs(c["cp"]) < CP_CLAMP:
+                c["cp"] = max(-CP_CLAMP + 1, min(CP_CLAMP - 1, c["cp"] + j))
 
     meta = {
         "sente": "tsubame", "gote": "kawasemi", "self": "sente",
@@ -1223,7 +1261,8 @@ def build_json(g, raw, out_path):
         },
         "generator": ("UIモック用のサンプルデータ。cshogi上の自作簡易探索（駒割り中心の評価、深さ5前後）"
                       "による自己対局と解析で作成したもので、実際の将棋エンジン（やねうら王＋水匠）の"
-                      "出力ではない。1〜24手目の評価値と候補手は定跡扱いの合成値。"),
+                      "出力ではない。1〜35手目は固定手順（1〜24手目の評価値・候補手は合成値、25〜35手目は本譜を最善として"
+                      "探索の候補を添えたもの）で、指し手評価は36手目以降に付けている。"),
         "seed": g["seed"],
     }
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -1242,7 +1281,8 @@ def print_summary(path):
         best = f"最善 {c1['ja']}" if c1 else ""
         ts = f" 詰{p['tsume']['len']}" if p["tsume"] else ""
         mt = f" mate={p['mate']}" if p["mate"] is not None else ""
-        print(f"{p['ply']:3d} {p['move']['ja']:<8s} cp={p['cp']:+5d}{mt}{ts} "
+        ms = " 詰み逃し" if p.get("missedTsume") else ""
+        print(f"{p['ply']:3d} {p['move']['ja']:<8s} cp={p['cp']:+5d}{mt}{ts}{ms} "
               f"{p['mark'] or '':<4s} loss={p['loss']:<5d} | 次の{best}")
     marks = [(p["ply"], p["move"]["ja"], p["mark"], p["loss"]) for p in d["positions"] if p["mark"]]
     print("marks:", marks)

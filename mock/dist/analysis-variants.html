@@ -1,0 +1,1065 @@
+<title>kifumate 解析画面 3案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Yuji+Syuku&text=歩香桂銀金角飛玉王と杏圭全馬竜&display=swap">
+<style>
+/* Layout: three phone-sized mock screens of the same analysis view, side by side on wide
+   screens and one at a time (with a switcher) on narrow ones. The page chrome follows the
+   viewer's theme; each mock screen keeps its own fixed light palette, because the palette
+   is the thing being compared. */
+:root{
+  --pg-bg:#E7E8EA; --pg-fg:#1B1D21; --pg-muted:#59606A; --pg-line:#C9CCD2; --pg-card:#F5F6F7;
+  --pg-on:#1B1D21; --pg-on-fg:#FFFFFF; --pg-bezel:#0E0F12;
+  --f-ui:"Inter","Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif;
+  --f-min:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  --f-maru:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic UI","Noto Sans JP",sans-serif;
+  --f-koma:"Yuji Syuku","Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --pg-bg:#141518; --pg-fg:#E9EAED; --pg-muted:#A0A6AF; --pg-line:#34373D; --pg-card:#1E2024;
+    --pg-on:#E9EAED; --pg-on-fg:#141518; --pg-bezel:#000000; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --pg-bg:#141518; --pg-fg:#E9EAED; --pg-muted:#A0A6AF; --pg-line:#34373D; --pg-card:#1E2024;
+  --pg-on:#E9EAED; --pg-on-fg:#141518; --pg-bezel:#000000; color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--pg-bg);color:var(--pg-fg);font-family:var(--f-ui);font-size:14px;line-height:1.6;-webkit-text-size-adjust:100%}
+*,*::before,*::after{box-sizing:border-box}
+
+/* ---------- page chrome ---------- */
+.pg{min-height:100%;display:flex;flex-direction:column}
+.pg-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 28px;padding-block:22px 14px;
+  padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+.pg-head .tx{min-width:0;flex:1 1 380px}
+.pg-head h1{margin:0;font:700 20px/1.35 var(--f-ui);letter-spacing:.02em;text-wrap:balance}
+.pg-head p{margin:4px 0 0;max-width:62ch;color:var(--pg-muted);font-size:13px}
+.pg-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.pg-ctl .lb{font:600 11.5px/1 var(--f-ui);color:var(--pg-muted);letter-spacing:.06em}
+.seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--pg-line);border-radius:10px;background:var(--pg-card)}
+.seg button{appearance:none;-webkit-appearance:none;border:0;background:none;cursor:pointer;
+  font:600 12.5px/1 var(--f-ui);color:var(--pg-muted);padding:7px 12px;border-radius:8px;white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--pg-on);color:var(--pg-on-fg)}
+.seg button:focus-visible{outline:2px solid var(--pg-fg);outline-offset:2px}
+.stage{display:flex;justify-content:center;align-items:flex-start;gap:28px;padding-block:6px 26px;
+  padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+.col{display:flex;flex-direction:column;align-items:center;gap:12px;flex:none;min-width:0}
+.cap{width:398px;max-width:100%}
+.vname{margin:0;align-self:flex-start;font:700 15px/1.4 var(--f-ui);display:flex;align-items:center;gap:8px}
+.vname i{font-style:normal;font:700 11px/1 var(--f-ui);width:20px;height:20px;border-radius:50%;
+  display:grid;place-items:center;background:var(--pg-on);color:var(--pg-on-fg)}
+.cap dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px;line-height:1.6}
+.cap dt{color:var(--pg-muted);white-space:nowrap}
+.cap dd{margin:0;min-width:0}
+.pg-foot{margin-top:auto;border-top:1px solid var(--pg-line);padding-block:16px 26px;
+  padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px));
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 36px;font-size:12.5px}
+.pg-foot h3{margin:0 0 4px;font:700 12.5px/1.5 var(--f-ui)}
+.pg-foot ol,.pg-foot p{margin:0;color:var(--pg-muted);max-width:64ch}
+.pg-foot ol{padding-left:1.4em}
+
+/* view modes: side by side when wide, one at a time otherwise */
+.vsw{display:none}
+@media (max-width:1039.98px){
+  .vsw{display:inline-flex}
+  .col{display:none;width:100%}
+  .vname{align-self:center}
+  body[data-view="a"] .col[data-v="a"],body[data-view="b"] .col[data-v="b"],body[data-view="c"] .col[data-v="c"]{display:flex}
+}
+@media (min-width:1040px) and (max-width:1299.98px){
+  .phone{zoom:.8}
+  .cap{width:318px}
+  .stage{gap:20px}
+}
+
+/* ---------- phone frame ---------- */
+.phone{flex:none;width:398px;max-width:100%;height:820px;padding:9px;border-radius:52px;background:var(--pg-bezel);
+  box-shadow:0 22px 44px -22px rgba(0,0,0,.5)}
+.screen{position:relative;isolation:isolate;width:100%;height:100%;border-radius:43px;overflow:hidden;
+  display:flex;flex-direction:column;font-size:13px;line-height:1.35;-webkit-font-smoothing:antialiased;
+  user-select:none;-webkit-user-select:none}
+.screen button{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;
+  padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.screen button:focus-visible{outline:2px solid currentColor;outline-offset:1px}
+.screen em,.screen i{font-style:normal}
+.ic{width:20px;height:20px;display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sb{flex:none;height:34px;position:relative;display:flex;align-items:center;justify-content:space-between;
+  padding:7px 30px 0;font:600 13px/1 var(--f-ui)}
+.sb .isl{position:absolute;left:50%;top:9px;width:78px;height:22px;margin-left:-39px;border-radius:12px;background:#0B0B0D}
+.sb svg{display:block}
+.bdw{flex:none;padding:0 8px}
+.bd{display:block;width:100%;height:auto;overflow:visible}
+.ar-ul{display:none}
+.gh{opacity:.5}
+.hand{display:flex;align-items:flex-end;gap:2px;margin-left:auto;flex:none;min-height:22px}
+.hp{display:inline-flex;align-items:flex-end}
+.hp i{width:19px;height:21px;display:grid;place-items:center;padding-top:3px;font-size:11.5px;line-height:1;
+  clip-path:polygon(50% 0,85% 15%,97% 100%,3% 100%,15% 15%)}
+.hp b{font:600 10px/1 var(--f-ui);min-width:8px;padding:0 0 1px 1px}
+.hp0{font:500 10px/1 var(--f-ui);opacity:.55;padding-bottom:4px}
+.tn{display:none}
+.screen[data-turn="b"] .pl[data-side="s"] .tn,.screen[data-turn="w"] .pl[data-side="g"] .tn{display:inline-block}
+.me{display:none}
+.pl[data-me] .me{display:inline-block}
+.pn{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.gr{position:relative;touch-action:pan-y;cursor:pointer}
+.gr svg{display:block;overflow:visible}
+.g-ln{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.g-tip{position:absolute;top:-5px;z-index:5;transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap;
+  display:flex;align-items:baseline;gap:6px;padding:4px 8px;border-radius:6px;font:500 11px/1.3 var(--f-ui)}
+.g-tip b{font-weight:700;font-size:12px}
+.mr{display:grid;grid-template-columns:30px 1fr auto 54px;align-items:center;gap:6px;width:100%;text-align:left}
+.mr .mn,.mr .me2{font-variant-numeric:tabular-nums}
+.mr .me2{text-align:right}
+body[data-plan="paid"] .lki{display:none}
+
+/* ============ A: 和モダン ============ */
+.va{--paper:#F5F2EA;--ink:#211F1B;--ink2:#5F5A51;--ink3:#928C81;--rule:rgba(33,31,27,.17);
+  --ai:#1F4E79;--shu:#B5391F;--yama:#946600;
+  color:var(--ink);font-family:var(--f-ui);background-color:var(--paper);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .3 0 0 0 0 .22 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
+.va .hd{flex:none;height:46px;display:grid;grid-template-columns:72px 1fr 36px 36px;align-items:center;padding:0 4px;border-bottom:1px solid var(--rule)}
+.va .hd .ib{width:36px;height:40px;display:grid;place-items:center}
+.va .ttl{min-width:0;text-align:center;display:flex;flex-direction:column;gap:2px}
+.va .ttl b{font:700 15px/1.25 var(--f-min);letter-spacing:.07em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.va .ttl span{font:500 10px/1.3 var(--f-ui);color:var(--ink2);letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.va .pl{flex:none;height:31px;display:flex;align-items:center;gap:7px;padding:0 12px}
+.va .pl .sym{font-size:13px;line-height:1}
+.va .pl .nm{font:700 13px/1 var(--f-min);letter-spacing:.03em;white-space:nowrap}
+.va .pl .me{font:500 9.5px/1 var(--f-ui);letter-spacing:.1em;border:1px solid var(--ink3);padding:2px 4px;flex:none}
+.va .pl .tg{font:500 10.5px/1 var(--f-ui);color:var(--ink2);letter-spacing:.03em;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.va .tn{font:700 9.5px/1 var(--f-ui);letter-spacing:.12em;color:var(--ai);flex:none}
+.va .hp{filter:drop-shadow(0 0 .6px #7E642B)}
+.va .hp i{background:#F3DFAC;font-family:var(--f-koma);font-size:12.5px;color:#1E1B16}
+.va .ct{flex:none;height:44px;display:grid;grid-template-columns:36px 36px 1fr 36px 36px;align-items:center;padding:0 6px;margin-top:1px;border-top:1px solid var(--rule)}
+.va .ct > button{height:38px;display:grid;place-items:center}
+.va .ct > button:active{color:var(--ai)}
+.va .now{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;white-space:nowrap}
+.va .now .n1{font:500 10.5px/1 var(--f-ui);color:var(--ink2);letter-spacing:.06em}
+.va .now .n2{font:700 16.5px/1 var(--f-min)}
+.va .tb{flex:none;height:36px;display:flex;gap:22px;padding:0 14px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.va .tb button{position:relative;display:flex;align-items:center;gap:4px;font:500 12.5px/1 var(--f-ui);letter-spacing:.14em;color:var(--ink2)}
+.va .tb button[aria-selected="true"]{color:var(--ink);font-weight:700}
+.va .tb button[aria-selected="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ai)}
+.va .tb .ic{width:12px;height:12px}
+.va .ev{margin-left:auto;display:flex;align-items:baseline;align-self:center;gap:7px;white-space:nowrap}
+.va .ev .num{font:700 19px/1 var(--f-min);letter-spacing:.01em}
+.va .ev .jd{font:700 12.5px/1 var(--f-min);letter-spacing:.05em}
+.va .gr{height:66px;margin:7px 12px 3px}
+.va .g-up{fill:var(--ink);opacity:.17}
+.va .g-dn{fill:var(--ink);opacity:.07}
+.va .g-mid{stroke:var(--ink);opacity:.3}
+.va .g-ln{stroke:var(--ink);stroke-width:1.7}
+.va .g-bad{fill:var(--shu);stroke:var(--paper);stroke-width:2}
+.va .g-dub{fill:var(--paper);stroke:var(--yama);stroke-width:2}
+.va .g-cur{stroke:var(--ai);stroke-width:1.5}
+.va .g-hov{stroke:var(--ink);opacity:.35}
+.va .g-dot{fill:var(--ai);stroke:var(--paper);stroke-width:2}
+.va .g-tk,.va .g-lb{font:500 9px/1 var(--f-ui);fill:var(--ink2)}
+.va .g-tip{background:var(--ink);color:var(--paper)}
+.va .cl{display:grid;grid-template-columns:24px 1fr;border-top:1px solid var(--rule)}
+.va .vl{writing-mode:vertical-rl;display:flex;justify-content:flex-start;align-items:center;gap:10px;padding-top:12px;border-right:1px solid var(--rule);
+  font:500 10px/1 var(--f-ui);letter-spacing:.4em;color:var(--ink2)}
+.va .vl i{letter-spacing:.2em;color:var(--ink3)}
+.va .cd{display:grid;grid-template-columns:24px 1fr auto;gap:3px 8px;align-items:center;width:100%;text-align:left;padding:9px 14px 9px 10px;border-bottom:1px solid var(--rule)}
+.va .cd .rk{width:22px;height:22px;border-radius:50%;border:1px solid var(--ink2);display:grid;place-items:center;font:700 12px/1 var(--f-min)}
+.va .cd.on .rk{background:var(--ai);border-color:var(--ai);color:#fff}
+.va .cd .mvx{display:flex;align-items:center;gap:6px;min-width:0;font:700 16px/1.25 var(--f-min)}
+.va .cd .scx{font:700 15px/1 var(--f-min);font-variant-numeric:tabular-nums}
+.va .cd .pvx{grid-column:2/4;font:400 11.5px/1.5 var(--f-ui);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.va .cd.on .pvx{white-space:normal}
+.va .gm{font:500 9.5px/1 var(--f-ui);letter-spacing:.1em;border:1px solid var(--ink3);padding:2px 4px;color:var(--ink2)}
+.va .mk{display:inline-block;font:700 10px/1 var(--f-ui);letter-spacing:.1em;padding:2px 4px;border:1.5px solid currentColor;border-radius:2px;color:var(--shu)}
+.va .mk-dub{color:var(--yama)}
+.va .mk-good{color:var(--ai)}
+.va .hint{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 14px 8px 10px;border-bottom:1px solid var(--rule);font:500 11.5px/1.3 var(--f-ui);white-space:nowrap}
+.va .hint b{font:700 13.5px/1 var(--f-min)}
+.va .hint .go{margin-left:auto;color:var(--ai);font-size:10.5px;letter-spacing:.04em}
+.va .lkr{display:flex;align-items:center;gap:8px;padding:11px 14px 11px 10px;color:var(--ink2);font:500 11.5px/1.3 var(--f-ui);border-bottom:1px solid var(--rule)}
+.va .lkr .ic{width:15px;height:15px}
+.va .lkr em{margin-left:auto;font:700 10px/1 var(--f-ui);letter-spacing:.14em;color:var(--ai);border:1.5px solid var(--ai);padding:2px 5px;border-radius:2px}
+.va .tm{margin:9px 14px 9px 10px;padding:8px 10px;border:1.5px solid var(--shu);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.va .tm b{font:700 11.5px/1 var(--f-ui);letter-spacing:.16em;color:var(--shu)}
+.va .tm span{font:700 13px/1 var(--f-min)}
+.va .tm i{font:500 12.5px/1.4 var(--f-min)}
+.va .end{padding:14px 14px 14px 10px;font:700 14px/1.5 var(--f-min);letter-spacing:.06em}
+.va .mr{padding:7px 14px;border-bottom:1px solid var(--rule);font:500 14px/1.2 var(--f-min)}
+.va .mr .mn{font:500 11px/1 var(--f-ui);color:var(--ink2)}
+.va .mr .me2{font:700 13px/1 var(--f-min)}
+.va .mr.cur{background:rgba(31,78,121,.1)}
+.va .aip{padding:12px 14px 16px}
+.va .bd-bg{fill:url(#wood-a)}
+.va .bd-ln{stroke:#5E4B2B;stroke-width:1.6;opacity:.75}
+.va .bd-bd{stroke:#4A3A20;stroke-width:3.4}
+.va .bd-star{fill:#4A3A20}
+.va .bd-co{font:500 25px/1 var(--f-ui);fill:var(--ink2)}
+.va .bd-from{fill:rgba(31,78,121,.1)}
+.va .bd-to{fill:rgba(31,78,121,.25)}
+.va .pc path{fill:#F6E4B6;stroke:#9C7E42;stroke-width:1.6;stroke-linejoin:round}
+.va .pc text{font:400 60px/1 var(--f-koma);fill:#1E1B16}
+.va .pc.pr text{fill:var(--shu)}
+.va .ar{opacity:.82}
+.va .ar-ln{stroke:var(--ai);stroke-width:17;stroke-linecap:round}
+.va .ar-hd{fill:var(--ai)}
+.va .ar-ring{fill:none;stroke:var(--ai);stroke-width:7}
+
+/* ============ B: 明るいミニマル ============ */
+.vb{--ink:#14171A;--ink2:#5F666D;--ink3:#8D949B;--line:#E8EAED;--sf:#F3F4F6;--ac:#0A7D54;--acw:rgba(10,125,84,.11);
+  --bad:#D93025;--warn:#B86E00;background:#FFFFFF;color:var(--ink);font-family:var(--f-ui)}
+.vb .hd{flex:none;height:44px;display:flex;align-items:center;gap:2px;padding:0 6px 0 4px}
+.vb .hd .ib{width:36px;height:40px;display:grid;place-items:center;flex:none}
+.vb .ttl{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+.vb .ttl b{font:600 15px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb .ttl .res{flex:none;font:600 10.5px/1 var(--f-ui);color:var(--ac);background:var(--acw);padding:4px 7px;border-radius:99px}
+.vb .pl{flex:none;height:29px;display:flex;align-items:center;gap:7px;padding:0 14px}
+.vb .pl .sym{font-size:12px;line-height:1}
+.vb .pl .nm{font:500 12.5px/1 var(--f-ui);white-space:nowrap}
+.vb .pl .me{font:500 10px/1 var(--f-ui);color:var(--ink2);background:var(--sf);padding:3px 5px;border-radius:4px;flex:none}
+.vb .pl .tg{font:400 11px/1 var(--f-ui);color:var(--ink2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb .tn{width:6px;height:6px;border-radius:50%;background:var(--ac);font-size:0;flex:none}
+.vb .hp i{background:#ECEEF0;font:700 11px/1 var(--f-ui);color:var(--ink)}
+.vb .scr{flex:none;height:60px;display:grid;grid-template-columns:38px 1fr 38px;align-items:stretch;padding:0 4px;margin-top:2px}
+.vb .scr > button{display:grid;place-items:center;border-radius:8px}
+.vb .scr > button:active{background:var(--sf)}
+.vb .gr{height:60px}
+.vb .g-up,.vb .g-dn{fill:var(--ac);opacity:.11}
+.vb .g-mid{stroke:#D5D9DD}
+.vb .g-ln{stroke:var(--ac);stroke-width:2}
+.vb .g-bad{fill:var(--bad);stroke:#fff;stroke-width:2}
+.vb .g-dub{fill:#fff;stroke:var(--warn);stroke-width:2}
+.vb .g-cur{stroke:var(--ink);stroke-width:1.5}
+.vb .g-hov{stroke:var(--ink);opacity:.3}
+.vb .g-dot{fill:var(--ink);stroke:#fff;stroke-width:2}
+.vb .g-tk,.vb .g-lb{font:500 9px/1 var(--f-ui);fill:var(--ink3)}
+.vb .g-tip{background:var(--ink);color:#fff}
+.vb .st{flex:none;height:30px;display:flex;align-items:center;gap:7px;padding:0 14px;white-space:nowrap}
+.vb .st .n1{font:400 11.5px/1 var(--f-ui);color:var(--ink2);font-variant-numeric:tabular-nums}
+.vb .st .n2{font:700 15px/1 var(--f-ui)}
+.vb .st .sp{flex:1}
+.vb .st .jd{font:400 11px/1 var(--f-ui);color:var(--ink2)}
+.vb .st .num{font:700 15px/1 var(--f-ui);font-variant-numeric:tabular-nums}
+.vb .st .cp{font:400 11.5px/1 var(--f-ui);color:var(--ink2);font-variant-numeric:tabular-nums}
+.vb .sg{flex:none;margin:4px 12px 0;height:32px;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:2px;background:var(--sf);border-radius:9px}
+.vb .sg button{display:flex;align-items:center;justify-content:center;gap:4px;border-radius:7px;font:600 12px/1 var(--f-ui);color:var(--ink2)}
+.vb .sg button[aria-selected="true"]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(20,23,26,.14)}
+.vb .sg .ic{width:12px;height:12px}
+.vb .pn{margin-top:4px}
+.vb .cd{display:grid;grid-template-columns:20px 1fr auto;gap:2px 8px;align-items:center;width:100%;text-align:left;padding:9px 14px 0}
+.vb .cd .rk{font:500 12px/1 var(--f-ui);color:var(--ink3);text-align:center;font-variant-numeric:tabular-nums}
+.vb .cd.on .rk{color:var(--ac);font-weight:700}
+.vb .cd .mvx{display:flex;align-items:center;gap:6px;min-width:0;font:600 15px/1.3 var(--f-ui)}
+.vb .cd .scx{display:flex;align-items:baseline;gap:6px}
+.vb .cd .scx b{font:700 15px/1 var(--f-ui);font-variant-numeric:tabular-nums}
+.vb .cd .scx i{min-width:40px;text-align:right;font:400 11.5px/1 var(--f-ui);color:var(--ink2);font-variant-numeric:tabular-nums}
+.vb .cd .pvx{grid-column:2/4;font:400 11.5px/1.5 var(--f-ui);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb .cd.on .pvx{white-space:normal}
+.vb .cd .mt{grid-column:1/4;height:2px;margin-top:8px;border-radius:2px;background:var(--line);overflow:hidden}
+.vb .cd .mt i{display:block;height:100%;background:var(--ink3)}
+.vb .cd.on .mt i{background:var(--ac)}
+.vb .gm{font:500 10px/1 var(--f-ui);color:var(--ink2);border:1px solid #D5D9DD;padding:2px 5px;border-radius:4px}
+.vb .mk{display:inline-block;font:600 10.5px/1 var(--f-ui);padding:3px 6px;border-radius:99px;background:#FCE9E7;color:#A8221B}
+.vb .mk-dub{background:#FDF0DA;color:#7F4B00}
+.vb .mk-good{background:var(--acw);color:var(--ac)}
+.vb .hint{display:flex;align-items:center;gap:8px;width:calc(100% - 24px);margin:4px 12px 0;padding:7px 10px;border-radius:8px;background:var(--sf);text-align:left;font:400 11.5px/1.3 var(--f-ui);white-space:nowrap}
+.vb .hint b{font-weight:700;font-size:12.5px}
+.vb .hint .go{margin-left:auto;color:var(--ac);font-weight:600;font-size:11px}
+.vb .lkr{display:flex;align-items:center;gap:8px;padding:12px 14px;color:var(--ink2);font:400 11.5px/1.3 var(--f-ui)}
+.vb .lkr .ic{width:15px;height:15px}
+.vb .lkr em{margin-left:auto;font:600 11px/1 var(--f-ui);color:var(--ac)}
+.vb .tm{margin:8px 12px 0;padding:8px 10px;border-radius:8px;background:#FCE9E7;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+.vb .tm b{font:700 11.5px/1 var(--f-ui);color:#A8221B}
+.vb .tm span{font:700 12.5px/1 var(--f-ui)}
+.vb .tm i{font:500 12px/1.4 var(--f-ui)}
+.vb .end{padding:14px;font:600 14px/1.5 var(--f-ui)}
+.vb .fn{padding:9px 14px 14px;font:400 10.5px/1.4 var(--f-ui);color:var(--ink3)}
+.vb .mr{padding:7px 14px;font:500 13.5px/1.2 var(--f-ui)}
+.vb .mr .mn{font-size:11px;color:var(--ink3)}
+.vb .mr .me2{font-weight:600;font-size:12.5px}
+.vb .mr.cur{background:var(--acw)}
+.vb .aip{padding:12px 14px 16px}
+.vb .bd-bg{fill:#FAF9F6}
+.vb .bd-ln{stroke:#C9CED4;stroke-width:1.4}
+.vb .bd-bd{stroke:#9AA1A8;stroke-width:2.2}
+.vb .bd-star{fill:#9AA1A8}
+.vb .bd-co{font:500 24px/1 var(--f-ui);fill:var(--ink3)}
+.vb .bd-from{fill:rgba(10,125,84,.07)}
+.vb .bd-to{fill:rgba(10,125,84,.18)}
+.vb .pc path{fill:#fff;stroke:#C3C8CE;stroke-width:1.5;stroke-linejoin:round}
+.vb .pc text{font:700 53px/1 var(--f-ui);fill:#14171A}
+.vb .pc.pr text{fill:var(--bad)}
+.vb .ar{opacity:.85}
+.vb .ar-ln{stroke:var(--ac);stroke-width:15;stroke-linecap:round}
+.vb .ar-hd{fill:var(--ac)}
+.vb .ar-ring{fill:none;stroke:var(--ac);stroke-width:6}
+
+/* ============ C: ポップ ============ */
+.vc{--ink:#242846;--ink2:#565B85;--bg:#FFF8E8;--you:#FFD23F;--opp:#A9C1FF;--mint:#19C6A5;--coral:#FF6464;--orange:#FFA347;
+  --ol:2px solid var(--ink);--sh:0 3px 0 var(--ink);background:var(--bg);color:var(--ink);font-family:var(--f-maru);font-weight:500}
+.vc .rb{width:34px;height:34px;flex:none;border-radius:50%;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);display:grid;place-items:center}
+.vc .rb:active{transform:translateY(2px);box-shadow:none}
+.vc .rb .ic{width:17px;height:17px;stroke-width:2.4}
+.vc .hd{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 12px}
+.vc .ttl{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.vc .ttl b{font:900 16px/1.2 var(--f-maru)}
+.vc .ttl span{font:500 10.5px/1.2 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc .jg{flex:none;font:900 12px/1 var(--f-maru);padding:6px 10px;border:var(--ol);border-radius:99px;background:#fff;box-shadow:0 2px 0 var(--ink);transform:rotate(-2deg)}
+.vc .jg[data-who="you"]{background:var(--you)}
+.vc .jg[data-who="opp"]{background:var(--opp)}
+.vc .barw{flex:none;display:flex;align-items:center;gap:8px;height:24px;margin:0 14px 4px;font:700 11px/1 var(--f-maru);white-space:nowrap}
+.vc .barw b{display:inline-block;min-width:2.3em;font:900 13px/1 var(--f-maru);font-variant-numeric:tabular-nums}
+.vc .barw .l b{text-align:right}
+.vc .bar{flex:1;min-width:0;position:relative;height:20px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
+.vc .bar .y{position:absolute;left:0;top:0;bottom:0;background:var(--you);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
+.vc .pl{flex:none;height:26px;display:flex;align-items:center;gap:6px;padding:0 14px}
+.vc .pl .av{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:10px;line-height:1;background:var(--opp)}
+.vc .pl[data-me] .av{background:var(--you)}
+.vc .pl .nm{font:700 12.5px/1 var(--f-maru);white-space:nowrap}
+.vc .pl .me{font:900 9.5px/1 var(--f-maru);background:var(--ink);color:#fff;padding:3px 6px;border-radius:99px;flex:none}
+.vc .pl .tg{font:500 10.5px/1 var(--f-maru);color:var(--ink2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc .tn{font:900 9.5px/1 var(--f-maru);background:var(--mint);border:1.5px solid var(--ink);padding:2px 6px;border-radius:99px;flex:none}
+.vc .hp i{clip-path:none;width:20px;height:20px;padding:0;border:1.5px solid var(--ink);border-radius:6px;background:#C9D8FF;font:900 11px/1 var(--f-maru)}
+.vc .pl[data-me] .hp i{background:#fff}
+.vc .hp b{font:700 10px/1 var(--f-maru);padding-bottom:3px}
+.vc .ct{flex:none;display:grid;grid-template-columns:36px 36px 1fr 36px 36px;gap:7px;align-items:center;padding:3px 12px 7px}
+.vc .ct .rb{width:36px;height:36px}
+.vc .now{position:relative;height:36px;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;border-radius:99px;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);white-space:nowrap}
+.vc .now:active{transform:translateY(2px);box-shadow:none}
+.vc .now .n1{font:700 10.5px/1 var(--f-maru);color:var(--ink2)}
+.vc .now .n2{font:900 15px/1 var(--f-maru)}
+.vc .now .ic{width:14px;height:14px;stroke-width:2.6}
+.vc .now .mkw{position:absolute;right:-5px;top:-11px}
+.vc .mk{display:inline-block;font:900 10.5px/1 var(--f-maru);padding:3px 7px;border:1.5px solid var(--ink);border-radius:8px;background:var(--coral);color:var(--ink);transform:rotate(5deg)}
+.vc .mk-dub{background:var(--orange)}
+.vc .mk-good{background:var(--mint)}
+.vc .pn{padding:0 12px 4px;display:flex;flex-direction:column;gap:6px}
+.vc .pn > *{flex:none}
+.vc .cds{display:flex;flex-direction:column;gap:6px}
+.vc .bc{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:5px 9px 6px 12px;background:#fff;border:var(--ol);border-radius:16px;box-shadow:var(--sh)}
+.vc .bc .m u{text-decoration:none;font:900 9.5px/1 var(--f-maru);color:var(--ink);border:1.5px solid var(--ink);border-radius:99px;padding:2px 6px}
+.vc .bc .m{display:flex;align-items:center;gap:8px;min-width:0;font:900 21px/1.25 var(--f-maru)}
+.vc .bc .p{min-width:0;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc .bc .w{grid-column:2;grid-row:1/3;width:46px;height:46px;border-radius:50%;border:var(--ol);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.vc .bc .w b{font:900 15px/1 var(--f-maru)}
+.vc .bc .w span{font:700 9px/1 var(--f-maru)}
+.vc .tbs{display:flex;align-items:flex-end;gap:4px;padding-left:16px;position:relative;z-index:1;margin-bottom:-2px}
+.vc .tbx{height:24px;display:flex;align-items:center;gap:4px;padding:0 10px;border:var(--ol);border-radius:10px 10px 0 0;background:#FFE9A8;font:900 11px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
+.vc .tbx.on{height:27px;background:#fff;color:var(--ink);border-bottom-color:#fff}
+.vc .tbx.lk{border-style:dashed;border-bottom-style:solid;background:transparent;font-weight:700;font-size:10.5px}
+.vc .tbx.lk .ic{width:12px;height:12px;stroke-width:2.2}
+.vc .hint{display:flex;align-items:center;gap:7px;width:100%;padding:5px 10px;border:var(--ol);border-radius:12px;background:#FFE1DE;text-align:left;font:700 11.5px/1.3 var(--f-maru);white-space:nowrap}
+.vc .hint[data-k="dub"]{background:#FFECD3}
+.vc .hint b{font-weight:900;font-size:13px}
+.vc .hint .go{margin-left:auto;font-weight:900}
+.vc .tm{padding:6px 12px;border:var(--ol);border-radius:12px;background:var(--mint);display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.vc .tm b{font:900 12.5px/1 var(--f-maru)}
+.vc .tm span{font:900 12.5px/1 var(--f-maru)}
+.vc .tm i{font:700 12px/1.4 var(--f-maru)}
+.vc .end{padding:12px 14px;background:#fff;border:var(--ol);border-radius:16px;box-shadow:var(--sh);font:900 15px/1.5 var(--f-maru)}
+.vc .dock{flex:none;display:flex;align-items:center;gap:9px;padding:3px 12px 11px}
+.vc .gc{flex:1;min-width:0;padding:3px 3px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
+.vc .gr{height:46px}
+.vc .g-up{fill:#FFE27A}
+.vc .g-dn{fill:#C3D3FF}
+.vc .g-mid{stroke:var(--ink);opacity:.25}
+.vc .g-ln{stroke:var(--ink);stroke-width:2}
+.vc .g-bad{fill:var(--coral);stroke:var(--ink);stroke-width:1.5}
+.vc .g-dub{fill:var(--orange);stroke:var(--ink);stroke-width:1.5}
+.vc .g-cur{stroke:var(--ink);stroke-width:2}
+.vc .g-hov{stroke:var(--ink);opacity:.3}
+.vc .g-dot{fill:#fff;stroke:var(--ink);stroke-width:2}
+.vc .g-tk,.vc .g-lb{font:700 9px/1 var(--f-maru);fill:var(--ink2)}
+.vc .g-tip{background:#fff;color:var(--ink);border:1.5px solid var(--ink);font-family:var(--f-maru);font-weight:700}
+.vc .fab{flex:none;height:44px;display:flex;align-items:center;gap:5px;padding:0 13px 0 10px;border-radius:99px;background:var(--mint);border:var(--ol);box-shadow:var(--sh);font:900 13px/1 var(--f-maru)}
+.vc .fab:active{transform:translateY(3px);box-shadow:none}
+.vc .fab .ic{width:17px;height:17px;stroke-width:2.2}
+.vc .fab .lki{width:13px;height:13px}
+.vc .shw{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;justify-content:flex-end}
+.vc .scrim{position:absolute;inset:0;background:rgba(36,40,70,.36)}
+.vc .shb{position:relative;height:58%;display:flex;flex-direction:column;background:var(--bg);border-top:var(--ol);border-radius:22px 22px 0 0;animation:c-up .2s ease-out}
+.vc .shh{flex:none;height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 16px}
+.vc .shh b{font:900 15px/1 var(--f-maru)}
+.vc .shc{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 12px 16px}
+@keyframes c-up{from{transform:translateY(28px)}}
+.vc .mr{padding:7px 10px;border-radius:10px;font:700 13.5px/1.2 var(--f-maru)}
+.vc .mr .mn{font-size:11px;color:var(--ink2)}
+.vc .mr .me2{font-weight:900;font-size:12.5px}
+.vc .mr.cur{background:var(--you)}
+.vc .aip{padding:2px 4px 8px}
+.vc .bd-sh{fill:var(--ink)}
+.vc .bd-bg{fill:#FFEFC4}
+.vc .bd-ln{stroke:var(--ink);stroke-width:1.5;opacity:.42}
+.vc .bd-bd{stroke:var(--ink);stroke-width:5}
+.vc .bd-star{fill:var(--ink);opacity:.55}
+.vc .bd-co{font:700 24px/1 var(--f-maru);fill:var(--ink2)}
+.vc .bd-from{fill:rgba(25,198,165,.2)}
+.vc .bd-to{fill:rgba(25,198,165,.45)}
+.vc .pc path{fill:#fff;stroke:var(--ink);stroke-width:3.4;stroke-linejoin:round}
+.vc .pc.po path{fill:#C9D8FF}
+.vc .pc text{font:900 51px/1 var(--f-maru);fill:var(--ink)}
+.vc .pc.pr text{fill:#DB2F45}
+.vc .ar-ul{display:inline}
+.vc .ar-ul .ar-ln{stroke:var(--ink);stroke-width:25;stroke-linecap:round}
+.vc .ar-ul .ar-hd{fill:var(--ink);stroke:var(--ink);stroke-width:10;stroke-linejoin:round}
+.vc .ar-ln{stroke:var(--mint);stroke-width:15;stroke-linecap:round}
+.vc .ar-hd{fill:var(--mint)}
+.vc .ar-ring{fill:none;stroke:var(--mint);stroke-width:9}
+
+/* ---------- shared: AI pane / lock ---------- */
+.lk{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:18px 10px 8px}
+.lk .ic{width:22px;height:22px}
+.lk b{font-size:13.5px;font-weight:700}
+.lk span{font-size:11.5px;line-height:1.6;opacity:.75;max-width:28em}
+.aih{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.aih b{font-size:13.5px;font-weight:700}
+.aih span{font-size:10px;font-weight:600;opacity:.6;border:1px solid currentColor;border-radius:99px;padding:2px 6px}
+.aik{display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;gap:2px 8px;width:100%;text-align:left;padding:8px 0;border-top:1px solid rgba(0,0,0,.1)}
+.aik i{font-size:11px;opacity:.7;font-variant-numeric:tabular-nums}
+.aik b{font-size:14px;font-weight:700}
+.aik span{grid-column:1/5;font-size:11.5px;line-height:1.5;opacity:.8}
+.ain{margin:8px 0 0;font-size:10.5px;line-height:1.5;opacity:.6}
+.va .aih b,.va .aik b{font-family:var(--f-min)}
+
+/* ---------- phone-width: the mock fills the screen ---------- */
+@media (max-width:520px){
+  .pg-head{padding-block:8px;gap:8px;align-items:center;justify-content:space-between}
+  .pg-head .tx,.pg-ctl .lb{display:none}
+  .pg-ctl{width:100%;justify-content:space-between;flex-wrap:nowrap;gap:8px}
+  .seg button{padding:7px 9px;font-size:12px}
+  .stage{padding:0;display:block}
+  .col{gap:0}
+  .vname{display:none}
+  html{scroll-snap-type:y proximity}
+  .pg-head{scroll-snap-align:start}
+  .phone{width:100%;height:max(640px,100vh);height:max(640px,100dvh);padding:0;border-radius:0;background:none;box-shadow:none;scroll-snap-align:start}
+  .screen{border-radius:0}
+  .sb{display:none}
+  .cap{width:100%;padding-block:16px 18px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .pg-foot{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+}
+@media (prefers-reduced-motion:reduce){
+  .vc .bar .y{transition:none}
+  .vc .shb{animation:none}
+}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-first" viewBox="0 0 24 24"><path d="M18 5l-7 7 7 7M6.5 5v14"/></symbol>
+  <symbol id="i-last" viewBox="0 0 24 24"><path d="M6 5l7 7-7 7M17.5 5v14"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="2.8"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 017 0v2.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9zM18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+</svg>
+
+<div class="pg">
+  <header class="pg-head">
+    <div class="tx">
+      <h1>解析画面のデザイン3案</h1>
+      <p>同じ対局・同じ局面を3つの方向性で表示しています。手を進める操作と、無料／有料の切り替えは3案に同時に反映されます。</p>
+    </div>
+    <div class="pg-ctl">
+      <div class="seg vsw" role="group" aria-label="表示する案">
+        <button type="button" data-view="a" aria-pressed="true">A 和モダン</button>
+        <button type="button" data-view="b" aria-pressed="false">B ミニマル</button>
+        <button type="button" data-view="c" aria-pressed="false">C ポップ</button>
+      </div>
+      <span class="lb">プラン</span>
+      <div class="seg" role="group" aria-label="プラン">
+        <button type="button" data-plan="free" aria-pressed="false">無料</button>
+        <button type="button" data-plan="paid" aria-pressed="true">有料</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <!-- ================= A ================= -->
+    <section class="col" data-v="a">
+      <h2 class="vname"><i>A</i>和モダン</h2>
+      <div class="phone"><div class="screen va" data-v="a">
+        <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+        <header class="hd">
+          <button type="button" class="ib" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <div class="ttl"><b data-b="title"></b><span data-b="sub"></span></div>
+          <button type="button" class="ib" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
+          <button type="button" class="ib" aria-label="メニュー"><svg class="ic"><use href="#i-more"/></svg></button>
+        </header>
+        <div class="pl" data-side="g"><span class="sym">☖</span><span class="nm" data-b="gname"></span><span class="me">自分</span><span class="tn">手番</span><span class="tg" data-b="gtags"></span><span class="hand" data-b="ghand"></span></div>
+        <div class="bdw" data-b="board"></div>
+        <div class="pl" data-side="s"><span class="sym">☗</span><span class="nm" data-b="sname"></span><span class="me">自分</span><span class="tn">手番</span><span class="tg" data-b="stags"></span><span class="hand" data-b="shand"></span></div>
+        <div class="ct">
+          <button type="button" data-act="first" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
+          <button type="button" data-act="prev" aria-label="1手戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <div class="now"><span class="n1" data-b="plyno"></span><span class="n2" data-b="move"></span><span data-b="mark"></span></div>
+          <button type="button" data-act="next" aria-label="1手進む"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button type="button" data-act="last" aria-label="最後へ"><svg class="ic"><use href="#i-last"/></svg></button>
+        </div>
+        <div class="tb" role="tablist">
+          <button type="button" role="tab" data-tab="an" aria-selected="true">解析</button>
+          <button type="button" role="tab" data-tab="kf" aria-selected="false">棋譜</button>
+          <button type="button" role="tab" data-tab="ai" aria-selected="false">AI解説<svg class="ic lki"><use href="#i-lock"/></svg></button>
+          <div class="ev" aria-label="評価値"><span class="num" data-b="num"></span><span class="jd" data-b="jd"></span></div>
+        </div>
+        <div class="pn">
+          <div data-pane="an">
+            <div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div>
+            <div class="cl"><span class="vl">候補手<i data-b="kind"></i></span><div class="cds" data-b="cands"></div></div>
+          </div>
+          <div data-pane="kf" hidden><div class="ml" data-b="moves"></div></div>
+          <div data-pane="ai" hidden><div class="aip" data-b="ai"></div></div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <dl>
+          <dt>色と形</dt><dd>生成りの地に墨・藍・朱。盤は榧、駒は黄楊の色で、成駒は朱書き。</dd>
+          <dt>構成</dt><dd>盤の下に「解析／棋譜／AI解説」のタブ。タブの右に評価値を常に表示し、解析タブにグラフと候補手を縦に並べる。</dd>
+          <dt>形勢</dt><dd>評価値の数字と「先手有利」などの言葉（先手基準）。</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- ================= B ================= -->
+    <section class="col" data-v="b">
+      <h2 class="vname"><i>B</i>明るいミニマル</h2>
+      <div class="phone"><div class="screen vb" data-v="b">
+        <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+        <header class="hd">
+          <button type="button" class="ib" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <div class="ttl"><b data-b="title"></b><span class="res" data-b="res"></span></div>
+          <button type="button" class="ib" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
+          <button type="button" class="ib" aria-label="メニュー"><svg class="ic"><use href="#i-more"/></svg></button>
+        </header>
+        <div class="pl" data-side="g"><span class="sym">☖</span><span class="nm" data-b="gname"></span><span class="me">自分</span><span class="tn">手番</span><span class="tg" data-b="gtags"></span><span class="hand" data-b="ghand"></span></div>
+        <div class="bdw" data-b="board"></div>
+        <div class="pl" data-side="s"><span class="sym">☗</span><span class="nm" data-b="sname"></span><span class="me">自分</span><span class="tn">手番</span><span class="tg" data-b="stags"></span><span class="hand" data-b="shand"></span></div>
+        <div class="scr">
+          <button type="button" data-act="prev" aria-label="1手戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div>
+          <button type="button" data-act="next" aria-label="1手進む"><svg class="ic"><use href="#i-next"/></svg></button>
+        </div>
+        <div class="st"><span class="n1" data-b="plyno"></span><span class="n2" data-b="move"></span><span data-b="mark"></span><span class="sp"></span><span class="jd" data-b="jd"></span><span class="num" data-b="num"></span><span class="cp" data-b="cp"></span></div>
+        <div class="sg" role="tablist">
+          <button type="button" role="tab" data-tab="an" aria-selected="true">候補手</button>
+          <button type="button" role="tab" data-tab="kf" aria-selected="false">棋譜</button>
+          <button type="button" role="tab" data-tab="ai" aria-selected="false">AI解説<svg class="ic lki"><use href="#i-lock"/></svg></button>
+        </div>
+        <div class="pn">
+          <div data-pane="an"><div class="cds" data-b="cands"></div><div class="fn" data-b="kind"></div></div>
+          <div data-pane="kf" hidden><div class="ml" data-b="moves"></div></div>
+          <div data-pane="ai" hidden><div class="aip" data-b="ai"></div></div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <dl>
+          <dt>色と形</dt><dd>白地に細い線。色は緑の1色だけで、警告の赤と橙は意味のあるところにだけ。</dd>
+          <dt>構成</dt><dd>グラフを盤の直下に常に置き、手送りのつまみとして使う。下段は候補手／棋譜／AI解説の切り替え。</dd>
+          <dt>形勢</dt><dd>勝率（％）を主に、評価値を添える（先手基準）。</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- ================= C ================= -->
+    <section class="col" data-v="c">
+      <h2 class="vname"><i>C</i>ポップ</h2>
+      <div class="phone"><div class="screen vc" data-v="c">
+        <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+        <header class="hd">
+          <button type="button" class="rb" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <div class="ttl"><b>ふりかえり</b><span data-b="sub"></span></div>
+          <span class="jg" data-b="jg"></span>
+          <button type="button" class="rb" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
+        </header>
+        <div class="barw" role="img" data-b="bar"><span class="l">あなた<b data-b="barl"></b></span><span class="bar"><span class="y" data-b="bary"></span></span><span class="r"><b data-b="barr"></b>相手</span></div>
+        <div class="pl" data-side="g"><span class="av">☖</span><span class="nm" data-b="gname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="gtags"></span><span class="hand" data-b="ghand"></span></div>
+        <div class="bdw" data-b="board"></div>
+        <div class="pl" data-side="s"><span class="av">☗</span><span class="nm" data-b="sname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="stags"></span><span class="hand" data-b="shand"></span></div>
+        <div class="ct">
+          <button type="button" class="rb" data-act="first" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
+          <button type="button" class="rb" data-act="prev" aria-label="1手戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <button type="button" class="now" data-open="kf" aria-label="棋譜を開く"><span class="n1" data-b="plyno"></span><span class="n2" data-b="move"></span><svg class="ic"><use href="#i-down"/></svg><span class="mkw" data-b="mark"></span></button>
+          <button type="button" class="rb" data-act="next" aria-label="1手進む"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button type="button" class="rb" data-act="last" aria-label="最後へ"><svg class="ic"><use href="#i-last"/></svg></button>
+        </div>
+        <div class="pn">
+          <div class="cds" data-b="cands"></div>
+        </div>
+        <div class="dock">
+          <div class="gc"><div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div></div>
+          <button type="button" class="fab" data-open="ai"><svg class="ic"><use href="#i-spark"/></svg>AIに聞く<svg class="ic lki"><use href="#i-lock"/></svg></button>
+        </div>
+        <div class="shw" data-b="sheet" hidden>
+          <div class="scrim" data-close></div>
+          <div class="shb">
+            <div class="shh"><b data-b="shtitle"></b><button type="button" class="rb" data-close aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></div>
+            <div class="shc" data-b="shc"><div class="ml" data-b="moves"></div><div class="aip" data-b="ai" hidden></div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <dl>
+          <dt>色と形</dt><dd>太い輪郭と明るい黄・青。相手の駒には青みを付け、向き以外でも見分けられる。</dd>
+          <dt>構成</dt><dd>最上部に形勢バー。盤の下は「おすすめ」の一手を主役にし、2位・3位・本譜は見出しのタブで切り替える。最下段にグラフとAIボタンを固定し、棋譜とAI解説は下から出るシートで開く。</dd>
+          <dt>形勢</dt><dd>あなた基準の勝率と「やや有利」などの言葉。</dd>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <footer class="pg-foot">
+    <div>
+      <h3>選んでいただきたいこと</h3>
+      <ol>
+        <li>全体のトーン（A・B・C）</li>
+        <li>盤の下の構成（タブ／常時グラフ／カードとシート）</li>
+        <li>形勢の見せ方（評価値の数字／勝率／言葉、先手基準か自分基準か）</li>
+        <li>無料プランでの候補2・3番手の見せ方（いまは鍵付きで存在を見せる案）</li>
+      </ol>
+    </div>
+    <div>
+      <h3>このモックのデータ</h3>
+      <p>36手目以降の指し手と、評価値・候補手・読み筋は、簡易的な探索プログラムで作ったモック用のデータです。水匠の出力ではありません。対局者名は架空です。パソコンでは ← → キーでも手を進められます。</p>
+    </div>
+  </footer>
+</div>
+
+<script>window.KIFU = {"meta":{"sente":"tsubame","gote":"kawasemi","self":"sente","date":"2026-11-08","plies":85,"winner":"sente","endReason":"詰み","tags":{"sente":{"strategy":["居飛車","対四間飛車急戦"],"castle":["舟囲い"]},"gote":{"strategy":["振り飛車","四間飛車"],"castle":["美濃囲い"]}},"generator":"UIモック用のサンプルデータ。cshogi上の自作簡易探索（駒割り中心の評価、深さ5前後）による自己対局と解析で作成したもので、実際の将棋エンジン（やねうら王＋水匠）の出力ではない。1〜35手目は固定手順（1〜24手目の評価値・候補手は合成値、25〜35手目は本譜を最善として探索の候補を添えたもの）で、指し手評価は36手目以降に付けている。","seed":101},"positions":[{"ply":0,"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1","move":null,"cp":39,"mate":null,"tsume":null,"cands":[{"usi":"7g7f","ja":"▲７六歩","from":"7g","to":"7f","drop":false,"cp":39,"mate":null,"pv":["▲７六歩","△３四歩","▲２六歩","△４四歩","▲４八銀"]},{"usi":"3i4h","ja":"▲４八銀","from":"3i","to":"4h","drop":false,"cp":17,"mate":null,"pv":["▲４八銀","△３四歩","▲７六歩","△４四歩"]},{"usi":"5i6h","ja":"▲６八玉","from":"5i","to":"6h","drop":false,"cp":-6,"mate":null,"pv":["▲６八玉","△３四歩","▲７六歩","△４四歩"]}],"mark":null,"loss":0},{"ply":1,"sfen":"lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 2","move":{"usi":"7g7f","ja":"▲７六歩","from":"7g","to":"7f","drop":false},"cp":44,"mate":null,"tsume":null,"cands":[{"usi":"3c3d","ja":"△３四歩","from":"3c","to":"3d","drop":false,"cp":44,"mate":null,"pv":["△３四歩","▲２六歩","△４四歩","▲４八銀","△４二飛"]},{"usi":"4c4d","ja":"△４四歩","from":"4c","to":"4d","drop":false,"cp":54,"mate":null,"pv":["△４四歩","▲２六歩","△３四歩","▲４八銀"]},{"usi":"5a6b","ja":"△６二玉","from":"5a","to":"6b","drop":false,"cp":79,"mate":null,"pv":["△６二玉","▲２六歩","△３四歩","▲４八銀"]}],"mark":null,"loss":0},{"ply":2,"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3","move":{"usi":"3c3d","ja":"△３四歩","from":"3c","to":"3d","drop":false},"cp":40,"mate":null,"tsume":null,"cands":[{"usi":"2g2f","ja":"▲２六歩","from":"2g","to":"2f","drop":false,"cp":40,"mate":null,"pv":["▲２六歩","△４四歩","▲４八銀","△４二飛","▲６八玉"]},{"usi":"3i4h","ja":"▲４八銀","from":"3i","to":"4h","drop":false,"cp":20,"mate":null,"pv":["▲４八銀","△４四歩","▲２六歩","△４二飛"]},{"usi":"5i6h","ja":"▲６八玉","from":"5i","to":"6h","drop":false,"cp":-8,"mate":null,"pv":["▲６八玉","△４四歩","▲２六歩","△４二飛"]}],"mark":null,"loss":0},{"ply":3,"sfen":"lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P4P1/PP1PPPP1P/1B5R1/LNSGKGSNL w - 4","move":{"usi":"2g2f","ja":"▲２六歩","from":"2g","to":"2f","drop":false},"cp":39,"mate":null,"tsume":null,"cands":[{"usi":"4c4d","ja":"△４四歩","from":"4c","to":"4d","drop":false,"cp":39,"mate":null,"pv":["△４四歩","▲４八銀","△４二飛","▲６八玉","△６二玉"]},{"usi":"5a6b","ja":"△６二玉","from":"5a","to":"6b","drop":false,"cp":63,"mate":null,"pv":["△６二玉","▲４八銀","△４四歩","▲６八玉"]},{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false,"cp":73,"mate":null,"pv":["△３二銀","▲４八銀","△４四歩","▲６八玉"]}],"mark":null,"loss":0},{"ply":4,"sfen":"lnsgkgsnl/1r5b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1B5R1/LNSGKGSNL b - 5","move":{"usi":"4c4d","ja":"△４四歩","from":"4c","to":"4d","drop":false},"cp":42,"mate":null,"tsume":null,"cands":[{"usi":"3i4h","ja":"▲４八銀","from":"3i","to":"4h","drop":false,"cp":42,"mate":null,"pv":["▲４八銀","△４二飛","▲６八玉","△６二玉","▲７八玉"]},{"usi":"5i6h","ja":"▲６八玉","from":"5i","to":"6h","drop":false,"cp":32,"mate":null,"pv":["▲６八玉","△４二飛","▲４八銀","△６二玉"]},{"usi":"5g5f","ja":"▲５六歩","from":"5g","to":"5f","drop":false,"cp":4,"mate":null,"pv":["▲５六歩","△４二飛","▲４八銀","△６二玉"]}],"mark":null,"loss":0},{"ply":5,"sfen":"lnsgkgsnl/1r5b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1B3S1R1/LNSGKG1NL w - 6","move":{"usi":"3i4h","ja":"▲４八銀","from":"3i","to":"4h","drop":false},"cp":48,"mate":null,"tsume":null,"cands":[{"usi":"8b4b","ja":"△４二飛","from":"8b","to":"4b","drop":false,"cp":48,"mate":null,"pv":["△４二飛","▲６八玉","△６二玉","▲７八玉","△７二玉"]},{"usi":"5a6b","ja":"△６二玉","from":"5a","to":"6b","drop":false,"cp":76,"mate":null,"pv":["△６二玉","▲６八玉","△７二玉","▲７八玉"]},{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false,"cp":95,"mate":null,"pv":["△３二銀","▲６八玉","△４二飛","▲７八玉"]}],"mark":null,"loss":0},{"ply":6,"sfen":"lnsgkgsnl/5r1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1B3S1R1/LNSGKG1NL b - 7","move":{"usi":"8b4b","ja":"△４二飛","from":"8b","to":"4b","drop":false},"cp":35,"mate":null,"tsume":null,"cands":[{"usi":"5i6h","ja":"▲６八玉","from":"5i","to":"6h","drop":false,"cp":35,"mate":null,"pv":["▲６八玉","△６二玉","▲７八玉","△７二玉","▲５六歩"]},{"usi":"5g5f","ja":"▲５六歩","from":"5g","to":"5f","drop":false,"cp":26,"mate":null,"pv":["▲５六歩","△６二玉","▲６八玉","△７二玉"]},{"usi":"4i5h","ja":"▲５八金右","from":"4i","to":"5h","drop":false,"cp":10,"mate":null,"pv":["▲５八金右","△６二玉","▲６八玉","△７二玉"]}],"mark":null,"loss":0},{"ply":7,"sfen":"lnsgkgsnl/5r1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1B1K1S1R1/LNSG1G1NL w - 8","move":{"usi":"5i6h","ja":"▲６八玉","from":"5i","to":"6h","drop":false},"cp":44,"mate":null,"tsume":null,"cands":[{"usi":"5a6b","ja":"△６二玉","from":"5a","to":"6b","drop":false,"cp":44,"mate":null,"pv":["△６二玉","▲７八玉","△７二玉","▲５六歩","△３二銀"]},{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false,"cp":67,"mate":null,"pv":["△３二銀","▲７八玉","△６二玉","▲５六歩"]},{"usi":"7a7b","ja":"△７二銀","from":"7a","to":"7b","drop":false,"cp":79,"mate":null,"pv":["△７二銀","▲７八玉","△６二玉","▲５六歩"]}],"mark":null,"loss":0},{"ply":8,"sfen":"lnsg1gsnl/3k1r1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1B1K1S1R1/LNSG1G1NL b - 9","move":{"usi":"5a6b","ja":"△６二玉","from":"5a","to":"6b","drop":false},"cp":46,"mate":null,"tsume":null,"cands":[{"usi":"6h7h","ja":"▲７八玉","from":"6h","to":"7h","drop":false,"cp":46,"mate":null,"pv":["▲７八玉","△７二玉","▲５六歩","△３二銀","▲５八金右"]},{"usi":"5g5f","ja":"▲５六歩","from":"5g","to":"5f","drop":false,"cp":38,"mate":null,"pv":["▲５六歩","△７二玉","▲７八玉","△３二銀"]},{"usi":"4i5h","ja":"▲５八金右","from":"4i","to":"5h","drop":false,"cp":22,"mate":null,"pv":["▲５八金右","△７二玉","▲７八玉","△３二銀"]}],"mark":null,"loss":0},{"ply":9,"sfen":"lnsg1gsnl/3k1r1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1BK2S1R1/LNSG1G1NL w - 10","move":{"usi":"6h7h","ja":"▲７八玉","from":"6h","to":"7h","drop":false},"cp":36,"mate":null,"tsume":null,"cands":[{"usi":"6b7b","ja":"△７二玉","from":"6b","to":"7b","drop":false,"cp":36,"mate":null,"pv":["△７二玉","▲５六歩","△３二銀","▲５八金右","△８二玉"]},{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false,"cp":60,"mate":null,"pv":["△３二銀","▲５六歩","△７二玉","▲５八金右"]},{"usi":"7a7b","ja":"△７二銀","from":"7a","to":"7b","drop":false,"cp":80,"mate":null,"pv":["△７二銀","▲５六歩","△３二銀","▲５八金右"]}],"mark":null,"loss":0},{"ply":10,"sfen":"lnsg1gsnl/2k2r1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1BK2S1R1/LNSG1G1NL b - 11","move":{"usi":"6b7b","ja":"△７二玉","from":"6b","to":"7b","drop":false},"cp":41,"mate":null,"tsume":null,"cands":[{"usi":"5g5f","ja":"▲５六歩","from":"5g","to":"5f","drop":false,"cp":41,"mate":null,"pv":["▲５六歩","△３二銀","▲５八金右","△８二玉","▲２五歩"]},{"usi":"4i5h","ja":"▲５八金右","from":"4i","to":"5h","drop":false,"cp":30,"mate":null,"pv":["▲５八金右","△３二銀","▲５六歩","△８二玉"]},{"usi":"3g3f","ja":"▲３六歩","from":"3g","to":"3f","drop":false,"cp":14,"mate":null,"pv":["▲３六歩","△３二銀","▲５六歩","△８二玉"]}],"mark":null,"loss":0},{"ply":11,"sfen":"lnsg1gsnl/2k2r1b1/ppppp2pp/5pp2/9/2P1P2P1/PP1P1PP1P/1BK2S1R1/LNSG1G1NL w - 12","move":{"usi":"5g5f","ja":"▲５六歩","from":"5g","to":"5f","drop":false},"cp":34,"mate":null,"tsume":null,"cands":[{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false,"cp":34,"mate":null,"pv":["△３二銀","▲５八金右","△８二玉","▲２五歩","△３三角"]},{"usi":"7b8b","ja":"△８二玉","from":"7b","to":"8b","drop":false,"cp":54,"mate":null,"pv":["△８二玉","▲５八金右","△３二銀","▲２五歩"]},{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false,"cp":82,"mate":null,"pv":["△５二金左","▲５八金右","△３二銀","▲２五歩"]}],"mark":null,"loss":0},{"ply":12,"sfen":"lnsg1g1nl/2k2rsb1/ppppp2pp/5pp2/9/2P1P2P1/PP1P1PP1P/1BK2S1R1/LNSG1G1NL b - 13","move":{"usi":"3a3b","ja":"△３二銀","from":"3a","to":"3b","drop":false},"cp":26,"mate":null,"tsume":null,"cands":[{"usi":"4i5h","ja":"▲５八金右","from":"4i","to":"5h","drop":false,"cp":26,"mate":null,"pv":["▲５八金右","△８二玉","▲２五歩","△３三角","▲３六歩"]},{"usi":"3g3f","ja":"▲３六歩","from":"3g","to":"3f","drop":false,"cp":12,"mate":null,"pv":["▲３六歩","△８二玉","▲５八金右","△３三角"]},{"usi":"7i6h","ja":"▲６八銀","from":"7i","to":"6h","drop":false,"cp":3,"mate":null,"pv":["▲６八銀","△８二玉","▲５八金右","△３三角"]}],"mark":null,"loss":0},{"ply":13,"sfen":"lnsg1g1nl/2k2rsb1/ppppp2pp/5pp2/9/2P1P2P1/PP1P1PP1P/1BK1GS1R1/LNSG3NL w - 14","move":{"usi":"4i5h","ja":"▲５八金右","from":"4i","to":"5h","drop":false},"cp":33,"mate":null,"tsume":null,"cands":[{"usi":"7b8b","ja":"△８二玉","from":"7b","to":"8b","drop":false,"cp":33,"mate":null,"pv":["△８二玉","▲２五歩","△３三角","▲３六歩","△７二銀"]},{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false,"cp":41,"mate":null,"pv":["△５二金左","▲２五歩","△８二玉","▲３六歩"]},{"usi":"3b4c","ja":"△４三銀","from":"3b","to":"4c","drop":false,"cp":65,"mate":null,"pv":["△４三銀","▲２五歩","△８二玉","▲３六歩"]}],"mark":null,"loss":0},{"ply":14,"sfen":"lnsg1g1nl/1k3rsb1/ppppp2pp/5pp2/9/2P1P2P1/PP1P1PP1P/1BK1GS1R1/LNSG3NL b - 15","move":{"usi":"7b8b","ja":"△８二玉","from":"7b","to":"8b","drop":false},"cp":35,"mate":null,"tsume":null,"cands":[{"usi":"2f2e","ja":"▲２五歩","from":"2f","to":"2e","drop":false,"cp":35,"mate":null,"pv":["▲２五歩","△３三角","▲３六歩","△７二銀","▲６八銀"]},{"usi":"3g3f","ja":"▲３六歩","from":"3g","to":"3f","drop":false,"cp":10,"mate":null,"pv":["▲３六歩","△３三角","▲２五歩","△７二銀"]},{"usi":"7i6h","ja":"▲６八銀","from":"7i","to":"6h","drop":false,"cp":-9,"mate":null,"pv":["▲６八銀","△３三角","▲２五歩","△７二銀"]}],"mark":null,"loss":0},{"ply":15,"sfen":"lnsg1g1nl/1k3rsb1/ppppp2pp/5pp2/7P1/2P1P4/PP1P1PP1P/1BK1GS1R1/LNSG3NL w - 16","move":{"usi":"2f2e","ja":"▲２五歩","from":"2f","to":"2e","drop":false},"cp":39,"mate":null,"tsume":null,"cands":[{"usi":"2b3c","ja":"△３三角","from":"2b","to":"3c","drop":false,"cp":39,"mate":null,"pv":["△３三角","▲３六歩","△７二銀","▲６八銀","△５二金左"]},{"usi":"7a7b","ja":"△７二銀","from":"7a","to":"7b","drop":false,"cp":50,"mate":null,"pv":["△７二銀","▲３六歩","△３三角","▲６八銀"]},{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false,"cp":62,"mate":null,"pv":["△５二金左","▲３六歩","△３三角","▲６八銀"]}],"mark":null,"loss":0},{"ply":16,"sfen":"lnsg1g1nl/1k3rs2/ppppp1bpp/5pp2/7P1/2P1P4/PP1P1PP1P/1BK1GS1R1/LNSG3NL b - 17","move":{"usi":"2b3c","ja":"△３三角","from":"2b","to":"3c","drop":false},"cp":43,"mate":null,"tsume":null,"cands":[{"usi":"3g3f","ja":"▲３六歩","from":"3g","to":"3f","drop":false,"cp":43,"mate":null,"pv":["▲３六歩","△７二銀","▲６八銀","△５二金左","▲５七銀左"]},{"usi":"7i6h","ja":"▲６八銀","from":"7i","to":"6h","drop":false,"cp":26,"mate":null,"pv":["▲６八銀","△７二銀","▲３六歩","△５二金左"]},{"usi":"9g9f","ja":"▲９六歩","from":"9g","to":"9f","drop":false,"cp":3,"mate":null,"pv":["▲９六歩","△７二銀","▲３六歩","△５二金左"]}],"mark":null,"loss":0},{"ply":17,"sfen":"lnsg1g1nl/1k3rs2/ppppp1bpp/5pp2/7P1/2P1P1P2/PP1P1P2P/1BK1GS1R1/LNSG3NL w - 18","move":{"usi":"3g3f","ja":"▲３六歩","from":"3g","to":"3f","drop":false},"cp":34,"mate":null,"tsume":null,"cands":[{"usi":"7a7b","ja":"△７二銀","from":"7a","to":"7b","drop":false,"cp":34,"mate":null,"pv":["△７二銀","▲６八銀","△５二金左","▲５七銀左","△４三銀"]},{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false,"cp":52,"mate":null,"pv":["△５二金左","▲６八銀","△７二銀","▲５七銀左"]},{"usi":"3b4c","ja":"△４三銀","from":"3b","to":"4c","drop":false,"cp":64,"mate":null,"pv":["△４三銀","▲６八銀","△７二銀","▲５七銀左"]}],"mark":null,"loss":0},{"ply":18,"sfen":"ln1g1g1nl/1ks2rs2/ppppp1bpp/5pp2/7P1/2P1P1P2/PP1P1P2P/1BK1GS1R1/LNSG3NL b - 19","move":{"usi":"7a7b","ja":"△７二銀","from":"7a","to":"7b","drop":false},"cp":34,"mate":null,"tsume":null,"cands":[{"usi":"7i6h","ja":"▲６八銀","from":"7i","to":"6h","drop":false,"cp":34,"mate":null,"pv":["▲６八銀","△５二金左","▲５七銀左","△４三銀","▲９六歩"]},{"usi":"9g9f","ja":"▲９六歩","from":"9g","to":"9f","drop":false,"cp":9,"mate":null,"pv":["▲９六歩","△５二金左","▲６八銀","△４三銀"]},{"usi":"4g4f","ja":"▲４六歩","from":"4g","to":"4f","drop":false,"cp":-5,"mate":null,"pv":["▲４六歩","△５二金左","▲６八銀","△４三銀"]}],"mark":null,"loss":0},{"ply":19,"sfen":"ln1g1g1nl/1ks2rs2/ppppp1bpp/5pp2/7P1/2P1P1P2/PP1P1P2P/1BKSGS1R1/LN1G3NL w - 20","move":{"usi":"7i6h","ja":"▲６八銀","from":"7i","to":"6h","drop":false},"cp":37,"mate":null,"tsume":null,"cands":[{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false,"cp":37,"mate":null,"pv":["△５二金左","▲５七銀左","△４三銀","▲９六歩","△９四歩"]},{"usi":"3b4c","ja":"△４三銀","from":"3b","to":"4c","drop":false,"cp":52,"mate":null,"pv":["△４三銀","▲５七銀左","△５二金左","▲９六歩"]},{"usi":"9c9d","ja":"△９四歩","from":"9c","to":"9d","drop":false,"cp":75,"mate":null,"pv":["△９四歩","▲５七銀左","△５二金左","▲９六歩"]}],"mark":null,"loss":0},{"ply":20,"sfen":"ln1g3nl/1ks1grs2/ppppp1bpp/5pp2/7P1/2P1P1P2/PP1P1P2P/1BKSGS1R1/LN1G3NL b - 21","move":{"usi":"4a5b","ja":"△５二金左","from":"4a","to":"5b","drop":false},"cp":41,"mate":null,"tsume":null,"cands":[{"usi":"6h5g","ja":"▲５七銀左","from":"6h","to":"5g","drop":false,"cp":41,"mate":null,"pv":["▲５七銀左","△４三銀","▲９六歩","△９四歩","▲４六銀"]},{"usi":"9g9f","ja":"▲９六歩","from":"9g","to":"9f","drop":false,"cp":19,"mate":null,"pv":["▲９六歩","△４三銀","▲５七銀左","△９四歩"]},{"usi":"5h5g","ja":"▲５七金","from":"5h","to":"5g","drop":false,"cp":1,"mate":null,"pv":["▲５七金","△４三銀","▲９六歩","△９四歩"]}],"mark":null,"loss":0},{"ply":21,"sfen":"ln1g3nl/1ks1grs2/ppppp1bpp/5pp2/7P1/2P1P1P2/PP1PSP2P/1BK1GS1R1/LN1G3NL w - 22","move":{"usi":"6h5g","ja":"▲５七銀左","from":"6h","to":"5g","drop":false},"cp":31,"mate":null,"tsume":null,"cands":[{"usi":"3b4c","ja":"△４三銀","from":"3b","to":"4c","drop":false,"cp":31,"mate":null,"pv":["△４三銀","▲９六歩","△９四歩","▲４六銀","△６四歩"]},{"usi":"9c9d","ja":"△９四歩","from":"9c","to":"9d","drop":false,"cp":53,"mate":null,"pv":["△９四歩","▲９六歩","△４三銀","▲４六銀"]},{"usi":"6c6d","ja":"△６四歩","from":"6c","to":"6d","drop":false,"cp":79,"mate":null,"pv":["△６四歩","▲９六歩","△４三銀","▲４六銀"]}],"mark":null,"loss":0},{"ply":22,"sfen":"ln1g3nl/1ks1gr3/pppppsbpp/5pp2/7P1/2P1P1P2/PP1PSP2P/1BK1GS1R1/LN1G3NL b - 23","move":{"usi":"3b4c","ja":"△４三銀","from":"3b","to":"4c","drop":false},"cp":38,"mate":null,"tsume":null,"cands":[{"usi":"9g9f","ja":"▲９六歩","from":"9g","to":"9f","drop":false,"cp":38,"mate":null,"pv":["▲９六歩","△９四歩","▲４六銀","△６四歩","▲３五歩"]},{"usi":"6i5i","ja":"▲５九金寄","from":"6i","to":"5i","drop":false,"cp":23,"mate":null,"pv":["▲５九金寄","△９四歩","▲９六歩","△６四歩"]},{"usi":"4h3g","ja":"▲３七銀","from":"4h","to":"3g","drop":false,"cp":2,"mate":null,"pv":["▲３七銀","△９四歩","▲９六歩","△６四歩"]}],"mark":null,"loss":0},{"ply":23,"sfen":"ln1g3nl/1ks1gr3/pppppsbpp/5pp2/7P1/P1P1P1P2/1P1PSP2P/1BK1GS1R1/LN1G3NL w - 24","move":{"usi":"9g9f","ja":"▲９六歩","from":"9g","to":"9f","drop":false},"cp":47,"mate":null,"tsume":null,"cands":[{"usi":"9c9d","ja":"△９四歩","from":"9c","to":"9d","drop":false,"cp":47,"mate":null,"pv":["△９四歩","▲４六銀","△６四歩","▲３五歩","△同歩"]},{"usi":"6c6d","ja":"△６四歩","from":"6c","to":"6d","drop":false,"cp":74,"mate":null,"pv":["△６四歩","▲４六銀","△９四歩","▲３五歩"]},{"usi":"7c7d","ja":"△７四歩","from":"7c","to":"7d","drop":false,"cp":82,"mate":null,"pv":["△７四歩","▲４六銀","△９四歩","▲３五歩"]}],"mark":null,"loss":0},{"ply":24,"sfen":"ln1g3nl/1ks1gr3/1ppppsbpp/p4pp2/7P1/P1P1P1P2/1P1PSP2P/1BK1GS1R1/LN1G3NL b - 25","move":{"usi":"9c9d","ja":"△９四歩","from":"9c","to":"9d","drop":false},"cp":44,"mate":null,"tsume":null,"cands":[{"usi":"5g4f","ja":"▲４六銀","from":"5g","to":"4f","drop":false,"cp":44,"mate":null,"pv":["▲４六銀","△６四歩","▲３五歩","△同歩","▲同銀"]},{"usi":"6i6h","ja":"▲６八金上","from":"6i","to":"6h","drop":false,"cp":23,"mate":null,"pv":["▲６八金上","△７一玉","▲６九玉","△６二金上","▲５五角","△６一玉"]},{"usi":"5g6f","ja":"▲６六銀","from":"5g","to":"6f","drop":false,"cp":3,"mate":null,"pv":["▲６六銀","△７一玉","▲５七銀上","△４五歩","▲５五歩","△６二金上"]}],"mark":null,"loss":0},{"ply":25,"sfen":"ln1g3nl/1ks1gr3/1ppppsbpp/p4pp2/7P1/P1P1PSP2/1P1P1P2P/1BK1GS1R1/LN1G3NL w - 26","move":{"usi":"5g4f","ja":"▲４六銀","from":"5g","to":"4f","drop":false},"cp":38,"mate":null,"tsume":null,"cands":[{"usi":"6c6d","ja":"△６四歩","from":"6c","to":"6d","drop":false,"cp":38,"mate":null,"pv":["△６四歩","▲３五歩","△同歩","▲同銀","△４五歩"]},{"usi":"4d4e","ja":"△４五歩","from":"4d","to":"4e","drop":false,"cp":61,"mate":null,"pv":["△４五歩","▲５七銀引","△７一玉","▲７七桂","△６二金上","▲７九玉"]},{"usi":"6a6b","ja":"△６二金上","from":"6a","to":"6b","drop":false,"cp":77,"mate":null,"pv":["△６二金上","▲５七銀上","△７一玉","▲６八金上","△６一玉","▲５五角"]}],"mark":null,"loss":0},{"ply":26,"sfen":"ln1g3nl/1ks1gr3/1pp1psbpp/p2p1pp2/7P1/P1P1PSP2/1P1P1P2P/1BK1GS1R1/LN1G3NL b - 27","move":{"usi":"6c6d","ja":"△６四歩","from":"6c","to":"6d","drop":false},"cp":42,"mate":null,"tsume":null,"cands":[{"usi":"3f3e","ja":"▲３五歩","from":"3f","to":"3e","drop":false,"cp":42,"mate":null,"pv":["▲３五歩","△同歩","▲同銀","△４五歩","▲３三角成"]},{"usi":"4h5g","ja":"▲５七銀上","from":"4h","to":"5g","drop":false,"cp":19,"mate":null,"pv":["▲５七銀上","△５四銀","▲７九玉","△７一玉","▲７八金","△６三銀引"]},{"usi":"6i6h","ja":"▲６八金上","from":"6i","to":"6h","drop":false,"cp":-1,"mate":null,"pv":["▲６八金上","△７一玉","▲５七銀上","△６二金上","▲５五角","△６五歩"]}],"mark":null,"loss":0},{"ply":27,"sfen":"ln1g3nl/1ks1gr3/1pp1psbpp/p2p1pp2/6PP1/P1P1PS3/1P1P1P2P/1BK1GS1R1/LN1G3NL w - 28","move":{"usi":"3f3e","ja":"▲３五歩","from":"3f","to":"3e","drop":false},"cp":43,"mate":null,"tsume":null,"cands":[{"usi":"3d3e","ja":"△同歩","from":"3d","to":"3e","drop":false,"cp":43,"mate":null,"pv":["△同歩","▲同銀","△４五歩","▲３三角成","△同桂"]},{"usi":"4d4e","ja":"△４五歩","from":"4d","to":"4e","drop":false,"cp":64,"mate":null,"pv":["△４五歩","▲同銀","△８八角成","▲同玉","△３五歩","▲７八玉"]}],"mark":null,"loss":0},{"ply":28,"sfen":"ln1g3nl/1ks1gr3/1pp1psbpp/p2p1p3/6pP1/P1P1PS3/1P1P1P2P/1BK1GS1R1/LN1G3NL b p 29","move":{"usi":"3d3e","ja":"△同歩","from":"3d","to":"3e","drop":false},"cp":47,"mate":null,"tsume":null,"cands":[{"usi":"4f3e","ja":"▲同銀","from":"4f","to":"3e","drop":false,"cp":47,"mate":null,"pv":["▲同銀","△４五歩","▲３三角成","△同桂","▲２四歩"]},{"usi":"4h5g","ja":"▲５七銀上","from":"4h","to":"5g","drop":false,"cp":-167,"mate":null,"pv":["▲５七銀上","△３四銀","▲５五角","△６三金","▲６八金上","△７一玉"]},{"usi":"6i6h","ja":"▲６八金上","from":"6i","to":"6h","drop":false,"cp":-167,"mate":null,"pv":["▲６八金上","△３四銀","▲５五角","△６三金","▲５七銀上","△７一玉"]}],"mark":null,"loss":0},{"ply":29,"sfen":"ln1g3nl/1ks1gr3/1pp1psbpp/p2p1p3/6SP1/P1P1P4/1P1P1P2P/1BK1GS1R1/LN1G3NL w Pp 30","move":{"usi":"4f3e","ja":"▲同銀","from":"4f","to":"3e","drop":false},"cp":39,"mate":null,"tsume":null,"cands":[{"usi":"4d4e","ja":"△４五歩","from":"4d","to":"4e","drop":false,"cp":39,"mate":null,"pv":["△４五歩","▲３三角成","△同桂","▲２四歩","△同歩"]},{"usi":"5b6c","ja":"△６三金","from":"5b","to":"6c","drop":false,"cp":71,"mate":null,"pv":["△６三金","▲５七銀","△７一玉","▲３四歩","△２二角","▲５五角"]},{"usi":"6d6e","ja":"△６五歩","from":"6d","to":"6e","drop":false,"cp":78,"mate":null,"pv":["△６五歩","▲５七銀","△６三金","▲３四歩","△２二角","▲５五角"]}],"mark":null,"loss":0},{"ply":30,"sfen":"ln1g3nl/1ks1gr3/1pp1psbpp/p2p5/5pSP1/P1P1P4/1P1P1P2P/1BK1GS1R1/LN1G3NL b Pp 31","move":{"usi":"4d4e","ja":"△４五歩","from":"4d","to":"4e","drop":false},"cp":29,"mate":null,"tsume":null,"cands":[{"usi":"8h3c+","ja":"▲３三角成","from":"8h","to":"3c","drop":false,"cp":29,"mate":null,"pv":["▲３三角成","△同桂","▲２四歩","△同歩","▲同銀"]},{"usi":"7f7e","ja":"▲７五歩","from":"7f","to":"7e","drop":false,"cp":-27,"mate":null,"pv":["▲７五歩","△８八角成","▲同玉","△３二飛","▲３八飛","△６三金"]},{"usi":"P*3d","ja":"▲３四歩","from":null,"to":"3d","drop":true,"cp":-28,"mate":null,"pv":["▲３四歩","△８八角成","▲同玉","△６二金寄","▲７九玉","△５四銀"]}],"mark":null,"loss":0},{"ply":31,"sfen":"ln1g3nl/1ks1gr3/1pp1ps+Bpp/p2p5/5pSP1/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL w BPp 32","move":{"usi":"8h3c+","ja":"▲３三角成","from":"8h","to":"3c","drop":false},"cp":35,"mate":null,"tsume":null,"cands":[{"usi":"2a3c","ja":"△同桂","from":"2a","to":"3c","drop":false,"cp":35,"mate":null,"pv":["△同桂","▲２四歩","△同歩","▲同銀","△２二飛"]},{"usi":"4b3b","ja":"△３二飛","from":"4b","to":"3b","drop":false,"cp":635,"mate":null,"pv":["△３二飛","▲１一馬","△３五飛","▲２一馬","△８四銀","▲７九玉"]},{"usi":"P*3d","ja":"△３四歩","from":null,"to":"3d","drop":true,"cp":635,"mate":null,"pv":["△３四歩","▲１一馬","△３五歩","▲２一馬","△６三金","▲５七銀"]}],"mark":null,"loss":0},{"ply":32,"sfen":"ln1g4l/1ks1gr3/1pp1psnpp/p2p5/5pSP1/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL b BPbp 33","move":{"usi":"2a3c","ja":"△同桂","from":"2a","to":"3c","drop":false},"cp":42,"mate":null,"tsume":null,"cands":[{"usi":"2e2d","ja":"▲２四歩","from":"2e","to":"2d","drop":false,"cp":42,"mate":null,"pv":["▲２四歩","△同歩","▲同銀","△２二飛","▲５五角"]},{"usi":"B*5e","ja":"▲５五角","from":null,"to":"5e","drop":true,"cp":14,"mate":null,"pv":["▲５五角","△３二飛","▲３四歩","△２五桂","▲１一角成","△３一飛"]},{"usi":"P*3d","ja":"▲３四歩","from":null,"to":"3d","drop":true,"cp":5,"mate":null,"pv":["▲３四歩","△３二飛","▲５五角","△２五桂","▲１一角成","△３一飛"]}],"mark":null,"loss":0},{"ply":33,"sfen":"ln1g4l/1ks1gr3/1pp1psnpp/p2p3P1/5pS2/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL w BPbp 34","move":{"usi":"2e2d","ja":"▲２四歩","from":"2e","to":"2d","drop":false},"cp":34,"mate":null,"tsume":null,"cands":[{"usi":"2c2d","ja":"△同歩","from":"2c","to":"2d","drop":false,"cp":34,"mate":null,"pv":["△同歩","▲同銀","△２二飛","▲５五角","△４四角"]},{"usi":"B*1e","ja":"△１五角","from":null,"to":"1e","drop":true,"cp":634,"mate":null,"pv":["△１五角","▲２三歩成","△６三金","▲５七銀","△５四銀","▲３三と"]},{"usi":"6d6e","ja":"△６五歩","from":"6d","to":"6e","drop":false,"cp":634,"mate":null,"pv":["△６五歩","▲２三歩成","△１五角","▲５七銀","△６三金","▲３三と"]}],"mark":null,"loss":0},{"ply":34,"sfen":"ln1g4l/1ks1gr3/1pp1psn1p/p2p3p1/5pS2/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL b BPb2p 35","move":{"usi":"2c2d","ja":"△同歩","from":"2c","to":"2d","drop":false},"cp":40,"mate":null,"tsume":null,"cands":[{"usi":"3e2d","ja":"▲同銀","from":"3e","to":"2d","drop":false,"cp":40,"mate":null,"pv":["▲同銀","△２二飛","▲５五角","△４四角","▲２三歩"]},{"usi":"P*3d","ja":"▲３四歩","from":null,"to":"3d","drop":true,"cp":9,"mate":null,"pv":["▲３四歩","△３二飛","▲２四飛","△６三金","▲５七銀","△２三歩"]},{"usi":"B*5e","ja":"▲５五角","from":null,"to":"5e","drop":true,"cp":0,"mate":null,"pv":["▲５五角","△３二銀","▲３四歩","△４三飛","▲３三歩成","△同銀"]}],"mark":null,"loss":0},{"ply":35,"sfen":"ln1g4l/1ks1gr3/1pp1psn1p/p2p3S1/5p3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL w B2Pb2p 36","move":{"usi":"3e2d","ja":"▲同銀","from":"3e","to":"2d","drop":false},"cp":27,"mate":null,"tsume":null,"cands":[{"usi":"B*4d","ja":"△４四角","from":null,"to":"4d","drop":true,"cp":27,"mate":null,"pv":["△４四角","▲７七桂","△６三金","▲２三銀成","△５四銀","▲５七銀"]},{"usi":"P*3b","ja":"△３二歩","from":null,"to":"3b","drop":true,"cp":167,"mate":null,"pv":["△３二歩","▲３一角","△４一飛","▲２二角成","△６三金","▲２三銀成"]},{"usi":"4b2b","ja":"△２二飛","from":"4b","to":"2b","drop":false,"cp":189,"mate":null,"pv":["△２二飛","▲２三銀不成","△４二飛","▲３一角","△４一飛","▲２二角成"]}],"mark":null,"loss":0},{"ply":36,"sfen":"ln1g4l/1ks1g2r1/1pp1psn1p/p2p3S1/5p3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL b B2Pb2p 37","move":{"usi":"4b2b","ja":"△２二飛","from":"4b","to":"2b","drop":false},"cp":190,"mate":null,"tsume":null,"cands":[{"usi":"2d2c","ja":"▲２三銀不成","from":"2d","to":"2c","drop":false,"cp":190,"mate":null,"pv":["▲２三銀不成","△４二飛","▲３一角","△４一飛","▲２二角成","△４四銀"]},{"usi":"P*2c","ja":"▲２三歩","from":null,"to":"2c","drop":true,"cp":156,"mate":null,"pv":["▲２三歩","△３二飛","▲５五角","△４二金","▲６四角","△７一玉"]},{"usi":"B*5e","ja":"▲５五角","from":null,"to":"5e","drop":true,"cp":116,"mate":null,"pv":["▲５五角","△２七歩","▲同飛","△３二銀","▲６四角","△３八角"]}],"mark":null,"loss":162},{"ply":37,"sfen":"ln1g4l/1ks1g2r1/1pp1psn1p/p2p3S1/4Bp3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL w 2Pb2p 38","move":{"usi":"B*5e","ja":"▲５五角","from":null,"to":"5e","drop":true},"cp":133,"mate":null,"tsume":null,"cands":[{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true,"cp":133,"mate":null,"pv":["△２七歩","▲同飛","△３二銀","▲６四角","△３八角","▲２八飛"]},{"usi":"B*4d","ja":"△４四角","from":null,"to":"4d","drop":true,"cp":229,"mate":null,"pv":["△４四角","▲２三銀不成","△５五角","▲同歩","△４二飛","▲２二銀成"]},{"usi":"P*3b","ja":"△３二歩","from":null,"to":"3b","drop":true,"cp":257,"mate":null,"pv":["△３二歩","▲２三銀成","△２一飛","▲２二成銀","△５一飛","▲２三飛成"]}],"mark":null,"loss":74},{"ply":38,"sfen":"ln1g4l/1ks1g2r1/1pp1psn1p/p2p1b1S1/4Bp3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL b 2P2p 39","move":{"usi":"B*4d","ja":"△４四角","from":null,"to":"4d","drop":true},"cp":230,"mate":null,"tsume":null,"cands":[{"usi":"2d2c","ja":"▲２三銀不成","from":"2d","to":"2c","drop":false,"cp":230,"mate":null,"pv":["▲２三銀不成","△５五角","▲同歩","△４二飛","▲２二銀成","△２七歩"]},{"usi":"5e4d","ja":"▲同角","from":"5e","to":"4d","drop":false,"cp":188,"mate":null,"pv":["▲同角","△同銀","▲２三銀成","△４二飛","▲３一角","△４三飛"]},{"usi":"P*2c","ja":"▲２三歩","from":null,"to":"2c","drop":true,"cp":29,"mate":null,"pv":["▲２三歩","△３二飛","▲４四角","△同銀","▲３四角","△９三玉"]}],"mark":null,"loss":96},{"ply":39,"sfen":"ln1g4l/1ks1g2r1/1pp1psnPp/p2p1b1S1/4Bp3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL w P2p 40","move":{"usi":"P*2c","ja":"▲２三歩","from":null,"to":"2c","drop":true},"cp":16,"mate":null,"tsume":null,"cands":[{"usi":"2b3b","ja":"△３二飛","from":"2b","to":"3b","drop":false,"cp":16,"mate":null,"pv":["△３二飛","▲４四角","△同銀","▲３四角","△９三玉","▲９五歩"]},{"usi":"4d5e","ja":"△５五角","from":"4d","to":"5e","drop":false,"cp":471,"mate":null,"pv":["△５五角","▲同歩","△３二飛","▲２一角","△４四角","▲３二角成"]},{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true,"cp":478,"mate":null,"pv":["△２七歩","▲同飛","△５五角","▲２二歩成","△９九角成","▲１一と"]}],"mark":null,"loss":201},{"ply":40,"sfen":"ln1g4l/1ks1g2r1/1pp1psnPp/p2p3S1/4bp3/P1P1P4/1P1P1P2P/2K1GS1R1/LN1G3NL b Pb2p 41","move":{"usi":"4d5e","ja":"△５五角","from":"4d","to":"5e","drop":false},"cp":475,"mate":null,"tsume":null,"cands":[{"usi":"5f5e","ja":"▲同歩","from":"5f","to":"5e","drop":false,"cp":475,"mate":null,"pv":["▲同歩","△３二飛","▲２一角","△４四角","▲３二角成","△同銀"]},{"usi":"2h2g","ja":"▲２七飛","from":"2h","to":"2g","drop":false,"cp":-294,"mate":null,"pv":["▲２七飛","△９九角成","▲２二歩成","△２五香","▲２六歩","△９八角"]},{"usi":"2h3h","ja":"▲３八飛","from":"2h","to":"3h","drop":false,"cp":-536,"mate":null,"pv":["▲３八飛","△３七歩","▲２二歩成","△３八歩成","▲５五歩","△４八と"]}],"mark":"疑問手","loss":455},{"ply":41,"sfen":"ln1g4l/1ks1g2r1/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL w BPb2p 42","move":{"usi":"5f5e","ja":"▲同歩","from":"5f","to":"5e","drop":false},"cp":474,"mate":null,"tsume":null,"cands":[{"usi":"2b3b","ja":"△３二飛","from":"2b","to":"3b","drop":false,"cp":474,"mate":null,"pv":["△３二飛","▲２一角","△４四角","▲３二角成","△同銀","▲２二歩成"]},{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true,"cp":1003,"mate":null,"pv":["△２七歩","▲３八飛","△２八歩成","▲３三飛成","△１二飛","▲２二歩成"]},{"usi":"2b1b","ja":"△１二飛","from":"2b","to":"1b","drop":false,"cp":1038,"mate":null,"pv":["△１二飛","▲３三銀成","△２七歩","▲同飛","△４九角","▲３七飛"]}],"mark":null,"loss":0},{"ply":42,"sfen":"ln1g4l/1ks1g1r2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL b BPb2p 43","move":{"usi":"2b3b","ja":"△３二飛","from":"2b","to":"3b","drop":false},"cp":485,"mate":null,"tsume":null,"cands":[{"usi":"B*2a","ja":"▲２一角","from":null,"to":"2a","drop":true,"cp":485,"mate":null,"pv":["▲２一角","△４四角","▲３二角成","△同銀","▲２二歩成","△５五角"]},{"usi":"2d3e","ja":"▲３五銀","from":"2d","to":"3e","drop":false,"cp":255,"mate":null,"pv":["▲３五銀","△２七歩","▲同飛","△２五歩","▲５七銀","△６三金"]},{"usi":"B*4a","ja":"▲４一角","from":null,"to":"4a","drop":true,"cp":156,"mate":null,"pv":["▲４一角","△２七歩","▲３二角成","△２八歩成","▲３三馬","△１九と"]}],"mark":"好手","loss":0},{"ply":43,"sfen":"ln1g3Bl/1ks1g1r2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL w Pb2p 44","move":{"usi":"B*2a","ja":"▲２一角","from":null,"to":"2a","drop":true},"cp":467,"mate":null,"tsume":null,"cands":[{"usi":"B*4d","ja":"△４四角","from":null,"to":"4d","drop":true,"cp":467,"mate":null,"pv":["△４四角","▲３二角成","△同銀","▲２二歩成","△５五角","▲３七歩"]},{"usi":"5b4b","ja":"△４二金","from":"5b","to":"4b","drop":false,"cp":693,"mate":null,"pv":["△４二金","▲３二角成","△同金","▲２一飛","△４四角","▲２二歩成"]},{"usi":"4e4f","ja":"△４六歩","from":"4e","to":"4f","drop":false,"cp":693,"mate":null,"pv":["△４六歩","▲３二角成","△同銀","▲２二歩成","△４七歩成","▲同銀"]}],"mark":null,"loss":0},{"ply":44,"sfen":"ln1g3Bl/1ks2gr2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL b Pb2p 45","move":{"usi":"5b4b","ja":"△４二金","from":"5b","to":"4b","drop":false},"cp":711,"mate":null,"tsume":null,"cands":[{"usi":"2a3b+","ja":"▲３二角成","from":"2a","to":"3b","drop":false,"cp":711,"mate":null,"pv":["▲３二角成","△同金","▲２一飛","△４四角","▲２二歩成","△５五角"]},{"usi":"2d3e","ja":"▲３五銀","from":"2d","to":"3e","drop":false,"cp":651,"mate":null,"pv":["▲３五銀","△３四歩","▲２二歩成","△３五歩","▲３二と","△同金"]},{"usi":"2d1e","ja":"▲１五銀","from":"2d","to":"1e","drop":false,"cp":418,"mate":null,"pv":["▲１五銀","△２五歩","▲３二角成","△同金","▲４一飛","△１四歩"]}],"mark":null,"loss":226},{"ply":45,"sfen":"ln1g4l/1ks2g+B2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL w RPb2p 46","move":{"usi":"2a3b+","ja":"▲３二角成","from":"2a","to":"3b","drop":false},"cp":692,"mate":null,"tsume":null,"cands":[{"usi":"4b3b","ja":"△同金","from":"4b","to":"3b","drop":false,"cp":692,"mate":null,"pv":["△同金","▲２一飛","△４四角","▲２二歩成","△５五角","▲４六歩"]},{"usi":"4c3b","ja":"△同銀","from":"4c","to":"3b","drop":false,"cp":1050,"mate":null,"pv":["△同銀","▲２二歩成","△２七歩","▲同飛","△４九角","▲３二と"]},{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true,"cp":2161,"mate":null,"pv":["△２七歩","▲４二馬","△２八歩成","▲４三馬","△１九と","▲３三銀成"]}],"mark":null,"loss":0},{"ply":46,"sfen":"ln1g4l/1ks3g2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL b RP2b2p 47","move":{"usi":"4b3b","ja":"△同金","from":"4b","to":"3b","drop":false},"cp":706,"mate":null,"tsume":null,"cands":[{"usi":"R*2a","ja":"▲２一飛","from":null,"to":"2a","drop":true,"cp":706,"mate":null,"pv":["▲２一飛","△４四角","▲２二歩成","△５五角","▲４六歩","△９九角成"]},{"usi":"2d3c+","ja":"▲３三銀成","from":"2d","to":"3c","drop":false,"cp":528,"mate":null,"pv":["▲３三銀成","△同金","▲２二歩成","△２七歩","▲同飛","△３八銀"]},{"usi":"2d3c","ja":"▲３三銀不成","from":"2d","to":"3c","drop":false,"cp":528,"mate":null,"pv":["▲３三銀不成","△同金","▲２二歩成","△２七歩","▲同飛","△３八銀"]}],"mark":null,"loss":0},{"ply":47,"sfen":"ln1g3Rl/1ks3g2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1R1/LN1G3NL w P2b2p 48","move":{"usi":"R*2a","ja":"▲２一飛","from":null,"to":"2a","drop":true},"cp":702,"mate":null,"tsume":null,"cands":[{"usi":"B*4d","ja":"△４四角","from":null,"to":"4d","drop":true,"cp":702,"mate":null,"pv":["△４四角","▲２二歩成","△５五角","▲４六歩","△９九角成","▲３二と"]},{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true,"cp":707,"mate":null,"pv":["△２七歩","▲１八飛","△２八歩成","▲同飛","△２七歩","▲同飛"]},{"usi":"1a1b","ja":"△１二香","from":"1a","to":"1b","drop":false,"cp":866,"mate":null,"pv":["△１二香","▲２二歩成","△２七歩","▲３八飛","△２八歩成","▲同飛"]}],"mark":null,"loss":0},{"ply":48,"sfen":"ln1g3Rl/1ks3g2/1pp1psnPp/p2p3S1/4Pp3/P1P6/1P1P1P1pP/2K1GS1R1/LN1G3NL b P2bp 49","move":{"usi":"P*2g","ja":"△２七歩","from":null,"to":"2g","drop":true},"cp":706,"mate":null,"tsume":null,"cands":[{"usi":"2h1h","ja":"▲１八飛","from":"2h","to":"1h","drop":false,"cp":706,"mate":null,"pv":["▲１八飛","△２八歩成","▲同飛","△２七歩","▲同飛","△４九角"]},{"usi":"2h2g","ja":"▲同飛","from":"2h","to":"2g","drop":false,"cp":543,"mate":null,"pv":["▲同飛","△４九角","▲３七飛","△２五桂","▲３二飛成","△同銀"]},{"usi":"2h3h","ja":"▲３八飛","from":"2h","to":"3h","drop":false,"cp":245,"mate":null,"pv":["▲３八飛","△４九角","▲３九飛","△５八角成","▲同金","△２八歩成"]}],"mark":null,"loss":5},{"ply":49,"sfen":"ln1g3Rl/1ks3g+P1/1pp1psn1p/p2p3S1/4Pp3/P1P6/1P1P1P1pP/2K1GS1R1/LN1G3NL w P2bp 50","move":{"usi":"2c2b+","ja":"▲２二歩成","from":"2c","to":"2b","drop":false},"cp":-958,"mate":null,"tsume":null,"cands":[{"usi":"2g2h+","ja":"△２八歩成","from":"2g","to":"2h","drop":false,"cp":-958,"mate":null,"pv":["△２八歩成","▲３四歩","△３八と","▲３二と","△４八と","▲同金"]},{"usi":"3b2b","ja":"△同金","from":"3b","to":"2b","drop":false,"cp":-316,"mate":null,"pv":["△同金","▲同飛成","△２八歩成","▲３三銀成","△４四銀","▲４三成銀"]},{"usi":"3b3a","ja":"△３一金","from":"3b","to":"3a","drop":false,"cp":426,"mate":null,"pv":["△３一金","▲同飛成","△２八歩成","▲３三龍","△４一飛","▲３二と"]}],"mark":"悪手","loss":1668},{"ply":50,"sfen":"ln1g3Rl/1ks3g+P1/1pp1psn1p/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1+p1/LN1G3NL b Pr2bp 51","move":{"usi":"2g2h+","ja":"△２八歩成","from":"2g","to":"2h","drop":false},"cp":-973,"mate":null,"tsume":null,"cands":[{"usi":"P*3d","ja":"▲３四歩","from":null,"to":"3d","drop":true,"cp":-973,"mate":null,"pv":["▲３四歩","△３八と","▲３二と","△４八と","▲同金","△３二銀"]},{"usi":"2b3b","ja":"▲３二と","from":"2b","to":"3b","drop":false,"cp":-1013,"mate":null,"pv":["▲３二と","△同銀","▲２二飛成","△６五角","▲３三銀成","△同銀"]},{"usi":"2a1a+","ja":"▲１一飛成","from":"2a","to":"1a","drop":false,"cp":-1057,"mate":null,"pv":["▲１一飛成","△１九と","▲３二と","△同銀","▲３七桂","△５六香"]}],"mark":null,"loss":0},{"ply":51,"sfen":"ln1g3Rl/1ks3+P2/1pp1psn1p/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS1+p1/LN1G3NL w GPr2bp 52","move":{"usi":"2b3b","ja":"▲３二と","from":"2b","to":"3b","drop":false},"cp":-996,"mate":null,"tsume":null,"cands":[{"usi":"4c3b","ja":"△同銀","from":"4c","to":"3b","drop":false,"cp":-996,"mate":null,"pv":["△同銀","▲２二飛成","△６五角","▲３三銀成","△同銀","▲２八龍"]},{"usi":"3c2e","ja":"△２五桂","from":"3c","to":"2e","drop":false,"cp":-213,"mate":null,"pv":["△２五桂","▲３三銀成","△３二銀","▲同成銀","△２九と","▲２五飛成"]},{"usi":"2h3h","ja":"△３八と","from":"2h","to":"3h","drop":false,"cp":-124,"mate":null,"pv":["△３八と","▲３三銀成","△３二銀","▲同成銀","△２八歩","▲３九銀"]}],"mark":null,"loss":40},{"ply":52,"sfen":"ln1g3Rl/1ks3+P2/1pp1psn1p/p2p3S1/4Pp3/P1P6/1P1P1P2P/2K1GS+p2/LN1G3NL b GPr2bp 53","move":{"usi":"2h3h","ja":"△３八と","from":"2h","to":"3h","drop":false},"cp":-132,"mate":null,"tsume":null,"cands":[{"usi":"2d3c+","ja":"▲３三銀成","from":"2d","to":"3c","drop":false,"cp":-132,"mate":null,"pv":["▲３三銀成","△３二銀","▲同成銀","△２八歩","▲３九銀","△同と"]},{"usi":"3b3c","ja":"▲３三と","from":"3b","to":"3c","drop":false,"cp":-234,"mate":null,"pv":["▲３三と","△４八と","▲同金","△２八飛","▲５八金上","△２九飛成"]},{"usi":"2d3c","ja":"▲３三銀不成","from":"2d","to":"3c","drop":false,"cp":-381,"mate":null,"pv":["▲３三銀不成","△４八と","▲同金","△３九銀","▲５七金","△３八飛"]}],"mark":"悪手","loss":872},{"ply":53,"sfen":"ln1g3Rl/1ks3+P2/1pp1ps+S1p/p2p5/4Pp3/P1P6/1P1P1P2P/2K1GS+p2/LN1G3NL w GNPr2bp 54","move":{"usi":"2d3c+","ja":"▲３三銀成","from":"2d","to":"3c","drop":false},"cp":-141,"mate":null,"tsume":null,"cands":[{"usi":"4c3b","ja":"△３二銀","from":"4c","to":"3b","drop":false,"cp":-141,"mate":null,"pv":["△３二銀","▲同成銀","△２八歩","▲３九銀","△同と","▲２八飛成"]},{"usi":"4c4d","ja":"△４四銀","from":"4c","to":"4d","drop":false,"cp":127,"mate":null,"pv":["△４四銀","▲１一飛成","△２九と","▲６三香","△７一金","▲４三成銀"]},{"usi":"R*4i","ja":"△４九飛","from":null,"to":"4i","drop":true,"cp":283,"mate":null,"pv":["△４九飛","▲１一飛成","△２九飛成","▲４三成銀","△４八と","▲同金"]}],"mark":null,"loss":0},{"ply":54,"sfen":"ln1g3Rl/1ks3s2/1pp1p1+S1p/p2p5/4Pp3/P1P6/1P1P1P2P/2K1GS+p2/LN1G3NL b GNPr2b2p 55","move":{"usi":"4c3b","ja":"△３二銀","from":"4c","to":"3b","drop":false},"cp":-124,"mate":null,"tsume":null,"cands":[{"usi":"3c3b","ja":"▲同成銀","from":"3c","to":"3b","drop":false,"cp":-124,"mate":null,"pv":["▲同成銀","△２八歩","▲３九銀","△同と","▲２八飛成","△２九と"]},{"usi":"N*7d","ja":"▲７四桂","from":null,"to":"7d","drop":true,"cp":-648,"mate":null,"pv":["▲７四桂","△同歩","▲３二成銀","△４八と","▲同金","△５六桂"]},{"usi":"2a6a+","ja":"▲６一飛成","from":"2a","to":"6a","drop":false,"cp":-992,"mate":null,"pv":["▲６一飛成","△同銀","▲３二成銀","△２九と","▲１八香","△５六桂"]}],"mark":null,"loss":0},{"ply":55,"sfen":"ln1g3Rl/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1P2P/2K1GS+p2/LN1G3NL w GSNPr2b2p 56","move":{"usi":"3c3b","ja":"▲同成銀","from":"3c","to":"3b","drop":false},"cp":-133,"mate":null,"tsume":null,"cands":[{"usi":"P*2h","ja":"△２八歩","from":null,"to":"2h","drop":true,"cp":-133,"mate":null,"pv":["△２八歩","▲３九銀","△同と","▲２八飛成","△２九と","▲同龍"]},{"usi":"R*4i","ja":"△４九飛","from":null,"to":"4i","drop":true,"cp":12,"mate":null,"pv":["△４九飛","▲５七銀","△２九飛成","▲１一飛成","△１九龍","▲１三龍"]},{"usi":"R*3f","ja":"△３六飛","from":null,"to":"3f","drop":true,"cp":50,"mate":null,"pv":["△３六飛","▲４一飛成","△２九と","▲３七銀打","△７六飛","▲７七金"]}],"mark":null,"loss":0},{"ply":56,"sfen":"ln1g3Rl/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1P2P/2K1GS+pp1/LN1G3NL b GSNPr2bp 57","move":{"usi":"P*2h","ja":"△２八歩","from":null,"to":"2h","drop":true},"cp":-126,"mate":null,"tsume":null,"cands":[{"usi":"4h3i","ja":"▲３九銀","from":"4h","to":"3i","drop":false,"cp":-126,"mate":null,"pv":["▲３九銀","△同と","▲２八飛成","△２九と","▲同龍","△５六銀"]},{"usi":"2i3g","ja":"▲３七桂","from":"2i","to":"3g","drop":false,"cp":-135,"mate":null,"pv":["▲３七桂","△４九飛","▲５七銀","△３七と","▲１一飛成","△１九飛成"]},{"usi":"S*3i","ja":"▲３九銀打","from":null,"to":"3i","drop":true,"cp":-166,"mate":null,"pv":["▲３九銀打","△同と","▲同銀","△２九歩成","▲同飛成","△５六銀"]}],"mark":null,"loss":0},{"ply":57,"sfen":"ln1g3Rl/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1PN1P/2K1GS+pp1/LN1G4L w GSNPr2bp 58","move":{"usi":"2i3g","ja":"▲３七桂","from":"2i","to":"3g","drop":false},"cp":-146,"mate":null,"tsume":null,"cands":[{"usi":"R*4i","ja":"△４九飛","from":null,"to":"4i","drop":true,"cp":-146,"mate":null,"pv":["△４九飛","▲５七銀","△３七と","▲１一飛成","△１九飛成","▲６三香"]},{"usi":"2h2i+","ja":"△２九歩成","from":"2h","to":"2i","drop":false,"cp":83,"mate":null,"pv":["△２九歩成","▲４五桂","△４八と","▲同金","△４三銀","▲２九飛成"]},{"usi":"R*3f","ja":"△３六飛","from":null,"to":"3f","drop":true,"cp":131,"mate":null,"pv":["△３六飛","▲２七飛成","△３七と","▲同龍","△同飛成","▲同銀"]}],"mark":null,"loss":9},{"ply":58,"sfen":"ln1g3Rl/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1PN1P/2K1GS+p2/LN1G3+pL b GSNPr2bp 59","move":{"usi":"2h2i+","ja":"△２九歩成","from":"2h","to":"2i","drop":false},"cp":82,"mate":null,"tsume":null,"cands":[{"usi":"3g4e","ja":"▲４五桂","from":"3g","to":"4e","drop":false,"cp":82,"mate":null,"pv":["▲４五桂","△４八と","▲同金","△４三銀","▲２九飛成"]},{"usi":"2a1a+","ja":"▲１一飛成","from":"2a","to":"1a","drop":false,"cp":46,"mate":null,"pv":["▲１一飛成","△４八と","▲同金","△２八飛","▲５八金寄","△１九と"]},{"usi":"4h5g","ja":"▲５七銀","from":"4h","to":"5g","drop":false,"cp":26,"mate":null,"pv":["▲５七銀","△１九と","▲４五桂","△３七飛","▲３三桂成"]}],"mark":null,"loss":229},{"ply":59,"sfen":"ln1g4+R/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1PN1P/2K1GS+p2/LN1G3+pL w GSNLPr2bp 60","move":{"usi":"2a1a+","ja":"▲１一飛成","from":"2a","to":"1a","drop":false},"cp":44,"mate":null,"tsume":null,"cands":[{"usi":"3h4h","ja":"△４八と","from":"3h","to":"4h","drop":false,"cp":44,"mate":null,"pv":["△４八と","▲同金","△２八飛","▲５八金寄","△１九と","▲４五桂"]},{"usi":"R*6b","ja":"△６二飛","from":null,"to":"6b","drop":true,"cp":326,"mate":null,"pv":["△６二飛","▲４一龍","△４八と","▲同金","△１九と","▲４五桂"]},{"usi":"R*3f","ja":"△３六飛","from":null,"to":"3f","drop":true,"cp":337,"mate":null,"pv":["△３六飛","▲６三香","△４八と","▲同金","△７六飛","▲７七銀"]}],"mark":null,"loss":36},{"ply":60,"sfen":"ln1g4+R/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1PN1P/2K1G+p3/LN1G3+pL b GSNLPr2bsp 61","move":{"usi":"3h4h","ja":"△４八と","from":"3h","to":"4h","drop":false},"cp":59,"mate":null,"tsume":null,"cands":[{"usi":"5h4h","ja":"▲同金","from":"5h","to":"4h","drop":false,"cp":59,"mate":null,"pv":["▲同金","△２八飛","▲５八金寄","△１九と","▲４五桂","△３八飛成"]},{"usi":"5h5g","ja":"▲５七金","from":"5h","to":"5g","drop":false,"cp":-365,"mate":null,"pv":["▲５七金","△１九と","▲４五桂","△５四歩","▲同歩"]},{"usi":"5h6h","ja":"▲６八金寄","from":"5h","to":"6h","drop":false,"cp":-394,"mate":null,"pv":["▲６八金寄","△１九と","▲４五桂","△６二銀","▲３三桂成"]}],"mark":null,"loss":0},{"ply":61,"sfen":"ln1g4+R/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P6/1P1P1PN1P/2K2G3/LN1G3+pL w GSNL2Pr2bsp 62","move":{"usi":"5h4h","ja":"▲同金","from":"5h","to":"4h","drop":false},"cp":43,"mate":null,"tsume":null,"cands":[{"usi":"R*2h","ja":"△２八飛","from":null,"to":"2h","drop":true,"cp":43,"mate":null,"pv":["△２八飛","▲５八金寄","△１九と","▲４五桂","△３八飛成"]},{"usi":"2i1i","ja":"△１九と","from":"2i","to":"1i","drop":false,"cp":143,"mate":null,"pv":["△１九と","▲４五桂","△２八飛","▲３七銀","△２三飛成"]},{"usi":"B*3i","ja":"△３九角","from":null,"to":"3i","drop":true,"cp":231,"mate":null,"pv":["△３九角","▲３八金","△５七角成","▲４五桂","△１九と"]}],"mark":null,"loss":0},{"ply":62,"sfen":"ln1g4+R/1ks3+S2/1pp1p3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G3+pL b GSNL2P2bsp 63","move":{"usi":"R*3f","ja":"△３六飛","from":null,"to":"3f","drop":true},"cp":619,"mate":null,"tsume":null,"cands":[{"usi":"L*6c","ja":"▲６三香","from":null,"to":"6c","drop":true,"cp":619,"mate":null,"pv":["▲６三香","△７一金","▲６二金","△同金","▲同香成","△１九と"]},{"usi":"L*6b","ja":"▲６二香","from":null,"to":"6b","drop":true,"cp":358,"mate":null,"pv":["▲６二香","△同金","▲７一銀","△９二玉","▲８二金","△９三玉"]},{"usi":"P*3d","ja":"▲３四歩","from":null,"to":"3d","drop":true,"cp":248,"mate":null,"pv":["▲３四歩","△１九と","▲３三歩成","△７六飛","▲７七銀"]}],"mark":"悪手","loss":565},{"ply":63,"sfen":"ln1g4+R/1ks3+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G3+pL w GSN2P2bsp 64","move":{"usi":"L*6c","ja":"▲６三香","from":null,"to":"6c","drop":true},"cp":620,"mate":null,"tsume":null,"cands":[{"usi":"6a7a","ja":"△７一金","from":"6a","to":"7a","drop":false,"cp":620,"mate":null,"pv":["△７一金","▲６二金","△同金","▲同香成","△１九と","▲７二成香"]},{"usi":"3f3b","ja":"△３二飛","from":"3f","to":"3b","drop":false,"cp":723,"mate":null,"pv":["△３二飛","▲６一香成","△１九と","▲７一銀","△９三玉","▲８二金"]},{"usi":"2i1i","ja":"△１九と","from":"2i","to":"1i","drop":false,"cp":723,"mate":null,"pv":["△１九と","▲６一香成","△３二飛","▲７一銀","△９三玉","▲８二金"]}],"mark":"好手","loss":0},{"ply":64,"sfen":"lng5+R/1ks3+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G3+pL b GSN2P2bsp 65","move":{"usi":"6a7a","ja":"△７一金","from":"6a","to":"7a","drop":false},"cp":627,"mate":null,"tsume":null,"cands":[{"usi":"G*6b","ja":"▲６二金","from":null,"to":"6b","drop":true,"cp":627,"mate":null,"pv":["▲６二金","△同金","▲同香成","△１九と","▲７二成香","△同玉"]},{"usi":"6c6b+","ja":"▲６二香成","from":"6c","to":"6b","drop":false,"cp":366,"mate":null,"pv":["▲６二香成","△同金","▲７一銀","△９二玉","▲８二金","△９三玉"]},{"usi":"S*6b","ja":"▲６二銀","from":null,"to":"6b","drop":true,"cp":129,"mate":null,"pv":["▲６二銀","△同金","▲同香成","△３二飛","▲７二成香","△同玉"]}],"mark":null,"loss":0},{"ply":65,"sfen":"lng2+R3/1ks3+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G3+pL w GSN2P2bsp 66","move":{"usi":"1a4a","ja":"▲４一龍","from":"1a","to":"4a","drop":false},"cp":-151,"mate":null,"tsume":null,"cands":[{"usi":"7b6c","ja":"△６三銀","from":"7b","to":"6c","drop":false,"cp":-151,"mate":null,"pv":["△６三銀","▲２七金","△７六飛","▲７七銀","△７五飛","▲４二龍"]},{"usi":"B*8e","ja":"△８五角","from":null,"to":"8e","drop":true,"cp":331,"mate":null,"pv":["△８五角","▲２五銀","△７六飛","▲７七金","△７五飛","▲７六歩"]},{"usi":"B*7d","ja":"△７四角","from":null,"to":"7d","drop":true,"cp":386,"mate":null,"pv":["△７四角","▲７一龍","△同玉","▲６二金","△８二玉","▲７一銀"]}],"mark":"悪手","loss":773},{"ply":66,"sfen":"lng2+R3/1ks3+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G4+p b GSN2P2bslp 67","move":{"usi":"2i1i","ja":"△１九と","from":"2i","to":"1i","drop":false},"cp":803,"mate":null,"tsume":null,"cands":[{"usi":"S*6b","ja":"▲６二銀","from":null,"to":"6b","drop":true,"cp":803,"mate":null,"pv":["▲６二銀","△７六飛","▲７七歩","△６二金","▲同香成","△５六飛"]},{"usi":"G*6b","ja":"▲６二金","from":null,"to":"6b","drop":true,"cp":731,"mate":null,"pv":["▲６二金","△７六飛","▲７七銀","△６二金","▲同香成","△５六飛"]},{"usi":"6c6b+","ja":"▲６二香成","from":"6c","to":"6b","drop":false,"cp":465,"mate":null,"pv":["▲６二香成","△同金","▲７一銀","△９二玉","▲６二銀成","△７六飛"]}],"mark":"悪手","loss":946},{"ply":67,"sfen":"lng2+R3/1ksG2+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G4+p w SN2P2bslp 68","move":{"usi":"G*6b","ja":"▲６二金","from":null,"to":"6b","drop":true},"cp":731,"mate":null,"tsume":null,"cands":[{"usi":"3f7f","ja":"△７六飛","from":"3f","to":"7f","drop":false,"cp":731,"mate":null,"pv":["△７六飛","▲７七銀","△６二金","▲同香成","△５六飛","▲７二成香"]},{"usi":"L*6a","ja":"△６一香","from":null,"to":"6a","drop":true,"cp":830,"mate":null,"pv":["△６一香","▲同金","△同銀","▲同香成","△７六飛","▲７七銀"]},{"usi":"7a6b","ja":"△同金","from":"7a","to":"6b","drop":false,"cp":1584,"mate":null,"pv":["△同金","▲同香成","△７六飛","▲７七金","△３六飛","▲７一銀"]}],"mark":null,"loss":72},{"ply":68,"sfen":"ln3+R3/1ksg2+S2/1ppLp3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G4+p b SN2P2bgslp 69","move":{"usi":"7a6b","ja":"△同金","from":"7a","to":"6b","drop":false},"cp":1578,"mate":null,"tsume":null,"cands":[{"usi":"6c6b+","ja":"▲同香成","from":"6c","to":"6b","drop":false,"cp":1578,"mate":null,"pv":["▲同香成","△７六飛","▲７七金","△３六飛","▲７一銀","△９二玉"]},{"usi":"S*7a","ja":"▲７一銀","from":null,"to":"7a","drop":true,"cp":292,"mate":null,"pv":["▲７一銀","△９三玉","▲６二香成","△８五角","▲５二成香","△７六飛"]},{"usi":"6c6b","ja":"▲同香不成","from":"6c","to":"6b","drop":false,"cp":-22,"mate":null,"pv":["▲同香不成","△７六飛","▲７七銀","△３六飛","▲４二成銀","△２八歩"]}],"mark":"疑問手","loss":853},{"ply":69,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/4Pp3/P1P3r2/1P1P1PN1P/2K2G3/LN1G4+p w GSN2P2bgslp 70","move":{"usi":"6c6b+","ja":"▲同香成","from":"6c","to":"6b","drop":false},"cp":1565,"mate":null,"tsume":null,"cands":[{"usi":"3f7f","ja":"△７六飛","from":"3f","to":"7f","drop":false,"cp":1565,"mate":null,"pv":["△７六飛","▲７七金","△３六飛","▲７一銀","△９二玉","▲７二成香"]},{"usi":"S*3i","ja":"△３九銀","from":null,"to":"3i","drop":true,"cp":3000,"mate":8,"pv":["△３九銀","▲７一龍","△９二玉","▲８四桂","△同歩","▲７二龍"]},{"usi":"B*3i","ja":"△３九角","from":null,"to":"3i","drop":true,"cp":3000,"mate":8,"pv":["△３九角","▲７一龍","△９二玉","▲８四桂","△同歩","▲７二龍"]}],"mark":null,"loss":0},{"ply":70,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/4Pp3/P1r6/1P1P1PN1P/2K2G3/LN1G4+p b GSN2P2bgsl2p 71","move":{"usi":"3f7f","ja":"△７六飛","from":"3f","to":"7f","drop":false},"cp":1578,"mate":null,"tsume":null,"cands":[{"usi":"G*7g","ja":"▲７七金","from":null,"to":"7g","drop":true,"cp":1578,"mate":null,"pv":["▲７七金","△３六飛","▲７一銀","△９二玉","▲７二成香","△９三銀"]},{"usi":"P*7g","ja":"▲７七歩","from":null,"to":"7g","drop":true,"cp":1483,"mate":null,"pv":["▲７七歩","△３六飛","▲７一銀","△９二玉","▲７二成香","△９三銀"]},{"usi":"S*7g","ja":"▲７七銀","from":null,"to":"7g","drop":true,"cp":1470,"mate":null,"pv":["▲７七銀","△３六飛","▲７二成香","△同玉","▲７一金","△６二玉"]}],"mark":null,"loss":0},{"ply":71,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/4Pp3/P1r6/1PGP1PN1P/2K2G3/LN1G4+p w SN2P2bgsl2p 72","move":{"usi":"G*7g","ja":"▲７七金","from":null,"to":"7g","drop":true},"cp":1583,"mate":null,"tsume":null,"cands":[{"usi":"7f3f","ja":"△３六飛","from":"7f","to":"3f","drop":false,"cp":1583,"mate":null,"pv":["△３六飛","▲７一銀","△９二玉","▲７二成香","△９三銀","▲５二龍"]},{"usi":"7f2f","ja":"△２六飛","from":"7f","to":"2f","drop":false,"cp":1826,"mate":null,"pv":["△２六飛","▲７一龍","△９三玉","▲８二銀","△９二玉","▲７二成香"]},{"usi":"7f7g+","ja":"△同飛成","from":"7f","to":"7g","drop":false,"cp":3000,"mate":16,"pv":["△同飛成","▲同桂","△３九角","▲７一龍","△９二玉","▲８四桂"]}],"mark":null,"loss":0},{"ply":72,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/4Pp3/P8/1P+rP1PN1P/2K2G3/LN1G4+p b SN2P2b2gsl2p 73","move":{"usi":"7f7g+","ja":"△同飛成","from":"7f","to":"7g","drop":false},"cp":3000,"mate":15,"tsume":null,"cands":[{"usi":"8i7g","ja":"▲同桂","from":"8i","to":"7g","drop":false,"cp":3000,"mate":15,"pv":["▲同桂","△３九角","▲７一龍","△９二玉","▲８四桂","△９三玉"]},{"usi":"7h7g","ja":"▲同玉","from":"7h","to":"7g","drop":false,"cp":1321,"mate":null,"pv":["▲同玉","△７五香","▲７六歩","△同香","▲同玉","△６五金"]}],"mark":null,"loss":1427},{"ply":73,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/4Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w RSN2P2b2gsl2p 74","move":{"usi":"8i7g","ja":"▲同桂","from":"8i","to":"7g","drop":false},"cp":3000,"mate":14,"tsume":null,"cands":[{"usi":"B*3i","ja":"△３九角","from":null,"to":"3i","drop":true,"cp":3000,"mate":14,"pv":["△３九角","▲７一龍","△９二玉","▲８四桂","△９三玉","▲８二龍"]},{"usi":"P*3a","ja":"△３一歩","from":null,"to":"3a","drop":true,"cp":3000,"mate":14,"pv":["△３一歩","▲７一龍","△９二玉","▲８四桂","△９三玉","▲８二龍"]},{"usi":"B*7e","ja":"△７五角","from":null,"to":"7e","drop":true,"cp":3000,"mate":10,"pv":["△７五角","▲７二成香","△同玉","▲７一飛","△８二玉","▲８一飛成"]}],"mark":null,"loss":0},{"ply":74,"sfen":"ln3+R3/1ks+L2+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b RSN2Pb2gsl2p 75","move":{"usi":"B*7e","ja":"△７五角","from":null,"to":"7e","drop":true},"cp":3000,"mate":9,"tsume":null,"cands":[{"usi":"6b7b","ja":"▲７二成香","from":"6b","to":"7b","drop":false,"cp":3000,"mate":9,"pv":["▲７二成香","△同玉","▲７一飛","△８二玉","▲８一飛成","△９三玉"]},{"usi":"4a7a","ja":"▲７一龍","from":"4a","to":"7a","drop":false,"cp":2753,"mate":null,"pv":["▲７一龍","△９三玉","▲８二銀","△８四玉","▲８五飛","△７四玉"]},{"usi":"N*6f","ja":"▲６六桂","from":null,"to":"6f","drop":true,"cp":2144,"mate":null,"pv":["▲６六桂","△６八香","▲同金","△３九角","▲７二成香","△同玉"]}],"mark":null,"loss":0},{"ply":75,"sfen":"ln3+R3/1k+L3+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w R2SN2Pb2gsl2p 76","move":{"usi":"6b7b","ja":"▲７二成香","from":"6b","to":"7b","drop":false},"cp":3000,"mate":8,"tsume":null,"cands":[{"usi":"8b7b","ja":"△同玉","from":"8b","to":"7b","drop":false,"cp":3000,"mate":8,"pv":["△同玉","▲７一飛","△８二玉","▲８一飛成","△９三玉","▲８二銀"]},{"usi":"8b9b","ja":"△９二玉","from":"8b","to":"9b","drop":false,"cp":3000,"mate":6,"pv":["△９二玉","▲８一龍","△９三玉","▲８二龍","△８四玉","▲８五銀"]},{"usi":"8b9c","ja":"△９三玉","from":"8b","to":"9c","drop":false,"cp":3000,"mate":4,"pv":["△９三玉","▲８二銀","△９二玉","▲８一龍"]}],"mark":null,"loss":0},{"ply":76,"sfen":"ln3+R3/2k3+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b R2SN2Pb2gs2l2p 77","move":{"usi":"8b7b","ja":"△同玉","from":"8b","to":"7b","drop":false},"cp":3000,"mate":7,"tsume":null,"cands":[{"usi":"R*7a","ja":"▲７一飛","from":null,"to":"7a","drop":true,"cp":3000,"mate":7,"pv":["▲７一飛","△８二玉","▲８一飛成","△９三玉","▲８二銀","△８四玉"]},{"usi":"R*6a","ja":"▲６一飛","from":null,"to":"6a","drop":true,"cp":2579,"mate":null,"pv":["▲６一飛","△８九銀","▲同玉","△４八角成","▲８一飛成","△６二玉"]},{"usi":"S*6f","ja":"▲６六銀","from":null,"to":"6f","drop":true,"cp":2178,"mate":null,"pv":["▲６六銀","△９三角","▲６一銀","△６三玉","▲５二龍","△７四玉"]}],"mark":null,"loss":0},{"ply":77,"sfen":"lnR2+R3/2k3+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w 2SN2Pb2gs2l2p 78","move":{"usi":"R*7a","ja":"▲７一飛","from":null,"to":"7a","drop":true},"cp":3000,"mate":6,"tsume":null,"cands":[{"usi":"7b8b","ja":"△８二玉","from":"7b","to":"8b","drop":false,"cp":3000,"mate":6,"pv":["△８二玉","▲８一飛成","△９三玉","▲８二銀","△８四玉","▲８五銀"]},{"usi":"7b6c","ja":"△６三玉","from":"7b","to":"6c","drop":false,"cp":3000,"mate":4,"pv":["△６三玉","▲５二銀","△７四玉","▲８五銀"]},{"usi":"7b6b","ja":"△６二玉","from":"7b","to":"6b","drop":false,"cp":3000,"mate":2,"pv":["△６二玉","▲６一龍"]}],"mark":null,"loss":0},{"ply":78,"sfen":"lnR2+R3/1k4+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b 2SN2Pb2gs2l2p 79","move":{"usi":"7b8b","ja":"△８二玉","from":"7b","to":"8b","drop":false},"cp":3000,"mate":5,"tsume":null,"cands":[{"usi":"7a8a+","ja":"▲８一飛成","from":"7a","to":"8a","drop":false,"cp":3000,"mate":5,"pv":["▲８一飛成","△９三玉","▲８二銀","△８四玉","▲８五銀"]},{"usi":"S*6f","ja":"▲６六銀","from":null,"to":"6f","drop":true,"cp":2839,"mate":null,"pv":["▲６六銀","△６三角","▲７五銀","△４一角","▲同飛成"]},{"usi":"4a5b","ja":"▲５二龍","from":"4a","to":"5b","drop":false,"cp":2718,"mate":null,"pv":["▲５二龍","△６二香","▲同龍","△９三玉","▲８五桂打","△８四玉"]}],"mark":null,"loss":0},{"ply":79,"sfen":"l+R3+R3/1k4+S2/1pp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w 2S2N2Pb2gs2l2p 80","move":{"usi":"7a8a+","ja":"▲８一飛成","from":"7a","to":"8a","drop":false},"cp":3000,"mate":4,"tsume":null,"cands":[{"usi":"8b9c","ja":"△９三玉","from":"8b","to":"9c","drop":false,"cp":3000,"mate":4,"pv":["△９三玉","▲８二銀","△８四玉","▲８五銀"]}],"mark":null,"loss":0},{"ply":80,"sfen":"l+R3+R3/6+S2/kpp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b 2S2N2Pb2gs2l2p 81","move":{"usi":"8b9c","ja":"△９三玉","from":"8b","to":"9c","drop":false},"cp":3000,"mate":3,"tsume":{"len":3,"line":[{"usi":"S*8b","ja":"▲８二銀"},{"usi":"9c8d","ja":"△８四玉"},{"usi":"S*8e","ja":"▲８五銀"}]},"cands":[{"usi":"S*8b","ja":"▲８二銀","from":null,"to":"8b","drop":true,"cp":3000,"mate":3,"pv":["▲８二銀","△８四玉","▲８五銀"]},{"usi":"8a9a","ja":"▲９一龍","from":"8a","to":"9a","drop":false,"cp":3000,"mate":5,"pv":["▲９一龍","△９二銀","▲８二銀","△８四玉","▲８五銀"]},{"usi":"N*6f","ja":"▲６六桂","from":null,"to":"6f","drop":true,"cp":3000,"mate":null,"pv":["▲６六桂","△９二金","▲８五桂打","△８四玉"]}],"mark":null,"loss":0},{"ply":81,"sfen":"+R4+R3/6+S2/kpp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w 2S2NL2Pb2gs2l2p 82","move":{"usi":"8a9a","ja":"▲９一龍","from":"8a","to":"9a","drop":false},"cp":3000,"mate":4,"tsume":null,"cands":[{"usi":"S*9b","ja":"△９二銀","from":null,"to":"9b","drop":true,"cp":3000,"mate":4,"pv":["△９二銀","▲８二銀","△８四玉","▲８五銀"]},{"usi":"G*9b","ja":"△９二金","from":null,"to":"9b","drop":true,"cp":3000,"mate":4,"pv":["△９二金","▲８二銀","△８四玉","▲８五銀"]},{"usi":"L*9b","ja":"△９二香","from":null,"to":"9b","drop":true,"cp":3000,"mate":4,"pv":["△９二香","▲８二銀","△８四玉","▲８五銀"]}],"mark":null,"loss":0,"missedTsume":3},{"ply":82,"sfen":"+R4+R3/s5+S2/kpp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b 2S2NL2Pb2g2l2p 83","move":{"usi":"S*9b","ja":"△９二銀","from":null,"to":"9b","drop":true},"cp":3000,"mate":3,"tsume":{"len":3,"line":[{"usi":"S*8b","ja":"▲８二銀"},{"usi":"9c8d","ja":"△８四玉"},{"usi":"S*8e","ja":"▲８五銀"}]},"cands":[{"usi":"S*8b","ja":"▲８二銀","from":null,"to":"8b","drop":true,"cp":3000,"mate":3,"pv":["▲８二銀","△８四玉","▲８五銀"]},{"usi":"N*8e","ja":"▲８五桂打","from":null,"to":"8e","drop":true,"cp":3000,"mate":null,"pv":["▲８五桂打","△８四玉","▲７六桂","△７四玉"]},{"usi":"S*6f","ja":"▲６六銀","from":null,"to":"6f","drop":true,"cp":3000,"mate":null,"pv":["▲６六銀","△同角","▲同歩","△５六角"]}],"mark":null,"loss":0},{"ply":83,"sfen":"+R4+R3/sS4+S2/kpp1p3p/p2p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w S2NL2Pb2g2l2p 84","move":{"usi":"S*8b","ja":"▲８二銀","from":null,"to":"8b","drop":true},"cp":3000,"mate":2,"tsume":null,"cands":[{"usi":"9c8d","ja":"△８四玉","from":"9c","to":"8d","drop":false,"cp":3000,"mate":2,"pv":["△８四玉","▲８五銀"]}],"mark":null,"loss":0},{"ply":84,"sfen":"+R4+R3/sS4+S2/1pp1p3p/pk1p5/2b1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p b S2NL2Pb2g2l2p 85","move":{"usi":"9c8d","ja":"△８四玉","from":"9c","to":"8d","drop":false},"cp":3000,"mate":1,"tsume":{"len":1,"line":[{"usi":"S*8e","ja":"▲８五銀"}]},"cands":[{"usi":"S*8e","ja":"▲８五銀","from":null,"to":"8e","drop":true,"cp":3000,"mate":1,"pv":["▲８五銀"]},{"usi":"N*6f","ja":"▲６六桂","from":null,"to":"6f","drop":true,"cp":3000,"mate":null,"pv":["▲６六桂","△同角","▲同歩","△５六角"]},{"usi":"L*8f","ja":"▲８六香","from":null,"to":"8f","drop":true,"cp":3000,"mate":null,"pv":["▲８六香","△８五香","▲同香","△７四玉"]}],"mark":null,"loss":0},{"ply":85,"sfen":"+R4+R3/sS4+S2/1pp1p3p/pk1p5/1Sb1Pp3/P8/1PNP1PN1P/2K2G3/L2G4+p w 2NL2Pb2g2l2p 86","move":{"usi":"S*8e","ja":"▲８五銀","from":null,"to":"8e","drop":true},"cp":3000,"mate":null,"tsume":null,"cands":[],"mark":null,"loss":0,"end":"詰み"}]};</script>
+<script>
+(() => {
+'use strict';
+const G = window.KIFU;
+if (!G || !G.positions) { document.querySelector('.stage').textContent = 'サンプル棋譜のデータを読み込めませんでした。'; return; }
+const P = G.positions, N = P.length - 1, M = G.meta;
+const SELF = M.self === 'gote' ? 'g' : 's';
+const V = {
+  a: { zen: true,  eval: 'cp', graph: 'cp', rx: 0,  bySize: true,  glab: ['先手', '後手'] },
+  b: { zen: false, eval: 'wr', graph: 'wr', rx: 0,  bySize: true,  glab: ['', ''] },
+  c: { zen: false, eval: 'wr', graph: 'wr', rx: 30, bySize: false, glab: ['あなた', '相手'], shadow: true },
+};
+const S = { ply: 0, plan: 'paid', sel: 0, tab: { a: 'an', b: 'an' }, sheet: null };
+
+/* ---------- helpers ---------- */
+const KJ = { P: '歩', L: '香', N: '桂', S: '銀', G: '金', B: '角', R: '飛' };
+const KJP = { P: 'と', L: '杏', N: '圭', S: '全', B: '馬', R: '竜' };
+const SZ = { P: .86, L: .9, N: .92, S: .96, G: .96, B: 1, R: 1, K: 1.03 };
+const MKC = { '悪手': 'bad', '疑問手': 'dub', '好手': 'good' };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const han = (s) => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+const mv = (ja, v) => esc(V[v].zen ? ja : han(ja));
+const markHTML = (m) => (m ? `<em class="mk mk-${MKC[m]}">${m}</em>` : '');
+const marksOf = (p) => markHTML(p.mark) + (p.missedTsume ? '<em class="mk mk-dub">詰み逃し</em>' : '');
+const cpOf = (o) => (o.mate != null ? (o.mate > 0 ? 3000 : -3000) : o.cp);
+const wrSelf = (o) => { const w = 100 / (1 + Math.exp(-cpOf(o) / 600)); return SELF === 's' ? w : 100 - w; };
+const wrSente = (o) => 100 / (1 + Math.exp(-cpOf(o) / 600));
+const pct = (w) => Math.max(1, Math.min(99, Math.round(w)));
+const fmtCp = (o) => {
+  if (o.mate != null) return (o.mate > 0 ? '+' : '−') + '詰' + Math.abs(o.mate);
+  return o.cp > 0 ? '+' + o.cp : o.cp < 0 ? '−' + (-o.cp) : '±0';
+};
+const JN = ['互角', 'やや有利', '有利', '優勢', '勝勢'];
+const judge = (o) => { const c = cpOf(o), a = Math.abs(c); return { lv: a < 150 ? 0 : a < 450 ? 1 : a < 1000 ? 2 : a < 2000 ? 3 : 4, side: c >= 0 ? 's' : 'g' }; };
+const judgeTxt = (o) => { const j = judge(o); return j.lv ? (j.side === 's' ? '先手' : '後手') + JN[j.lv] : '互角'; };
+const plyLabel = (p) => (p ? p + '手目' : '開始局面');
+const winnerSide = M.winner === 'gote' ? 'g' : 's';
+const endTxt = `${winnerSide === 's' ? '先手' : '後手'}の勝ち（${M.endReason}）`;
+const turnOf = (p) => P[p].sfen.split(' ')[1];
+const evalTxt = (o, v) => (V[v].eval === 'cp' ? fmtCp(o) : pct(v === 'c' ? wrSelf(o) : wrSente(o)) + '%');
+
+function parseSfen(sfen) {
+  const [b, , h] = sfen.split(' ');
+  const cells = [];
+  b.split('/').forEach((row, ri) => {
+    let f = 9, prom = false;
+    for (const ch of row) {
+      if (ch === '+') { prom = true; continue; }
+      if (ch >= '0' && ch <= '9') { f -= +ch; continue; }
+      cells.push({ f, r: ri + 1, k: ch.toUpperCase(), side: ch === ch.toUpperCase() ? 's' : 'g', prom });
+      prom = false; f--;
+    }
+  });
+  const hands = { s: {}, g: {} };
+  if (h && h !== '-') {
+    let n = '';
+    for (const ch of h) {
+      if (ch >= '0' && ch <= '9') { n += ch; continue; }
+      hands[ch === ch.toUpperCase() ? 's' : 'g'][ch.toUpperCase()] = n ? +n : 1; n = '';
+    }
+  }
+  return { cells, hands };
+}
+const POS = P.map((p) => parseSfen(p.sfen));
+
+/* candidate rows for a position: visible candidates plus the move actually played */
+function rowsFor(p) {
+  const pos = P[p], nx = p < N ? P[p + 1] : null, all = pos.cands || [];
+  const vis = S.plan === 'paid' ? all.slice(0, 3) : all.slice(0, 1);
+  const rows = vis.map((c, i) => {
+    const game = !!nx && nx.move.usi === c.usi;
+    return { rank: i, c, game, pv: (c.pv || []).slice(1), o: c, ja: c.ja, mk: game ? marksOf(nx) : '' };
+  });
+  if (nx && !rows.some((r) => r.game)) {
+    const pv = [];
+    for (let k = p + 2; k <= Math.min(N, p + 6); k++) pv.push(P[k].move.ja);
+    rows.push({ rank: -1, c: nx.move, game: true, pv, o: nx, ja: nx.move.ja, mk: marksOf(nx) });
+  }
+  return rows;
+}
+const lockedCount = (p) => (S.plan === 'free' ? Math.max(0, Math.min(3, (P[p].cands || []).length) - 1) : 0);
+
+/* ---------- board ---------- */
+const CW = 100, CH = 108, GT = 42, GR = 44;
+const sq = (s) => [+s[0], s.charCodeAt(1) - 96];
+const xy = (f, r) => [(9 - f) * CW, GT + (r - 1) * CH];
+function pieceG(k, prom, side, x, y, v, cls) {
+  const sc = V[v].bySize ? SZ[k] : 1;
+  const t = prom ? KJP[k] : k === 'K' ? (side === 's' ? '玉' : '王') : KJ[k];
+  let tr = `translate(${x} ${y})`;
+  if (side === 'g') tr += ' rotate(180 50 54)';
+  if (sc !== 1) tr += ` translate(${(50 * (1 - sc)).toFixed(2)} ${(58 * (1 - sc)).toFixed(2)}) scale(${sc})`;
+  return `<g class="pc${side === SELF ? '' : ' po'}${prom ? ' pr' : ''}${cls || ''}" transform="${tr}"><path d="M50 9 79 25 89 99 11 99 21 25Z"/><text x="50" y="64" dy=".35em" text-anchor="middle">${t}</text></g>`;
+}
+function arrowG(m, side, v) {
+  if (!m) return '';
+  const [tf, tr] = sq(m.to), [tx, ty] = xy(tf, tr), ex = tx + 50, ey = ty + 54;
+  if (m.drop) return `<g class="ar">${pieceG(m.usi[0], false, side, tx, ty, v, ' gh')}<circle class="ar-ring" cx="${ex}" cy="${ey}" r="47"/></g>`;
+  const [ff, fr] = sq(m.from), [fx, fy] = xy(ff, fr), sx = fx + 50, sy = fy + 54;
+  const dx = ex - sx, dy = ey - sy, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  const a = [sx + ux * 26, sy + uy * 26], tip = [ex - ux * 12, ey - uy * 12], b = [tip[0] - ux * 46, tip[1] - uy * 46];
+  const f1 = (n) => n.toFixed(1);
+  const shape = `<line class="ar-ln" x1="${f1(a[0])}" y1="${f1(a[1])}" x2="${f1(b[0])}" y2="${f1(b[1])}"/><polygon class="ar-hd" points="${f1(tip[0])},${f1(tip[1])} ${f1(b[0] + px * 30)},${f1(b[1] + py * 30)} ${f1(b[0] - px * 30)},${f1(b[1] - py * 30)}"/>`;
+  return `<g class="ar"><g class="ar-ul">${shape}</g>${shape}</g>`;
+}
+function boardSVG(v, p, arrow) {
+  const cfg = V[v], pos = POS[p], last = P[p].move, rx = cfg.rx;
+  const Z = '１２３４５６７８９', K9 = '一二三四五六七八九';
+  let s = `<svg class="bd" viewBox="-5 0 ${900 + GR + 8} ${GT + 972 + (cfg.shadow ? 15 : 5)}" role="img" aria-label="${plyLabel(p)}の盤面">`;
+  s += `<defs><clipPath id="bc-${v}"><rect x="0" y="${GT}" width="900" height="972" rx="${rx}"/></clipPath>`;
+  if (v === 'a') s += `<linearGradient id="wood-a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EDD39B"/><stop offset=".55" stop-color="#E6C686"/><stop offset="1" stop-color="#E0BD7C"/></linearGradient><pattern id="grain-a" width="46" height="972" patternUnits="userSpaceOnUse"><path d="M11 0V972M29 0V972M38 0V972" stroke="#8B6B2E" stroke-opacity=".07" stroke-width="2.4" fill="none"/></pattern>`;
+  s += '</defs>';
+  if (cfg.shadow) s += `<rect class="bd-sh" x="0" y="${GT + 9}" width="900" height="972" rx="${rx}"/>`;
+  s += `<rect class="bd-bg" x="0" y="${GT}" width="900" height="972" rx="${rx}"/>`;
+  if (v === 'a') s += `<rect x="0" y="${GT}" width="900" height="972" fill="url(#grain-a)"/>`;
+  if (last) {
+    s += `<g clip-path="url(#bc-${v})">`;
+    if (last.from) { const [x, y] = xy(...sq(last.from)); s += `<rect class="bd-from" x="${x}" y="${y}" width="${CW}" height="${CH}"/>`; }
+    const [x, y] = xy(...sq(last.to)); s += `<rect class="bd-to" x="${x}" y="${y}" width="${CW}" height="${CH}"/></g>`;
+  }
+  for (let i = 1; i < 9; i++) s += `<line class="bd-ln" x1="${i * CW}" y1="${GT}" x2="${i * CW}" y2="${GT + 972}"/><line class="bd-ln" x1="0" y1="${GT + i * CH}" x2="900" y2="${GT + i * CH}"/>`;
+  s += `<rect class="bd-bd" x="0" y="${GT}" width="900" height="972" rx="${rx}" fill="none"/>`;
+  for (const [i, j] of [[3, 3], [6, 3], [3, 6], [6, 6]]) s += `<circle class="bd-star" cx="${i * CW}" cy="${GT + j * CH}" r="7"/>`;
+  for (let f = 1; f <= 9; f++) s += `<text class="bd-co" x="${(9 - f) * CW + 50}" y="${GT - 13}" text-anchor="middle">${cfg.zen ? Z[f - 1] : f}</text>`;
+  for (let r = 1; r <= 9; r++) s += `<text class="bd-co" x="${900 + GR / 2 + 3}" y="${GT + (r - 1) * CH + 54}" dy=".35em" text-anchor="middle">${K9[r - 1]}</text>`;
+  for (const c of pos.cells) { const [x, y] = xy(c.f, c.r); s += pieceG(c.k, c.prom, c.side, x, y, v, ''); }
+  s += arrowG(arrow, turnOf(p) === 'b' ? 's' : 'g', v);
+  return s + '</svg>';
+}
+function handHTML(h) {
+  const out = ['R', 'B', 'G', 'S', 'N', 'L', 'P'].filter((k) => h[k]).map((k) => `<span class="hp"><i>${KJ[k]}</i>${h[k] > 1 ? `<b>${h[k]}</b>` : ''}</span>`).join('');
+  return out || '<span class="hp0">持ち駒なし</span>';
+}
+
+/* ---------- graph ---------- */
+const GRF = {};
+function buildGraph(v) {
+  const host = R[v].graph, W = host.clientWidth, H = host.clientHeight;
+  if (!W || !H) return;
+  const mode = V[v].graph, padX = 8, top = 6, bot = 13, pw = W - padX * 2, ph = H - top - bot, mid = top + ph / 2;
+  const nv = (i) => (mode === 'cp' ? Math.max(-2000, Math.min(2000, cpOf(P[i]))) / 2000 : ((v === 'c' ? wrSelf(P[i]) : wrSente(P[i])) - 50) / 50);
+  const X = (i) => padX + (pw * i) / N, Y = (i) => top + (ph * (1 - nv(i))) / 2;
+  let d = '';
+  for (let i = 0; i <= N; i++) d += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(i).toFixed(1);
+  const area = `${d}L${X(N).toFixed(1)} ${mid}L${X(0).toFixed(1)} ${mid}Z`;
+  let tk = '', mk = '';
+  for (let t = 20; t <= N - 5; t += 20) tk += `<text class="g-tk" x="${X(t).toFixed(1)}" y="${H - 2}" text-anchor="middle">${t}</text>`;
+  P.forEach((p, i) => {
+    if (p.mark === '悪手') mk += `<circle class="g-bad" cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="4"/>`;
+    else if (p.mark === '疑問手' || p.missedTsume) mk += v === 'c'
+      ? `<rect class="g-dub" x="${(X(i) - 3.6).toFixed(1)}" y="${(Y(i) - 3.6).toFixed(1)}" width="7.2" height="7.2" transform="rotate(45 ${X(i).toFixed(1)} ${Y(i).toFixed(1)})"/>`
+      : `<circle class="g-dub" cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="3.4"/>`;
+  });
+  const lab = V[v].glab;
+  host.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <defs><clipPath id="gu-${v}"><rect x="0" y="0" width="${W}" height="${mid}"/></clipPath><clipPath id="gd-${v}"><rect x="0" y="${mid}" width="${W}" height="${H - mid}"/></clipPath></defs>
+    <path class="g-up" d="${area}" clip-path="url(#gu-${v})"/><path class="g-dn" d="${area}" clip-path="url(#gd-${v})"/>
+    <line class="g-mid" x1="${padX}" x2="${W - padX}" y1="${mid}" y2="${mid}"/>
+    <path class="g-ln" d="${d}"/>${mk}${tk}
+    ${lab[0] ? `<text class="g-lb" x="${padX}" y="${top + 7}">${lab[0]}</text><text class="g-lb" x="${padX}" y="${top + ph - 1}">${lab[1]}</text>` : `<text class="g-lb" x="${W - padX}" y="${mid - 3}" text-anchor="end">50%</text>`}
+    <line class="g-hov" y1="${top}" y2="${top + ph}" visibility="hidden"/>
+    <line class="g-cur" y1="${top}" y2="${top + ph}"/><circle class="g-dot" r="4.5"/>
+  </svg><div class="g-tip" hidden><b></b><span></span></div>`;
+  GRF[v] = { W, padX, pw, X, Y, cur: host.querySelector('.g-cur'), dot: host.querySelector('.g-dot'), hov: host.querySelector('.g-hov'), tip: host.querySelector('.g-tip') };
+  updateGraph(v);
+}
+function updateGraph(v) {
+  const g = GRF[v];
+  R[v].graph.setAttribute('aria-valuenow', S.ply);
+  if (!g) return;
+  const x = g.X(S.ply).toFixed(1);
+  g.cur.setAttribute('x1', x); g.cur.setAttribute('x2', x);
+  g.dot.setAttribute('cx', x); g.dot.setAttribute('cy', g.Y(S.ply).toFixed(1));
+}
+function bindGraph(v) {
+  const host = R[v].graph;
+  let drag = false;
+  const plyAt = (e) => {
+    const g = GRF[v]; if (!g) return S.ply;
+    const r = host.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * g.W;
+    return Math.max(0, Math.min(N, Math.round(((x - g.padX) / g.pw) * N)));
+  };
+  const hideHover = () => { const g = GRF[v]; if (!g) return; g.hov.setAttribute('visibility', 'hidden'); g.tip.hidden = true; };
+  host.addEventListener('pointerdown', (e) => { drag = true; try { host.setPointerCapture(e.pointerId); } catch (_) {} hideHover(); setPly(plyAt(e)); });
+  host.addEventListener('pointermove', (e) => {
+    if (drag) { setPly(plyAt(e)); return; }
+    const g = GRF[v]; if (!g || e.pointerType !== 'mouse') return;
+    const i = plyAt(e), x = g.X(i);
+    g.hov.setAttribute('x1', x); g.hov.setAttribute('x2', x); g.hov.setAttribute('visibility', 'visible');
+    g.tip.firstChild.textContent = evalTxt(P[i], v);
+    g.tip.lastChild.textContent = plyLabel(i) + (i ? ' ' + (V[v].zen ? P[i].move.ja : han(P[i].move.ja)) : '');
+    g.tip.style.left = Math.max(56, Math.min(g.W - 56, x)) + 'px';
+    g.tip.hidden = false;
+  });
+  const end = () => { drag = false; };
+  host.addEventListener('pointerup', end);
+  host.addEventListener('pointercancel', end);
+  host.addEventListener('pointerleave', hideHover);
+}
+
+/* ---------- per-variant rendering ---------- */
+const R = {};
+document.querySelectorAll('.screen').forEach((root) => {
+  const v = root.dataset.v, r = { root };
+  root.querySelectorAll('[data-b]').forEach((el) => { r[el.dataset.b] = el; });
+  R[v] = r;
+});
+
+function hintHTML(v, p) {
+  const pos = P[p];
+  if (p && pos.missedTsume && P[p - 1].tsume) {
+    return `<button type="button" class="hint" data-jump="${p - 1}" data-k="dub"><span>ここは</span><b>${pos.missedTsume}手詰め</b><span>がありました</span><span class="go">1手戻って見る ›</span></button>`;
+  }
+  if (!p || !pos.mark || pos.mark === '好手') return '';
+  const best = (P[p - 1].cands || [])[0];
+  if (!best || best.usi === pos.move.usi) return '';
+  return `<button type="button" class="hint" data-jump="${p - 1}" data-k="${MKC[pos.mark]}"><span>最善は</span><b>${mv(best.ja, v)}</b><span>${evalTxt(best, v)}</span><span class="go">1手戻って見る ›</span></button>`;
+}
+function tsumeHTML(v, p) {
+  const t = P[p].tsume;
+  if (!t) return '';
+  const n = v === 'a' ? ['', '一', '', '三'][t.len] + '手詰' : t.len + '手詰め';
+  return `<div class="tm"><b>詰みあり</b><span>${n}</span><i>${t.line.map((m) => mv(m.ja, v)).join(' ')}</i></div>`;
+}
+const pvTxt = (r, v) => (r.pv.length ? r.pv.map((m) => mv(m, v)).join(' ') : '');
+const endHTML = () => `<div class="end">終局　${endTxt}</div>`;
+
+function candsA(p) {
+  const rows = rowsFor(p);
+  let h = hintHTML('a', p) + tsumeHTML('a', p);
+  rows.forEach((r, i) => {
+    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? '一二三'[r.rank] : '譜'}</span><span class="mvx">${mv(r.ja, 'a')}${r.game && r.rank >= 0 ? '<em class="gm">本譜</em>' : ''}${r.mk}</span><span class="scx">${fmtCp(r.o)}</span><span class="pvx">${pvTxt(r, 'a')}</span></button>`;
+  });
+  if (lockedCount(p)) h += `<div class="lkr"><svg class="ic"><use href="#i-lock"/></svg><span>二番手・三番手は精密解析で表示されます</span><em>有料</em></div>`;
+  if (p === N) h += endHTML();
+  return h;
+}
+function candsB(p) {
+  const rows = rowsFor(p);
+  let h = hintHTML('b', p) + tsumeHTML('b', p);
+  rows.forEach((r, i) => {
+    const w = pct(wrSente(r.o));
+    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? r.rank + 1 : '–'}</span><span class="mvx">${mv(r.ja, 'b')}${r.game ? '<em class="gm">本譜</em>' : ''}${r.mk}</span><span class="scx"><b>${w}%</b><i>${fmtCp(r.o)}</i></span><span class="pvx">${pvTxt(r, 'b')}</span><span class="mt"><i style="width:${w}%"></i></span></button>`;
+  });
+  if (lockedCount(p)) h += `<div class="lkr"><svg class="ic"><use href="#i-lock"/></svg><span>候補手 2・3 は精密解析で表示されます</span><em>有料プラン</em></div>`;
+  if (p === N) h += endHTML();
+  return h;
+}
+function candsC(p) {
+  const rows = rowsFor(p), t = P[p].tsume;
+  let h = hintHTML('c', p);
+  if (t) h += `<div class="tm"><b>詰みがあります</b><span>${t.len}手</span><i>${t.line.map((m) => mv(m.ja, 'c')).join(' ')}</i></div>`;
+  const r = rows[S.sel];
+  if (r) {
+    const w = pct(wrSelf(r.o));
+    h += '<div class="cs"><div class="tbs">';
+    rows.forEach((x, i) => { h += `<button type="button" class="tbx${i === S.sel ? ' on' : ''}" data-cand="${i}">${x.rank === 0 ? 'おすすめ' : x.rank > 0 ? x.rank + 1 + '位' : '本譜'}</button>`; });
+    if (lockedCount(p)) h += `<span class="tbx lk"><svg class="ic"><use href="#i-lock"/></svg>2位・3位は精密解析で</span>`;
+    h += `</div><div class="bc"><span class="m">${mv(r.ja, 'c')}${r.game && r.rank >= 0 ? '<u>本譜</u>' : ''}${r.mk}</span><span class="p">${pvTxt(r, 'c') || '　'}</span><span class="w" style="background:conic-gradient(var(--you) 0 ${w}%, var(--opp) 0)"><b>${w}%</b><span>勝率</span></span></div></div>`;
+  }
+  if (p === N) h += `<div class="end">${winnerSide === SELF ? 'あなたの勝ち！' : '相手の勝ち'}（${esc(M.endReason)}）</div>`;
+  return h;
+}
+function movesHTML(v) {
+  let h = '';
+  for (let i = 0; i <= N; i++) {
+    const p = P[i];
+    h += `<button type="button" class="mr" data-ply="${i}"><span class="mn">${i || ''}</span><span class="mm">${i ? mv(p.move.ja, v) : '開始局面'}</span><span>${marksOf(p)}</span><span class="me2">${evalTxt(p, v)}</span></button>`;
+  }
+  return h;
+}
+function aiHTML(v) {
+  if (S.plan === 'free') return `<div class="lk"><svg class="ic"><use href="#i-lock"/></svg><b>AI対局解説は有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で解説します。続けてチャットで質問できます。</span></div>`;
+  const km = P.map((p, i) => ({ p, i })).filter((o) => o.p.mark === '悪手' || o.p.mark === '疑問手').sort((x, y) => (y.p.loss || 0) - (x.p.loss || 0)).slice(0, 3).sort((x, y) => x.i - y.i);
+  let h = `<div class="aih"><b>この対局の要点</b><span>サンプル</span></div>`;
+  km.forEach((o) => {
+    const best = (P[o.i - 1].cands || [])[0];
+    const alt = best && best.usi !== o.p.move.usi ? `代わりに ${mv(best.ja, v)} が有力でした。` : '';
+    h += `<button type="button" class="aik" data-jump="${o.i}"><i>${o.i}手目</i><b>${mv(o.p.move.ja, v)}</b>${markHTML(o.p.mark)}<span>${alt}</span></button>`;
+  });
+  return h + `<p class="ain">文章での解説とチャットは、次のステップで作ります。</p>`;
+}
+
+function ensureVisible(box, row) {
+  if (!box || !row || !box.clientHeight || !row.offsetParent) return;
+  const b = box.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (r.top < b.top + 4) box.scrollTop += r.top - b.top - 40;
+  else if (r.bottom > b.bottom - 4) box.scrollTop += r.bottom - b.bottom + 40;
+}
+function markCurrent(v) {
+  const list = R[v].moves, old = list.querySelector('.mr.cur'), row = list.children[S.ply];
+  if (old) old.classList.remove('cur');
+  if (row) { row.classList.add('cur'); ensureVisible(v === 'c' ? R.c.shc : R[v].root.querySelector('.pn'), row); }
+}
+function renderCands(v) {
+  const rows = rowsFor(S.ply);
+  if (S.sel >= rows.length) S.sel = 0;
+  R[v].cands.innerHTML = v === 'a' ? candsA(S.ply) : v === 'b' ? candsB(S.ply) : candsC(S.ply);
+  const sel = rows[S.sel];
+  R[v].board.innerHTML = boardSVG(v, S.ply, sel ? sel.c : null);
+}
+function renderPly() {
+  const p = S.ply, pos = P[p];
+  for (const v of ['a', 'b', 'c']) {
+    const r = R[v];
+    r.root.dataset.turn = p === N ? '-' : turnOf(p);
+    r.ghand.innerHTML = handHTML(POS[p].hands.g);
+    r.shand.innerHTML = handHTML(POS[p].hands.s);
+    r.plyno.textContent = plyLabel(p);
+    r.move.textContent = pos.move ? (V[v].zen ? pos.move.ja : han(pos.move.ja)) : '';
+    r.mark.innerHTML = marksOf(pos);
+    renderCands(v);
+    updateGraph(v);
+    markCurrent(v);
+  }
+  R.a.num.textContent = p === N ? '' : fmtCp(pos);
+  R.a.jd.textContent = p === N ? endTxt : judgeTxt(pos);
+  R.b.num.textContent = p === N ? '' : pct(wrSente(pos)) + '%';
+  R.b.cp.textContent = p === N ? '' : fmtCp(pos);
+  R.b.jd.textContent = p === N ? endTxt : judgeTxt(pos);
+  const w = pct(wrSelf(pos)), j = judge(pos);
+  R.c.bary.style.width = w + '%';
+  R.c.barl.textContent = w + '%';
+  R.c.barr.textContent = 100 - w + '%';
+  R.c.bar.setAttribute('aria-label', `あなたの勝率 ${w}%`);
+  const who = j.lv ? (j.side === SELF ? 'you' : 'opp') : 'even';
+  R.c.jg.dataset.who = p === N ? (winnerSide === SELF ? 'you' : 'opp') : who;
+  R.c.jg.textContent = p === N ? (winnerSide === SELF ? 'あなたの勝ち' : '相手の勝ち') : who === 'even' ? 'ほぼ互角' : (who === 'you' ? 'あなたが' : '相手が') + JN[j.lv];
+}
+function renderPlan() {
+  document.body.dataset.plan = S.plan;
+  document.querySelectorAll('[data-plan]').forEach((b) => { if (b.tagName === 'BUTTON') b.setAttribute('aria-pressed', String(b.dataset.plan === S.plan)); });
+  const paid = S.plan === 'paid';
+  R.a.kind.textContent = paid ? '精密解析' : '通常解析';
+  R.b.kind.textContent = paid ? '精密解析（1手1.5秒・候補3手）の結果' : '通常解析（1手0.5秒・候補1手）の結果';
+  for (const v of ['a', 'b', 'c']) { R[v].ai.innerHTML = aiHTML(v); renderCands(v); }
+}
+function renderTabs(v) {
+  const r = R[v].root, t = S.tab[v];
+  r.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+  r.querySelectorAll('[data-pane]').forEach((el) => { el.hidden = el.dataset.pane !== t; });
+  if (t === 'kf') markCurrent(v);
+}
+function renderSheet() {
+  const r = R.c;
+  r.sheet.hidden = !S.sheet;
+  if (!S.sheet) return;
+  r.shtitle.textContent = S.sheet === 'kf' ? '棋譜' : 'AIに聞く';
+  r.moves.hidden = S.sheet !== 'kf';
+  r.ai.hidden = S.sheet !== 'ai';
+  r.shc.scrollTop = 0;
+  if (S.sheet === 'kf') markCurrent('c');
+}
+function setPly(p) {
+  p = Math.max(0, Math.min(N, p));
+  if (p === S.ply) return;
+  S.ply = p; S.sel = 0;
+  renderPly();
+}
+
+/* ---------- static content ---------- */
+const [yy, mm, dd] = M.date.split('-').map(Number);
+const tags = (t) => [...t.strategy.slice(-1), ...t.castle.slice(0, 1)].join('・');
+const selfWon = winnerSide === SELF;
+R.a.title.textContent = `${M.sente} 対 ${M.gote}`;
+R.a.sub.textContent = `${yy}年${mm}月${dd}日・${N}手で${winnerSide === 's' ? '先手' : '後手'}の勝ち`;
+R.b.title.textContent = `${M.sente} vs ${M.gote}`;
+R.b.res.textContent = selfWon ? '勝ち' : '負け';
+R.c.sub.textContent = `${M.sente} vs ${M.gote}・${N}手`;
+for (const v of ['a', 'b', 'c']) {
+  const r = R[v];
+  r.gname.textContent = M.gote; r.sname.textContent = M.sente;
+  r.gtags.textContent = tags(M.tags.gote); r.stags.textContent = tags(M.tags.sente);
+  r.root.querySelector(`.pl[data-side="${SELF}"]`).setAttribute('data-me', '');
+  r.moves.innerHTML = movesHTML(v);
+  r.graph.setAttribute('aria-valuemax', N);
+  bindGraph(v);
+}
+
+/* ---------- events ---------- */
+document.querySelectorAll('.screen').forEach((root) => {
+  const v = root.dataset.v;
+  root.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-act],[data-tab],[data-cand],[data-ply],[data-jump],[data-open],[data-close]');
+    if (!t || !root.contains(t)) return;
+    const d = t.dataset;
+    if (d.act) setPly(d.act === 'first' ? 0 : d.act === 'last' ? N : S.ply + (d.act === 'next' ? 1 : -1));
+    else if (d.tab) { S.tab[v] = d.tab; renderTabs(v); }
+    else if (d.cand != null) { S.sel = +d.cand; for (const k of ['a', 'b', 'c']) renderCands(k); }
+    else if (d.ply != null) setPly(+d.ply);
+    else if (d.jump != null) { S.sheet = null; renderSheet(); setPly(+d.jump); }
+    else if (d.open) { S.sheet = d.open; renderSheet(); }
+    else if ('close' in d) { S.sheet = null; renderSheet(); }
+  });
+});
+document.querySelector('.pg-ctl').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.plan) { S.plan = b.dataset.plan; renderPlan(); }
+  if (b.dataset.view) setView(b.dataset.view);
+});
+function setView(v) {
+  document.body.dataset.view = v;
+  document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+  try { localStorage.setItem('kifumate-mock-view', v); } catch (_) {}
+}
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k === 'ArrowLeft') setPly(S.ply - 1);
+  else if (k === 'ArrowRight') setPly(S.ply + 1);
+  else if (k === 'Home') setPly(0);
+  else if (k === 'End') setPly(N);
+  else return;
+  e.preventDefault();
+});
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver((es) => { for (const en of es) buildGraph(en.target.closest('.screen').dataset.v); });
+  for (const v of ['a', 'b', 'c']) ro.observe(R[v].graph);
+}
+
+/* ---------- start ---------- */
+let view = 'a';
+try { view = localStorage.getItem('kifumate-mock-view') || 'a'; } catch (_) {}
+setView(['a', 'b', 'c'].includes(view) ? view : 'a');
+let start = P.findIndex((p, i) => i > 30 && p.mark === '悪手' && (i % 2 === 1) === (SELF === 's'));
+if (start < 0) start = P.findIndex((p, i) => i > 30 && p.mark === '悪手');
+if (start < 0) start = Math.round(N * 0.55);
+S.ply = start;
+renderPlan();
+renderPly();
+for (const v of ['a', 'b', 'c']) buildGraph(v);
+})();
+</script>

@@ -300,20 +300,19 @@ body[data-plan="paid"] .lki{display:none}
 .vc .rb{width:34px;height:34px;flex:none;border-radius:50%;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);display:grid;place-items:center}
 .vc .rb:active{transform:translateY(2px);box-shadow:none}
 .vc .rb .ic{width:17px;height:17px;stroke-width:2.4}
-.vc .hd{flex:none;height:46px;display:flex;align-items:center;gap:8px;padding:0 12px}
+.vc .hd{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 12px}
 .vc .ttl{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .vc .ttl b{font:900 16px/1.2 var(--f-maru)}
 .vc .ttl span{font:500 10.5px/1.2 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vc .jg{flex:none;font:900 12px/1 var(--f-maru);padding:6px 10px;border:var(--ol);border-radius:99px;background:#fff;box-shadow:0 2px 0 var(--ink);transform:rotate(-2deg)}
 .vc .jg[data-who="you"]{background:var(--you)}
 .vc .jg[data-who="opp"]{background:var(--opp)}
-.vc .bar{flex:none;position:relative;height:26px;margin:0 12px 4px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
+.vc .barw{flex:none;display:flex;align-items:center;gap:8px;height:24px;margin:0 14px 4px;font:700 11px/1 var(--f-maru);white-space:nowrap}
+.vc .barw b{display:inline-block;min-width:2.3em;font:900 13px/1 var(--f-maru);font-variant-numeric:tabular-nums}
+.vc .barw .l b{text-align:right}
+.vc .bar{flex:1;min-width:0;position:relative;height:20px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
 .vc .bar .y{position:absolute;left:0;top:0;bottom:0;background:var(--you);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
-.vc .bar .l,.vc .bar .r{position:absolute;top:0;bottom:0;display:flex;align-items:center;gap:5px;font:700 11px/1 var(--f-maru)}
-.vc .bar .l{left:11px}
-.vc .bar .r{right:11px}
-.vc .bar b{font:900 13px/1 var(--f-maru)}
-.vc .pl{flex:none;height:28px;display:flex;align-items:center;gap:6px;padding:0 14px}
+.vc .pl{flex:none;height:26px;display:flex;align-items:center;gap:6px;padding:0 14px}
 .vc .pl .av{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:10px;line-height:1;background:var(--opp)}
 .vc .pl[data-me] .av{background:var(--you)}
 .vc .pl .nm{font:700 12.5px/1 var(--f-maru);white-space:nowrap}
@@ -323,7 +322,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .hp i{clip-path:none;width:20px;height:20px;padding:0;border:1.5px solid var(--ink);border-radius:6px;background:#C9D8FF;font:900 11px/1 var(--f-maru)}
 .vc .pl[data-me] .hp i{background:#fff}
 .vc .hp b{font:700 10px/1 var(--f-maru);padding-bottom:3px}
-.vc .ct{flex:none;display:grid;grid-template-columns:36px 36px 1fr 36px 36px;gap:7px;align-items:center;padding:4px 12px 8px}
+.vc .ct{flex:none;display:grid;grid-template-columns:36px 36px 1fr 36px 36px;gap:7px;align-items:center;padding:3px 12px 7px}
 .vc .ct .rb{width:36px;height:36px}
 .vc .now{position:relative;height:36px;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;border-radius:99px;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);white-space:nowrap}
 .vc .now:active{transform:translateY(2px);box-shadow:none}
@@ -334,35 +333,33 @@ body[data-plan="paid"] .lki{display:none}
 .vc .mk{display:inline-block;font:900 10.5px/1 var(--f-maru);padding:3px 7px;border:1.5px solid var(--ink);border-radius:8px;background:var(--coral);color:var(--ink);transform:rotate(5deg)}
 .vc .mk-dub{background:var(--orange)}
 .vc .mk-good{background:var(--mint)}
-.vc .pn{padding:0 12px 6px;display:flex;flex-direction:column;gap:8px}
+.vc .pn{padding:0 12px 4px;display:flex;flex-direction:column;gap:6px}
 .vc .pn > *{flex:none}
-.vc .cds{display:flex;flex-direction:column;gap:8px}
-.vc .bc{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:7px 10px 8px 12px;background:#fff;border:var(--ol);border-radius:16px;box-shadow:var(--sh)}
-.vc .bc .k{display:flex;align-items:center;gap:6px;font:700 10.5px/1.3 var(--f-maru);color:var(--ink2)}
-.vc .bc .k u{text-decoration:none;font:900 9.5px/1 var(--f-maru);color:var(--ink);border:1.5px solid var(--ink);border-radius:99px;padding:2px 6px}
+.vc .cds{display:flex;flex-direction:column;gap:6px}
+.vc .bc{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:5px 9px 6px 12px;background:#fff;border:var(--ol);border-radius:16px;box-shadow:var(--sh)}
+.vc .bc .m u{text-decoration:none;font:900 9.5px/1 var(--f-maru);color:var(--ink);border:1.5px solid var(--ink);border-radius:99px;padding:2px 6px}
 .vc .bc .m{display:flex;align-items:center;gap:8px;min-width:0;font:900 21px/1.25 var(--f-maru)}
 .vc .bc .p{min-width:0;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.vc .bc .w{grid-column:2;grid-row:1/4;width:54px;height:54px;border-radius:50%;border:var(--ol);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
-.vc .bc .w b{font:900 16px/1 var(--f-maru)}
+.vc .bc .w{grid-column:2;grid-row:1/3;width:46px;height:46px;border-radius:50%;border:var(--ol);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.vc .bc .w b{font:900 15px/1 var(--f-maru)}
 .vc .bc .w span{font:700 9px/1 var(--f-maru)}
-.vc .chs{display:flex;gap:7px}
-.vc .chip{flex:1;min-width:0;height:32px;display:flex;align-items:center;justify-content:center;gap:4px;padding:0 6px;border:var(--ol);border-radius:99px;background:#fff;box-shadow:0 2px 0 var(--ink);font:700 12px/1 var(--f-maru);white-space:nowrap;overflow:hidden}
-.vc .chip i{font:900 10px/1 var(--f-maru);color:var(--ink2)}
-.vc .chip.on{background:var(--you)}
-.vc .chip.lk{flex:2.2;gap:6px;color:var(--ink2);background:transparent;border-style:dashed;box-shadow:none;font-size:11px}
-.vc .chip.lk .ic{width:13px;height:13px;stroke-width:2.2}
-.vc .hint{display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border:var(--ol);border-radius:12px;background:#FFE1DE;text-align:left;font:700 11.5px/1.3 var(--f-maru);white-space:nowrap}
+.vc .tbs{display:flex;align-items:flex-end;gap:4px;padding-left:16px;position:relative;z-index:1;margin-bottom:-2px}
+.vc .tbx{height:24px;display:flex;align-items:center;gap:4px;padding:0 10px;border:var(--ol);border-radius:10px 10px 0 0;background:#FFE9A8;font:900 11px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
+.vc .tbx.on{height:27px;background:#fff;color:var(--ink);border-bottom-color:#fff}
+.vc .tbx.lk{border-style:dashed;border-bottom-style:solid;background:transparent;font-weight:700;font-size:10.5px}
+.vc .tbx.lk .ic{width:12px;height:12px;stroke-width:2.2}
+.vc .hint{display:flex;align-items:center;gap:7px;width:100%;padding:5px 10px;border:var(--ol);border-radius:12px;background:#FFE1DE;text-align:left;font:700 11.5px/1.3 var(--f-maru);white-space:nowrap}
 .vc .hint[data-k="dub"]{background:#FFECD3}
 .vc .hint b{font-weight:900;font-size:13px}
 .vc .hint .go{margin-left:auto;font-weight:900}
-.vc .tm{padding:8px 12px;border:var(--ol);border-radius:12px;background:var(--mint);display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.vc .tm{padding:6px 12px;border:var(--ol);border-radius:12px;background:var(--mint);display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
 .vc .tm b{font:900 12.5px/1 var(--f-maru)}
 .vc .tm span{font:900 12.5px/1 var(--f-maru)}
 .vc .tm i{font:700 12px/1.4 var(--f-maru)}
 .vc .end{padding:12px 14px;background:#fff;border:var(--ol);border-radius:16px;box-shadow:var(--sh);font:900 15px/1.5 var(--f-maru)}
-.vc .dock{flex:none;display:flex;align-items:center;gap:9px;padding:4px 12px 12px}
+.vc .dock{flex:none;display:flex;align-items:center;gap:9px;padding:3px 12px 11px}
 .vc .gc{flex:1;min-width:0;padding:3px 3px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
-.vc .gr{height:54px}
+.vc .gr{height:46px}
 .vc .g-up{fill:#FFE27A}
 .vc .g-dn{fill:#C3D3FF}
 .vc .g-mid{stroke:var(--ink);opacity:.25}
@@ -577,7 +574,7 @@ body[data-plan="paid"] .lki{display:none}
           <span class="jg" data-b="jg"></span>
           <button type="button" class="rb" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
         </header>
-        <div class="bar" role="img" data-b="bar"><span class="y" data-b="bary"></span><span class="l">あなた<b data-b="barl"></b></span><span class="r"><b data-b="barr"></b>相手</span></div>
+        <div class="barw" role="img" data-b="bar"><span class="l">あなた<b data-b="barl"></b></span><span class="bar"><span class="y" data-b="bary"></span></span><span class="r"><b data-b="barr"></b>相手</span></div>
         <div class="pl" data-side="g"><span class="av">☖</span><span class="nm" data-b="gname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="gtags"></span><span class="hand" data-b="ghand"></span></div>
         <div class="bdw" data-b="board"></div>
         <div class="pl" data-side="s"><span class="av">☗</span><span class="nm" data-b="sname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="stags"></span><span class="hand" data-b="shand"></span></div>
@@ -606,7 +603,7 @@ body[data-plan="paid"] .lki{display:none}
       <div class="cap">
         <dl>
           <dt>色と形</dt><dd>太い輪郭と明るい黄・青。相手の駒には青みを付け、向き以外でも見分けられる。</dd>
-          <dt>構成</dt><dd>最上部に形勢バー。盤の下は「おすすめの一手」を主役にし、最下段にグラフとAIボタンを固定。棋譜とAI解説は下から出るシートで開く。</dd>
+          <dt>構成</dt><dd>最上部に形勢バー。盤の下は「おすすめ」の一手を主役にし、2位・3位・本譜は見出しのタブで切り替える。最下段にグラフとAIボタンを固定し、棋譜とAI解説は下から出るシートで開く。</dd>
           <dt>形勢</dt><dd>あなた基準の勝率と「やや有利」などの言葉。</dd>
         </dl>
       </div>
@@ -654,6 +651,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const han = (s) => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 const mv = (ja, v) => esc(V[v].zen ? ja : han(ja));
 const markHTML = (m) => (m ? `<em class="mk mk-${MKC[m]}">${m}</em>` : '');
+const marksOf = (p) => markHTML(p.mark) + (p.missedTsume ? '<em class="mk mk-dub">詰み逃し</em>' : '');
 const cpOf = (o) => (o.mate != null ? (o.mate > 0 ? 3000 : -3000) : o.cp);
 const wrSelf = (o) => { const w = 100 / (1 + Math.exp(-cpOf(o) / 600)); return SELF === 's' ? w : 100 - w; };
 const wrSente = (o) => 100 / (1 + Math.exp(-cpOf(o) / 600));
@@ -701,12 +699,12 @@ function rowsFor(p) {
   const vis = S.plan === 'paid' ? all.slice(0, 3) : all.slice(0, 1);
   const rows = vis.map((c, i) => {
     const game = !!nx && nx.move.usi === c.usi;
-    return { rank: i, c, game, pv: (c.pv || []).slice(1), o: c, ja: c.ja, mark: game ? nx.mark : null };
+    return { rank: i, c, game, pv: (c.pv || []).slice(1), o: c, ja: c.ja, mk: game ? marksOf(nx) : '' };
   });
   if (nx && !rows.some((r) => r.game)) {
     const pv = [];
     for (let k = p + 2; k <= Math.min(N, p + 6); k++) pv.push(P[k].move.ja);
-    rows.push({ rank: -1, c: nx.move, game: true, pv, o: nx, ja: nx.move.ja, mark: nx.mark });
+    rows.push({ rank: -1, c: nx.move, game: true, pv, o: nx, ja: nx.move.ja, mk: marksOf(nx) });
   }
   return rows;
 }
@@ -779,7 +777,7 @@ function buildGraph(v) {
   for (let t = 20; t <= N - 5; t += 20) tk += `<text class="g-tk" x="${X(t).toFixed(1)}" y="${H - 2}" text-anchor="middle">${t}</text>`;
   P.forEach((p, i) => {
     if (p.mark === '悪手') mk += `<circle class="g-bad" cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="4"/>`;
-    else if (p.mark === '疑問手') mk += v === 'c'
+    else if (p.mark === '疑問手' || p.missedTsume) mk += v === 'c'
       ? `<rect class="g-dub" x="${(X(i) - 3.6).toFixed(1)}" y="${(Y(i) - 3.6).toFixed(1)}" width="7.2" height="7.2" transform="rotate(45 ${X(i).toFixed(1)} ${Y(i).toFixed(1)})"/>`
       : `<circle class="g-dub" cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="3.4"/>`;
   });
@@ -841,6 +839,9 @@ document.querySelectorAll('.screen').forEach((root) => {
 
 function hintHTML(v, p) {
   const pos = P[p];
+  if (p && pos.missedTsume && P[p - 1].tsume) {
+    return `<button type="button" class="hint" data-jump="${p - 1}" data-k="dub"><span>ここは</span><b>${pos.missedTsume}手詰め</b><span>がありました</span><span class="go">1手戻って見る ›</span></button>`;
+  }
   if (!p || !pos.mark || pos.mark === '好手') return '';
   const best = (P[p - 1].cands || [])[0];
   if (!best || best.usi === pos.move.usi) return '';
@@ -859,7 +860,7 @@ function candsA(p) {
   const rows = rowsFor(p);
   let h = hintHTML('a', p) + tsumeHTML('a', p);
   rows.forEach((r, i) => {
-    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? '一二三'[r.rank] : '譜'}</span><span class="mvx">${mv(r.ja, 'a')}${r.game && r.rank >= 0 ? '<em class="gm">本譜</em>' : ''}${markHTML(r.mark)}</span><span class="scx">${fmtCp(r.o)}</span><span class="pvx">${pvTxt(r, 'a')}</span></button>`;
+    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? '一二三'[r.rank] : '譜'}</span><span class="mvx">${mv(r.ja, 'a')}${r.game && r.rank >= 0 ? '<em class="gm">本譜</em>' : ''}${r.mk}</span><span class="scx">${fmtCp(r.o)}</span><span class="pvx">${pvTxt(r, 'a')}</span></button>`;
   });
   if (lockedCount(p)) h += `<div class="lkr"><svg class="ic"><use href="#i-lock"/></svg><span>二番手・三番手は精密解析で表示されます</span><em>有料</em></div>`;
   if (p === N) h += endHTML();
@@ -870,7 +871,7 @@ function candsB(p) {
   let h = hintHTML('b', p) + tsumeHTML('b', p);
   rows.forEach((r, i) => {
     const w = pct(wrSente(r.o));
-    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? r.rank + 1 : '–'}</span><span class="mvx">${mv(r.ja, 'b')}${r.game ? '<em class="gm">本譜</em>' : ''}${markHTML(r.mark)}</span><span class="scx"><b>${w}%</b><i>${fmtCp(r.o)}</i></span><span class="pvx">${pvTxt(r, 'b')}</span><span class="mt"><i style="width:${w}%"></i></span></button>`;
+    h += `<button type="button" class="cd${i === S.sel ? ' on' : ''}" data-cand="${i}"><span class="rk">${r.rank >= 0 ? r.rank + 1 : '–'}</span><span class="mvx">${mv(r.ja, 'b')}${r.game ? '<em class="gm">本譜</em>' : ''}${r.mk}</span><span class="scx"><b>${w}%</b><i>${fmtCp(r.o)}</i></span><span class="pvx">${pvTxt(r, 'b')}</span><span class="mt"><i style="width:${w}%"></i></span></button>`;
   });
   if (lockedCount(p)) h += `<div class="lkr"><svg class="ic"><use href="#i-lock"/></svg><span>候補手 2・3 は精密解析で表示されます</span><em>有料プラン</em></div>`;
   if (p === N) h += endHTML();
@@ -883,12 +884,10 @@ function candsC(p) {
   const r = rows[S.sel];
   if (r) {
     const w = pct(wrSelf(r.o));
-    const k = r.rank === 0 ? 'つぎの一手・おすすめ' : r.rank > 0 ? `${r.rank + 1}番めの候補` : '本譜の手';
-    h += `<div class="bc"><span class="k">${k}${r.game && r.rank >= 0 ? '<u>本譜</u>' : ''}</span><span class="m">${mv(r.ja, 'c')}${markHTML(r.mark)}</span><span class="p">${pvTxt(r, 'c') || '　'}</span><span class="w" style="background:conic-gradient(var(--you) 0 ${w}%, var(--opp) 0)"><b>${w}%</b><span>勝率</span></span></div>`;
-    h += '<div class="chs">';
-    rows.forEach((x, i) => { h += `<button type="button" class="chip${i === S.sel ? ' on' : ''}" data-cand="${i}"><i>${x.rank >= 0 ? x.rank + 1 + '位' : '本譜'}</i>${mv(x.ja, 'c')}</button>`; });
-    if (lockedCount(p)) h += `<span class="chip lk"><svg class="ic"><use href="#i-lock"/></svg>2位・3位は精密解析で</span>`;
-    h += '</div>';
+    h += '<div class="cs"><div class="tbs">';
+    rows.forEach((x, i) => { h += `<button type="button" class="tbx${i === S.sel ? ' on' : ''}" data-cand="${i}">${x.rank === 0 ? 'おすすめ' : x.rank > 0 ? x.rank + 1 + '位' : '本譜'}</button>`; });
+    if (lockedCount(p)) h += `<span class="tbx lk"><svg class="ic"><use href="#i-lock"/></svg>2位・3位は精密解析で</span>`;
+    h += `</div><div class="bc"><span class="m">${mv(r.ja, 'c')}${r.game && r.rank >= 0 ? '<u>本譜</u>' : ''}${r.mk}</span><span class="p">${pvTxt(r, 'c') || '　'}</span><span class="w" style="background:conic-gradient(var(--you) 0 ${w}%, var(--opp) 0)"><b>${w}%</b><span>勝率</span></span></div></div>`;
   }
   if (p === N) h += `<div class="end">${winnerSide === SELF ? 'あなたの勝ち！' : '相手の勝ち'}（${esc(M.endReason)}）</div>`;
   return h;
@@ -897,7 +896,7 @@ function movesHTML(v) {
   let h = '';
   for (let i = 0; i <= N; i++) {
     const p = P[i];
-    h += `<button type="button" class="mr" data-ply="${i}"><span class="mn">${i || ''}</span><span class="mm">${i ? mv(p.move.ja, v) : '開始局面'}</span><span>${markHTML(p.mark)}</span><span class="me2">${evalTxt(p, v)}</span></button>`;
+    h += `<button type="button" class="mr" data-ply="${i}"><span class="mn">${i || ''}</span><span class="mm">${i ? mv(p.move.ja, v) : '開始局面'}</span><span>${marksOf(p)}</span><span class="me2">${evalTxt(p, v)}</span></button>`;
   }
   return h;
 }
@@ -940,15 +939,15 @@ function renderPly() {
     r.shand.innerHTML = handHTML(POS[p].hands.s);
     r.plyno.textContent = plyLabel(p);
     r.move.textContent = pos.move ? (V[v].zen ? pos.move.ja : han(pos.move.ja)) : '';
-    r.mark.innerHTML = markHTML(pos.mark);
+    r.mark.innerHTML = marksOf(pos);
     renderCands(v);
     updateGraph(v);
     markCurrent(v);
   }
-  R.a.num.textContent = fmtCp(pos);
+  R.a.num.textContent = p === N ? '' : fmtCp(pos);
   R.a.jd.textContent = p === N ? endTxt : judgeTxt(pos);
-  R.b.num.textContent = pct(wrSente(pos)) + '%';
-  R.b.cp.textContent = fmtCp(pos);
+  R.b.num.textContent = p === N ? '' : pct(wrSente(pos)) + '%';
+  R.b.cp.textContent = p === N ? '' : fmtCp(pos);
   R.b.jd.textContent = p === N ? endTxt : judgeTxt(pos);
   const w = pct(wrSelf(pos)), j = judge(pos);
   R.c.bary.style.width = w + '%';
