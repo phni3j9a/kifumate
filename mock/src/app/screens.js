@@ -385,7 +385,7 @@ function settingsTab() {
     <h3 class="st">データ</h3>
     <div class="cd">${row('backup', 'i-box', 'バックアップと復元', '機種変更のときはここから')}</div>
     <h3 class="st">このアプリ</h3>
-    <div class="cd"><button type="button" class="rw" data-a="replay"><span class="ri"><svg class="ic"><use href="#i-play"/></svg></span><span class="rx"><b>使い方をもう一度見る</b><span>はじめの紹介を最初から</span></span><svg class="ic"><use href="#i-next"/></svg></button>${row('about', 'i-info', 'このアプリについて', 'バージョン・ライセンス')}</div></div>`;
+    <div class="cd"><button type="button" class="rw" data-a="replay"><span class="ri"><svg class="ic"><use href="#i-play"/></svg></span><span class="rx"><b>使い方をもう一度見る</b><span>はじめの紹介を最初から</span></span><svg class="ic"><use href="#i-next"/></svg></button>${row('about', 'i-info', 'このアプリについて', '利用規約・ライセンス')}</div></div>`;
 }
 function namesPage() {
   return { title: '自分の対局者名', html: `<div class="pgc"><p class="hint" style="margin:0 4px 10px">棋譜に書かれた対局者名と照らし合わせて、あなたが先手か後手か、勝ったか負けたかを判定します。名前はいくつでも登録できます。この端末の中だけで使い、サーバーには送りません。</p>
@@ -449,8 +449,7 @@ A.restorebuy = () => {
 A.subscribe = () => { DB.plan = 'paid'; syncPlan(); toast('有料プランに登録しました（モック）'); };
 function aboutPage() {
   const lnk = (t, v) => `<button type="button" class="rw" data-a="toast" data-v="${v}"><span class="rx"><b>${t}</b></span><svg class="ic"><use href="#i-next"/></svg></button>`;
-  return { title: 'このアプリについて', html: `<div class="pgc"><div class="abt">${pic('app-icon', 'abic')}<div><b>kifumate</b><span>棋譜の記録と振り返り</span></div></div><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>データの保存</i><span>この端末の中だけ</span><i>棋譜の解析</i><span>サーバーで行います</span><i>サーバーに送るもの</i><span>解析する対局の指し手と、AIコーチに使う解析結果・学習プロフィール</span><i>送らないもの</i><span>対局者名</span></div>
-    <div class="cd" style="margin-top:12px">${lnk('利用規約', '利用規約のページを開きます（モック）')}${lnk('プライバシーポリシー', 'プライバシーポリシーのページを開きます（モック）')}${lnk('お問い合わせ', 'お問い合わせのページを開きます（モック）')}<button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>このアプリに含まれるソフトウェア</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
+  return { title: 'このアプリについて', html: `<div class="pgc"><div class="abt">${pic('app-icon', 'abic')}<div><b>kifumate</b><span>棋譜の記録と振り返り</span></div></div><div class="cd">${lnk('利用規約', '利用規約のページを開きます（モック）')}${lnk('プライバシーポリシー', 'プライバシーポリシーのページを開きます（モック）')}${lnk('お問い合わせ', 'お問い合わせのページを開きます（モック）')}<button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>このアプリに含まれるソフトウェア</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
 }
 /* record details: who you are in it, and the strategy and castle tags with manual correction */
 function infoPage(t) {
