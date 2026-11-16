@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""マスコット素材集（kifumate-mascot-kit）から、モックで使う分だけを小さくして assets/mascot に書き出す。
+"""マスコット素材集（リポジトリ直下の assets/mascot-kit）から、モックで使う分だけを小さくして
+mock/assets/mascot に書き出す。
 
-  python3 -I mock/tools/make_mascot.py <素材集を展開したフォルダ>
+  python3 mock/tools/make_mascot.py [素材集のフォルダ]
 
-元の素材集（1024px のPNG・約29MB）はリポジトリに入れていない。ここで作るのは、モックの画面に
-実際に置く大きさに合わせた WebP（透過あり）で、build.py がページに埋め込む。
+素材集は 1024px のPNG（約29MB）。ここで作るのは、モックの画面に実際に置く大きさに合わせた
+WebP（透過あり）で、build.py がページに埋め込む。
 余白を切り詰めてから縮小するので、画面側は「高さを決めて置く」だけでよい。
 """
 import pathlib
@@ -46,9 +47,7 @@ USE = {
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        raise SystemExit(__doc__)
-    kit = pathlib.Path(sys.argv[1])
+    kit = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / "assets" / "mascot-kit"
     OUT.mkdir(parents=True, exist_ok=True)
     total = 0
     for name, (rel, size) in USE.items():
