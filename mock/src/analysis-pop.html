@@ -88,8 +88,8 @@ body[data-plan="paid"] .lki{display:none}
 .vc .jg{flex:none;font:900 10.5px/1 var(--f-maru);padding:2px 8px 3px;border:1.5px solid var(--ink);border-radius:99px;background:#fff}
 .vc .jg[data-who="you"]{background:var(--you)}
 .vc .jg[data-who="opp"]{background:var(--opp)}
-.vc .bar{position:relative;height:13px;border:var(--ol);border-radius:99px;background:var(--you);overflow:hidden}
-.vc .bar .o{position:absolute;left:0;top:0;bottom:0;background:var(--opp);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
+.vc .bar{position:relative;height:13px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
+.vc .bar .y{position:absolute;left:0;top:0;bottom:0;background:var(--you);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
 .vc .bar .nt{position:absolute;left:50%;top:0;bottom:0;margin-left:-1px;border-left:2px dotted rgba(36,40,70,.5)}
 
 /* names sit above (opponent, left) and below (you, right) the board; only the piece stands are beside it */
@@ -294,7 +294,7 @@ body[data-plan="paid"] .lki{display:none}
   .notes{padding-block:18px 26px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 }
 @media (prefers-reduced-motion:reduce){
-  .vc .bar .o{transition:none}
+  .vc .bar .y{transition:none}
   .vc .shb{animation:none}
 }
 </style>
@@ -333,8 +333,8 @@ body[data-plan="paid"] .lki{display:none}
       <header class="hd">
         <button type="button" class="rb" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
         <div class="wr" role="img" data-b="bar">
-          <div class="wl"><span class="l">相手<b data-b="oppp"></b></span><span class="jg" data-b="jg"></span><span class="r"><b data-b="youp"></b>あなた</span></div>
-          <div class="bar"><span class="o" data-b="baro"></span><i class="nt"></i></div>
+          <div class="wl"><span class="l">あなた<b data-b="youp"></b></span><span class="jg" data-b="jg"></span><span class="r"><b data-b="oppp"></b>相手</span></div>
+          <div class="bar"><span class="y" data-b="bary"></span><i class="nt"></i></div>
         </div>
         <button type="button" class="rb" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
       </header>
@@ -377,7 +377,7 @@ body[data-plan="paid"] .lki{display:none}
       <h2>今回変えたところ</h2>
       <ul>
         <li>形勢グラフの縦軸を評価値にして、−3000 から +3000 まで 1000 刻みの目盛りを入れました。プラスがあなたの有利です。グラフ上の数字と棋譜一覧の数字も評価値にそろえました。</li>
-        <li>持ち駒を盤の両脇に置きました。相手が左上、あなたが右下です。名前は盤の上（相手）と下（あなた）にあり、手番の側は緑になって「手番」と出ます。形勢バーも同じ向き（左が相手、右があなた）にそろえました。</li>
+        <li>持ち駒を盤の両脇に置きました。相手が左上、あなたが右下です。名前は盤の上（相手）と下（あなた）にあり、手番の側は緑になって「手番」と出ます。形勢バーは左があなた、右が相手です。</li>
         <li>戦型と囲いの表示は、この画面から外しました。</li>
         <li>縦に長い画面では、グラフだけが伸びないようにしました。画面の高さに合わせて操作ボタン・カード・グラフが少しずつ大きくなり、グラフは横幅と高さに応じた上限で止まります。それでも余る分は各段の間隔に配ります。</li>
       </ul>
@@ -856,7 +856,7 @@ function renderPly() {
   updateGraph();
   markCurrent();
   const w = pct(wrSelf(pos)), j = judge(pos);
-  R.baro.style.width = 100 - w + '%';
+  R.bary.style.width = w + '%';
   R.oppp.textContent = 100 - w + '%';
   R.youp.textContent = w + '%';
   R.bar.setAttribute('aria-label', `あなたの勝率 ${w}%`);
