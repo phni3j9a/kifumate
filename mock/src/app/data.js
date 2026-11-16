@@ -1,5 +1,8 @@
 /* ---------- app data: everything here is made up for the mock ---------- */
 const TODAY = '2026-11-16';
+/* mascot images (assets/mascot), embedded by the build as name → data URI */
+const IMG = /*__IMAGES__*/{};
+const pic = (name, cls, alt) => `<img class="${cls}" src="${IMG[name] || ''}" alt="${alt || ''}" draggable="false">`;
 /* strategies grouped by the two big families; castles with the ones they grow out of */
 const ST_MASTER = {
   '居飛車': ['矢倉', '角換わり', '相掛かり', '横歩取り', '雁木', '棒銀', '右四間飛車', '対四間飛車急戦', '対振り持久戦'],
@@ -10,15 +13,8 @@ const CS_PARENT = { '高美濃': '美濃囲い', '銀冠': '高美濃' };
 const FOCUS = ['総合', '序盤の駒組み', '中盤の攻防', '終盤', '悪手・改善点'];
 const DETAIL = ['かんたん', 'ふつう', 'くわしく'];
 
-const DB = {
-  plan: 'paid',
-  names: ['tsubame', 'つばめ'],
-  usage: { freeToday: 3, freeMax: 10, precise: 12, preciseMax: 60, rt: 48, rtMax: 300 },
-  profile: { practice: ['四間飛車', '矢倉'], goal: 'アマ初段になりたい。終盤で詰みを逃さないようにしたい。' },
-  style: { focus: '総合', detail: 'ふつう' },
-  games: [],
-};
-
+const DB = { plan: 'paid', first: false, celebrated: true, names: [], usage: {}, profile: {}, style: {}, games: [] };
+let GAME1 = null;
 let GSEQ = 0;
 /* st: [family, ...specific names] (empty = unclassified); cs: castles in the order they were built */
 function mkGame(date, opp, side, res, plies, end, my, mycs, op, opcs, an, fav) {
@@ -39,37 +35,54 @@ function gameFromData(G, an, fav) {
   };
 }
 const I = '居飛車', F = '振り飛車';
-DB.games = [
-  mkGame('2026-11-13', 'mozu', 'g', 'w', 112, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['居飛車穴熊'], 'pre'),
-  mkGame('2026-11-12', 'sekirei', 's', 'l', 98, '投了', [I, '矢倉'], ['金矢倉'], [I, '雁木'], ['雁木囲い'], 'std'),
-  mkGame('2026-11-10', 'tsugumi', 'g', 'l', 76, '詰み', [F, '四間飛車'], ['美濃囲い'], [I, '棒銀'], ['舟囲い'], 'none'),
-  gameFromData(window.KIFU, 'pre', true),
-  mkGame('2026-11-06', 'uguisu', 's', 'w', 121, '投了', [I, '角換わり'], [], [I, '角換わり'], [], 'pre'),
-  mkGame('2026-11-03', 'mejiro', 'g', 'w', 89, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['左美濃'], 'std'),
-  mkGame('2026-10-30', 'hibari', 's', 'l', 104, '投了', [I, '相掛かり'], ['中住まい'], [I, '相掛かり'], ['中住まい'], 'std'),
-  mkGame('2026-10-27', 'kakesu', 'g', 'l', 133, '投了', [F, '三間飛車'], ['美濃囲い', '高美濃'], [I, '対振り持久戦'], ['居飛車穴熊'], 'std'),
-  mkGame('2026-10-24', 'kawasemi', 's', 'w', 93, '詰み', [I, '対四間飛車急戦'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'pre', true),
-  mkGame('2026-10-20', 'shijukara', 'g', 'w', 108, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃'], [I, '棒銀'], ['舟囲い'], 'std'),
-  mkGame('2026-10-17', 'mozu', 's', 'w', 79, '投了', [I, '矢倉'], ['金矢倉'], [I, '矢倉'], ['金矢倉'], 'std'),
-  mkGame('2026-10-12', 'aosagi', 'g', 'l', 96, '投了', [F, '四間飛車'], ['美濃囲い'], [I, '対四間飛車急戦'], ['舟囲い', 'エルモ囲い'], 'std'),
-  mkGame('2026-10-08', 'kogera', 's', 'l', 117, '投了', [I, '角換わり'], [], [I, '角換わり'], [], 'std'),
-  mkGame('2026-10-03', 'sekirei', 'g', 'w', 101, '詰み', [F, '中飛車'], ['美濃囲い'], [I], ['舟囲い'], 'std', true),
-  mkGame('2026-09-28', 'hiyodori', 's', 'w', 87, '投了', [I, '対四間飛車急戦'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
-  mkGame('2026-09-23', 'tsugumi', 'g', 'l', 124, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['居飛車穴熊'], 'std'),
-  mkGame('2026-09-19', 'uguisu', 's', 'w', 110, '投了', [I, '矢倉'], ['金矢倉'], [I, '右四間飛車'], ['左美濃'], 'std'),
-  mkGame('2026-09-14', 'mejiro', 'g', 'w', 92, '投了', [F, '四間飛車'], ['美濃囲い'], [I, '棒銀'], ['舟囲い'], 'std'),
-  mkGame('2026-09-09', 'hibari', 's', 'l', 75, '詰み', [I, '相掛かり'], [], [I, '相掛かり'], [], 'std'),
-  mkGame('2026-09-02', 'kakesu', 'g', 'w', 118, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃'], [I, '対振り持久戦'], ['左美濃'], 'std'),
-  mkGame('2026-08-27', 'shijukara', 's', 'w', 99, '投了', [I, '矢倉'], ['金矢倉'], [I, '雁木'], ['雁木囲い'], 'std'),
-  mkGame('2026-08-21', 'aosagi', 'g', 'l', 106, '投了', [], [], [I], [], 'none'),
-  mkGame('2026-08-15', 'kogera', 's', 'w', 84, '投了', [I, '棒銀'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
-];
-/* one record that is not the user's own game: kept and replayable, left out of the statistics */
-DB.games.splice(5, 0, {
-  id: 'g' + (++GSEQ), date: '2026-11-01', sente: 'kiji', gote: 'toki', self: null, win: 's', plies: 128, end: '投了',
-  tags: { s: { st: [I, '矢倉'], cs: ['金矢倉'] }, g: { st: [I, '矢倉'], cs: ['金矢倉'] } }, an: 'std', fav: false, data: null, ai: null, edited: false,
-});
-const GAME1 = DB.games.find((g) => g.data === window.KIFU);
+/* the state the mock normally opens in: an app that has been used for a few months */
+function seedData() {
+  DB.first = false; DB.celebrated = true;
+  DB.names = ['tsubame', 'つばめ'];
+  DB.usage = { freeToday: 3, freeMax: 10, precise: 12, preciseMax: 60, rt: 48, rtMax: 300 };
+  DB.profile = { practice: ['四間飛車', '矢倉'], goal: 'アマ初段になりたい。終盤で詰みを逃さないようにしたい。' };
+  DB.style = { focus: '総合', detail: 'ふつう' };
+  DB.games = [
+    mkGame('2026-11-13', 'mozu', 'g', 'w', 112, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['居飛車穴熊'], 'pre'),
+    mkGame('2026-11-12', 'sekirei', 's', 'l', 98, '投了', [I, '矢倉'], ['金矢倉'], [I, '雁木'], ['雁木囲い'], 'std'),
+    mkGame('2026-11-10', 'tsugumi', 'g', 'l', 76, '詰み', [F, '四間飛車'], ['美濃囲い'], [I, '棒銀'], ['舟囲い'], 'none'),
+    gameFromData(window.KIFU, 'pre', true),
+    mkGame('2026-11-06', 'uguisu', 's', 'w', 121, '投了', [I, '角換わり'], [], [I, '角換わり'], [], 'pre'),
+    mkGame('2026-11-03', 'mejiro', 'g', 'w', 89, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['左美濃'], 'std'),
+    /* one record that is not the user's own game: kept and replayable, left out of the statistics */
+    { id: 'g' + (++GSEQ), date: '2026-11-01', sente: 'kiji', gote: 'toki', self: null, win: 's', plies: 128, end: '投了',
+      tags: { s: { st: [I, '矢倉'], cs: ['金矢倉'] }, g: { st: [I, '矢倉'], cs: ['金矢倉'] } }, an: 'std', fav: false, data: null, ai: null, edited: false },
+    mkGame('2026-10-30', 'hibari', 's', 'l', 104, '投了', [I, '相掛かり'], ['中住まい'], [I, '相掛かり'], ['中住まい'], 'std'),
+    mkGame('2026-10-27', 'kakesu', 'g', 'l', 133, '投了', [F, '三間飛車'], ['美濃囲い', '高美濃'], [I, '対振り持久戦'], ['居飛車穴熊'], 'std'),
+    mkGame('2026-10-24', 'kawasemi', 's', 'w', 93, '詰み', [I, '対四間飛車急戦'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'pre', true),
+    mkGame('2026-10-20', 'shijukara', 'g', 'w', 108, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃'], [I, '棒銀'], ['舟囲い'], 'std'),
+    mkGame('2026-10-17', 'mozu', 's', 'w', 79, '投了', [I, '矢倉'], ['金矢倉'], [I, '矢倉'], ['金矢倉'], 'std'),
+    mkGame('2026-10-12', 'aosagi', 'g', 'l', 96, '投了', [F, '四間飛車'], ['美濃囲い'], [I, '対四間飛車急戦'], ['舟囲い', 'エルモ囲い'], 'std'),
+    mkGame('2026-10-08', 'kogera', 's', 'l', 117, '投了', [I, '角換わり'], [], [I, '角換わり'], [], 'std'),
+    mkGame('2026-10-03', 'sekirei', 'g', 'w', 101, '詰み', [F, '中飛車'], ['美濃囲い'], [I], ['舟囲い'], 'std', true),
+    mkGame('2026-09-28', 'hiyodori', 's', 'w', 87, '投了', [I, '対四間飛車急戦'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
+    mkGame('2026-09-23', 'tsugumi', 'g', 'l', 124, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['居飛車穴熊'], 'std'),
+    mkGame('2026-09-19', 'uguisu', 's', 'w', 110, '投了', [I, '矢倉'], ['金矢倉'], [I, '右四間飛車'], ['左美濃'], 'std'),
+    mkGame('2026-09-14', 'mejiro', 'g', 'w', 92, '投了', [F, '四間飛車'], ['美濃囲い'], [I, '棒銀'], ['舟囲い'], 'std'),
+    mkGame('2026-09-09', 'hibari', 's', 'l', 75, '詰み', [I, '相掛かり'], [], [I, '相掛かり'], [], 'std'),
+    mkGame('2026-09-02', 'kakesu', 'g', 'w', 118, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃'], [I, '対振り持久戦'], ['左美濃'], 'std'),
+    mkGame('2026-08-27', 'shijukara', 's', 'w', 99, '投了', [I, '矢倉'], ['金矢倉'], [I, '雁木'], ['雁木囲い'], 'std'),
+    mkGame('2026-08-21', 'aosagi', 'g', 'l', 106, '投了', [], [], [I], [], 'none'),
+    mkGame('2026-08-15', 'kogera', 's', 'w', 84, '投了', [I, '棒銀'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
+  ];
+  GAME1 = DB.games.find((g) => g.data === window.KIFU);
+}
+/* a first launch: nothing saved, no names registered, nothing analysed yet */
+function clearData() {
+  DB.first = true; DB.celebrated = false;
+  DB.names = [];
+  DB.usage = { freeToday: 0, freeMax: 10, precise: 0, preciseMax: 60, rt: 0, rtMax: 300 };
+  DB.profile = { practice: [], goal: '' };
+  DB.style = { focus: '総合', detail: 'ふつう' };
+  DB.games = [];
+  GAME1 = null;
+}
+seedData();
 
 const gameById = (id) => DB.games.find((g) => g.id === id);
 const oppName = (g) => (g.self === 's' ? g.gote : g.sente);

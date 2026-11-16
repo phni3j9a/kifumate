@@ -84,8 +84,8 @@ function gameCard(g) {
   const right = run ? `<span class="runpill" data-runpill>解析中 ${RUN.done}/${RUN.total}</span>` : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
   return `<div class="gcd" role="button" tabindex="0" data-a="open" data-v="${g.id}">${stamp}<div class="gin"><div class="g1"><b>${own ? esc(oppName(g)) : `${esc(g.sente)} 対 ${esc(g.gote)}`}</b><span class="sd">${own ? (g.self === 's' ? '☗先手' : '☖後手') : '自分以外'}</span></div><div class="tg">${tags}</div><div class="g3"><span>${dshort(g.date)}・${g.plies}手</span>${g.an === 'pre' && paid() && !run ? '<span class="pre">精密</span>' : ''}</div></div><div class="gx">${right}<button type="button" class="fv" data-a="fav" data-v="${g.id}" aria-pressed="${g.fav}" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button></div></div>`;
 }
-function listHTML(gs) {
-  if (!gs.length) return '<p class="empty">条件に合う棋譜がありません。</p>';
+function listHTML(gs, canClear) {
+  if (!gs.length) return `<div class="emp sm">${pic('sys-noresults', 'empi')}<h3>条件に合う棋譜がありません</h3>${canClear ? '<button type="button" class="bt sm" data-a="fclear">絞り込みを解除</button>' : ''}</div>`;
   let h = '', cur = '';
   [...gs].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).forEach((g) => {
     const k = g.date.slice(0, 7);
@@ -109,20 +109,23 @@ function fsumHTML(n) {
 
 /* ---------- tab: list ---------- */
 function listTab() {
+  if (!DB.games.length) {
+    return `<header class="ab"><h2>棋譜</h2></header><div class="emp">${pic('sys-empty', 'empi')}<h3>まだ棋譜がありません</h3><p>指した将棋のKIFを取り込むと、ここに並びます。解析して、振り返りを始めましょう。</p><button type="button" class="bt pri" data-a="nav" data-v="import"><svg class="ic"><use href="#i-plus"/></svg>棋譜を取り込む</button></div>`;
+  }
   const u = DB.usage, gs = DB.games.filter((g) => gameMatch(g, listFilter())), nf = fltCount();
   const chip = (v, label) => `<button type="button" class="ch" data-a="quick" data-v="${v}" aria-pressed="${UI.quick === v}">${label}</button>`;
   return `<header class="ab"><h2>棋譜</h2><span class="abn">${DB.games.length}局</span>${paid() ? '' : `<button type="button" class="upl" data-a="nav" data-v="plan">きょうの解析 <b>あと${u.freeMax - u.freeToday}局</b></button>`}<button type="button" class="rb" data-a="search" aria-label="検索" aria-pressed="${UI.search}"><svg class="ic"><use href="#i-search"/></svg></button></header>
     ${UI.search ? `<label class="sf"><svg class="ic"><use href="#i-search"/></svg><input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="対局者名・戦法・囲い" value="${esc(UI.q)}"><button type="button" data-a="search" aria-label="検索を閉じる"><svg class="ic"><use href="#i-x"/></svg></button></label>` : ''}
     <div class="chs" role="group" aria-label="絞り込み"><button type="button" class="ch" data-a="filter"><svg class="ic"><use href="#i-filter"/></svg>絞り込み${nf ? `<span class="n">${nf}</span>` : ''}</button>${chip('all', 'すべて')}${chip('fav', 'お気に入り')}${chip('w', '勝ち')}${chip('l', '負け')}${chip('none', '未解析')}</div>
     <div data-b2="fsum">${fsumHTML(gs.length)}</div>
-    <div class="gl fabpad" data-b2="gl">${listHTML(gs)}</div>
+    <div class="gl fabpad" data-b2="gl">${listHTML(gs, true)}</div>
     <button type="button" class="fab" data-a="nav" data-v="import"><svg class="ic"><use href="#i-plus"/></svg>取り込む</button>`;
 }
 function refreshList() {
   const gl = R.tabc.querySelector('[data-b2="gl"]'), fs = R.tabc.querySelector('[data-b2="fsum"]');
   if (!gl) return;
   const gs = DB.games.filter((g) => gameMatch(g, listFilter()));
-  gl.innerHTML = listHTML(gs);
+  gl.innerHTML = listHTML(gs, true);
   fs.innerHTML = fsumHTML(gs.length);
 }
 function filterSheetHTML() {
@@ -167,25 +170,35 @@ SCR.addEventListener('input', (e) => {
   if (t.id === 'q') { UI.q = t.value; refreshList(); }
   else if (t.id === 'kif-in') { IMP.text = t.value; const r = R.vpage.querySelector('[data-b2="impres"]'); if (r) r.innerHTML = impResultHTML(); }
   else if (t.id === 'goal-in') DB.profile.goal = t.value;
+  else if (t.id === 'onb-name') ONB.name = t.value;
+  else if (t.id === 'onb-goal') ONB.goal = t.value;
 });
 
 /* ---------- import ---------- */
-const IMP = { tab: 'paste', text: '', file: '', side: 'g' };
+const IMP = { tab: 'paste', text: '', file: '', pick: undefined };
 const game2 = () => DB.games.find((g) => g.data === window.KIFU2);
+/* Your side in the record: matched against the registered names; a choice made by hand wins.
+   's' / 'g' = that side, 'x' = not your game, null = no name matches and nothing chosen yet. */
+const impAuto = () => { const m = window.KIFU2.meta; return DB.names.includes(m.gote) ? 'g' : DB.names.includes(m.sente) ? 's' : null; };
+const impSide = () => (IMP.pick !== undefined ? IMP.pick : impAuto());
 const impState = () => (IMP.tab === 'file' ? (IMP.file ? 'ok' : '') : !IMP.text.trim() ? '' : /手数-+指手|^\s*\d+\s+\S+/m.test(IMP.text) ? 'ok' : 'bad');
 function impResultHTML() {
   const st = impState(), row = (cls, icon, title, body) => `<div class="vl"><span class="ck${cls}"><svg class="ic"><use href="#${icon}"/></svg></span><div class="vx"><b>${title}</b>${body}</div></div>`;
   if (!st) return '<p class="hint">対局サービスへのログインや連携は要りません。棋譜のテキストかファイルがあれば取り込めます。</p>';
-  if (st === 'bad') return `<div class="cd vr">${row(' ng', 'i-x', 'KIF形式として読み取れませんでした', '「手数----指手」の行と、その下に指し手が入っているか確かめてください。')}</div>`;
-  const m = window.KIFU2.meta, u = DB.usage, dup = game2(), auto = m.self === 'gote' ? 'g' : 's';
+  if (st === 'bad') return `<div class="cd vri">${pic('sys-invalid', 'vrim')}<div><b>棋譜として読み取れませんでした</b><p>KIF形式の「手数----指手」の行と、その下に指し手が入っているか確かめてください。</p></div></div>`;
+  const m = window.KIFU2.meta, u = DB.usage, dup = game2(), auto = impAuto();
   let h = `<div class="cd vr">${row('', 'i-check', '棋譜を読み取れました', `<div class="vs"><i>日付</i><span>${dlong(m.date)}</span><i>先手</i><span>☗ ${esc(m.sente)}</span><i>後手</i><span>☖ ${esc(m.gote)}</span><i>結果</i><span>${m.plies}手で${m.winner === 'sente' ? '先手' : '後手'}の勝ち（${esc(m.endReason)}）</span></div>`)}`;
   if (dup) {
-    return h + row(' wn', 'i-info', '同じ棋譜がすでに保存されています', '二重に保存すると戦績も二重に数えられるため、取り込みません。') + `</div><div class="acts"><button type="button" class="bt pri wide" data-a="open" data-v="${dup.id}">保存済みの棋譜を開く</button></div>`;
+    return h + `</div><div class="cd vri">${pic('sys-duplicate', 'vrim')}<div><b>同じ棋譜がすでに保存されています</b><p>二重に保存すると戦績も二重に数えられるため、取り込みません。</p></div></div><div class="acts"><button type="button" class="bt pri wide" data-a="open" data-v="${dup.id}">保存済みの棋譜を開く</button></div>`;
   }
-  const side = IMP.side;
-  h += row('', 'i-check', side ? `あなたは${side === 's' ? '先手' : '後手'}` : '自分の対局ではない', `${side === auto ? `登録した名前「${esc(side === 's' ? m.sente : m.gote)}」と一致しました。` : side ? '手で指定しました。' : '保存と再生・解析はできます。戦績には数えません。'}<div class="sg s" role="group" aria-label="あなたの手番">${[['s', '☗先手'], ['g', '☖後手'], ['', '自分ではない']].map(([v, t]) => `<button type="button" data-a="impside" data-v="${v}" aria-pressed="${(side || '') === v}">${t}</button>`).join('')}</div>`);
+  const side = impSide(), name = side === 's' ? m.sente : side === 'g' ? m.gote : '';
+  const seg = `<div class="sg s" role="group" aria-label="あなたの手番">${[['s', `☗ ${esc(m.sente)}`], ['g', `☖ ${esc(m.gote)}`], ['x', '自分ではない']].map(([v, t]) => `<button type="button" data-a="impside" data-v="${v}" aria-pressed="${side === v}">${t}</button>`).join('')}</div>`;
+  if (side == null) h += row(' wn', 'i-info', 'あなたはどちらですか？', `${DB.names.length ? '登録した名前に当てはまる対局者がいません。' : '対局者名がまだ登録されていません。'}選んだ名前は、自分の対局者名として登録されます。${seg}`);
+  else if (side === 'x') h += row('', 'i-check', '自分の対局ではない', `保存・再生・解析はできます。戦績には数えません。${seg}`);
+  else h += row('', 'i-check', `あなたは${side === 's' ? '先手' : '後手'}`, `${side === auto ? `登録した名前「${esc(name)}」と一致しました。` : DB.names.includes(name) ? '手で指定しました。' : `保存すると、「${esc(name)}」を自分の対局者名に登録します。`}${seg}`);
   h += row('', 'i-check', '重複はありません', '保存済みの棋譜に、同じ対局は見つかりませんでした。') + '</div>';
-  return h + `<div class="acts"><button type="button" class="bt pri wide" data-a="impsave" data-v="1">保存して解析する</button><small>${paid() ? `精密解析　今月あと${u.preciseMax - u.precise}局` : `無料の解析　きょうは あと${u.freeMax - u.freeToday}局`}</small><button type="button" class="bt wide" data-a="impsave" data-v="0">保存だけする</button></div>`;
+  const off = side == null ? ' disabled' : '';
+  return h + `<div class="acts"><button type="button" class="bt pri wide" data-a="impsave" data-v="1"${off}>保存して解析する</button><small>${paid() ? `精密解析　今月あと${u.preciseMax - u.precise}局` : `無料の解析　きょうは あと${u.freeMax - u.freeToday}局`}</small><button type="button" class="bt wide" data-a="impsave" data-v="0"${off}>保存だけする</button></div>`;
 }
 function importPage() {
   const tab = (v, t) => `<button type="button" data-a="imptab" data-v="${v}" aria-pressed="${IMP.tab === v}">${t}</button>`;
@@ -199,20 +212,23 @@ A.imptab = (v) => { IMP.tab = v; show(); };
 A.imppaste = () => { IMP.text = kifText(window.KIFU2); show(); };
 A.impfile = () => { IMP.file = 'kifu_20261115.kif'; show(); };
 A.impclear = () => { IMP.text = ''; IMP.file = ''; show(); };
-A.impside = (v) => { IMP.side = v || null; R.vpage.querySelector('[data-b2="impres"]').innerHTML = impResultHTML(); };
+A.impside = (v) => { IMP.pick = v; R.vpage.querySelector('[data-b2="impres"]').innerHTML = impResultHTML(); };
+/* saving a record you chose a side for also registers that player name, so the next one is recognised */
 function addGame2() {
-  const gm = gameFromData(window.KIFU2, 'none', false);
-  gm.self = IMP.side || null;
+  const gm = gameFromData(window.KIFU2, 'none', false), side = impSide(), name = side === 's' ? gm.sente : side === 'g' ? gm.gote : '';
+  gm.self = side === 's' || side === 'g' ? side : null;
+  let added = '';
+  if (name && !DB.names.includes(name)) { DB.names.push(name); added = name; }
   DB.games.unshift(gm);
-  IMP.text = ''; IMP.file = '';
-  return gm;
+  IMP.text = ''; IMP.file = ''; IMP.pick = undefined;
+  return { gm, added };
 }
 A.impsave = (v) => {
-  const gm = addGame2();
+  const { gm, added } = addGame2();
   NAV.length = 0; UI.tab = 'list'; UI.scroll.list = 0;
   push({ t: 'game', id: gm.id });
   if (v === '1') startAnalysis(gm, paid() ? 'pre' : 'std');
-  else toast('保存しました');
+  toast(added ? `保存しました。「${added}」を自分の対局者名に登録しました` : '保存しました');
 };
 
 /* ---------- tab: statistics ---------- */
@@ -266,6 +282,9 @@ function statsTab() {
   const seg = (key, opts) => `<div class="sg s" role="group">${opts.map(([v, l]) => `<button type="button" data-a="stset" data-v="${key}:${v}" aria-pressed="${st[key] === v}">${l}</button>`).join('')}</div>`;
   const chron = [...gs].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const half = (label, list) => { const x = tally(list); return `<span>${label}</span><span class="sbar${x.w ? '' : ' z'}"><i style="width:${x.r}%"></i></span><span>${x.w}勝${x.l}敗</span>`; };
+  if (!DB.games.some((g) => g.self)) {
+    return `<header class="ab"><h2>戦績</h2></header><div class="emp">${pic('sys-empty', 'empi')}<h3>まだ集計できる対局がありません</h3><p>自分の対局を取り込むと、勝率や、戦法・囲いごとの成績がここに出ます。</p><button type="button" class="bt pri" data-a="nav" data-v="import"><svg class="ic"><use href="#i-plus"/></svg>棋譜を取り込む</button></div>`;
+  }
   if (!t.n) return `<header class="ab"><h2>戦績</h2></header><div class="pgc"><div class="frow">${seg('period', [['', 'すべて'], ['90', '90日'], ['30', '30日']])}${seg('side', [['', 'すべて'], ['s', '先手'], ['g', '後手']])}</div><p class="empty">この条件の対局はありません。</p></div>`;
   return `<header class="ab"><h2>戦績</h2><span class="abn">自分の対局 ${t.n}局</span></header>
     <div class="pgc">
@@ -357,7 +376,7 @@ function backupPage() {
     <p class="hint">データはこの端末の中だけに保存されています。アカウント登録や自動の同期はありません。機種変更の前に、ここから書き出してください。</p>
     <p class="hint">有料プランの購入情報は、バックアップには入りません。新しい端末では「購入を復元」から引き継ぎます。</p></div>` };
 }
-A.bkout = () => ask('バックアップを書き出しました', `kifumate-backup-${TODAY.replace(/-/g, '')}　棋譜 ${DB.games.length}局<br>実際のアプリでは、ここで保存先や共有先を選ぶ画面が開きます。`, 'OK', null, { single: true });
+A.bkout = () => ask('バックアップを書き出しました', `kifumate-backup-${TODAY.replace(/-/g, '')}　棋譜 ${DB.games.length}局<br>実際のアプリでは、ここで保存先や共有先を選ぶ画面が開きます。`, 'OK', null, { single: true, img: 'sys-backup' });
 A.bkin = () => ask('バックアップから復元しますか', 'いまこの端末にあるデータは、バックアップの内容に置きかわります。元には戻せません。', '復元する', () => toast('復元しました（モックでは何も変わりません）'), { danger: true });
 function planPage() {
   const u = DB.usage, rowc = (a, b, c) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`;
@@ -377,7 +396,7 @@ function planPage() {
 }
 A.subscribe = () => { DB.plan = 'paid'; syncPlan(); toast('有料プランに登録しました（モック）'); };
 function aboutPage() {
-  return { title: 'このアプリについて', html: `<div class="pgc"><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>棋譜の解析</i><span>サーバーで行います</span><i>データの保存</i><span>この端末の中だけ</span></div>
+  return { title: 'このアプリについて', html: `<div class="pgc"><div class="abt">${pic('app-icon', 'abic')}<div><b>kifumate</b><span>棋譜の記録と振り返り</span></div></div><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>棋譜の解析</i><span>サーバーで行います</span><i>データの保存</i><span>この端末の中だけ</span></div>
     <div class="cd" style="margin-top:12px"><button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>このアプリに含まれるソフトウェア</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
 }
 /* record details: who you are in it, and the strategy and castle tags with manual correction */

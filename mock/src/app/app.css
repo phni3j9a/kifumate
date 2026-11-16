@@ -29,7 +29,9 @@ body{background:var(--pg-bg);color:var(--pg-fg);font-family:var(--f-ui);font-siz
 .pg-head .tx{min-width:0;flex:1 1 380px}
 .pg-head h1{margin:0;font:700 20px/1.35 var(--f-ui);letter-spacing:.02em;text-wrap:balance}
 .pg-head p{margin:4px 0 0;max-width:62ch;color:var(--pg-muted);font-size:13px}
-.pg-ctl{display:flex;align-items:center;gap:10px}
+.pg-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.pg-ctl .seg{margin-right:8px}
+.pg-ctl .seg:last-child{margin-right:0}
 .pg-ctl .lb{font:600 11.5px/1 var(--f-ui);color:var(--pg-muted);letter-spacing:.06em}
 .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--pg-line);border-radius:10px;background:var(--pg-card)}
 .seg button{appearance:none;-webkit-appearance:none;border:0;background:none;cursor:pointer;
@@ -338,6 +340,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .mn2 .rt .ic{width:13px;height:13px}
 .vc .dlg{position:absolute;inset:0;z-index:8;display:grid;place-items:center;padding:0 26px}
 .vc .dlb{position:relative;width:100%;padding:18px 16px 14px;background:var(--bg);border:var(--ol);border-radius:20px;box-shadow:var(--sh)}
+.vc .dlb .dli{display:block;height:116px;width:auto;margin:-4px auto 10px}
 .vc .dlb b{display:block;font:900 15px/1.4 var(--f-maru)}
 .vc .dlb p{margin-top:6px;font:500 12.5px/1.65 var(--f-maru);color:var(--ink2)}
 .vc .dlb .dla{display:flex;gap:8px;margin-top:14px}
@@ -348,11 +351,17 @@ body[data-plan="paid"] .lki{display:none}
 .lk b{font-size:13.5px;font-weight:700}
 .lk span{font-size:11.5px;line-height:1.6;opacity:.75;max-width:28em}
 .lk .bt{margin-top:8px}
+.lk .lkim{height:104px;width:auto;margin-bottom:2px}
 
 /* ---------- AI commentary: a sheet that leaves the board in view ---------- */
 .vc .aiw{position:absolute;left:0;right:0;bottom:0;z-index:5;max-height:92%;display:flex;flex-direction:column;background:var(--bg);border-top:var(--ol);border-radius:20px 20px 0 0;animation:c-up .2s ease-out}
 .vc .aih2{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 14px}
 .vc .aih2 b{font:900 15px/1 var(--f-maru)}
+.vc .aiav{width:30px;height:30px;flex:none;display:block;margin-left:-4px}
+.vc .ca{display:flex;align-items:flex-start;gap:7px;margin-bottom:9px}
+.vc .ca .cav{width:28px;height:28px;flex:none;margin-top:1px}
+.vc .ca > div{flex:1;min-width:0}
+.vc .ca .blk{margin-bottom:0}
 .vc .aih2 .smp{font:700 9.5px/1 var(--f-maru);color:var(--ink2);border:1.5px dashed rgba(36,40,70,.5);border-radius:99px;padding:2px 6px}
 .vc .aihr{margin-left:auto;display:flex;align-items:center;gap:6px}
 .vc .aih2 .sty{display:flex;align-items:center;gap:4px;height:26px;padding:0 9px;border:1.5px solid var(--ink);border-radius:99px;background:#fff;font:700 10.5px/1 var(--f-maru);white-space:nowrap}
@@ -596,12 +605,62 @@ body[data-plan="paid"] .lki{display:none}
 .vc .opt{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .vc .optl{margin:4px 2px 6px;font:900 11px/1.3 var(--f-maru);color:var(--ink2)}
 
+/* ---------- empty and system states, with the mascot ---------- */
+.vc .emp{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:10px 30px 44px;text-align:center;overflow-y:auto}
+.vc .emp .empi{height:172px;width:auto;max-width:82%;object-fit:contain;margin-bottom:6px}
+.vc .emp h3{font:900 17px/1.4 var(--f-maru)}
+.vc .emp p{max-width:25em;font:500 12.5px/1.75 var(--f-maru);color:var(--ink2)}
+.vc .emp .bt{margin-top:10px}
+.vc .emp.sm{flex:none;padding:26px 30px 30px}
+.vc .emp.sm .empi{height:112px}
+.vc .emp.sm h3{font-size:14.5px}
+.vc .vri{display:flex;align-items:center;gap:12px;margin-top:12px;padding:10px 14px 10px 10px}
+.vc .vri .vrim{flex:none;height:88px;width:auto}
+.vc .vri b{display:block;font:900 13.5px/1.4 var(--f-maru)}
+.vc .vri p{margin-top:3px;font:500 11.5px/1.6 var(--f-maru);color:var(--ink2)}
+.vc .abt{display:flex;align-items:center;gap:12px;margin:2px 2px 14px}
+.vc .abic{width:56px;height:56px;flex:none;display:block;border-radius:15px;border:var(--ol);box-shadow:0 2px 0 var(--ink)}
+.vc .abt b{display:block;font:900 18px/1.2 var(--f-maru);letter-spacing:.02em}
+.vc .abt span{display:block;margin-top:4px;font:500 11.5px/1.3 var(--f-maru);color:var(--ink2)}
+
+/* ---------- onboarding: the mascot on a tinted stage, the words left-aligned under it ---------- */
+.vc .ontop{flex:none;height:50px;display:flex;align-items:center;gap:8px;padding:0 14px}
+.vc .onsl{flex:none;width:84px;display:flex;align-items:center}
+.vc .onsl.r{justify-content:flex-end}
+.vc .onbrand{display:flex;align-items:center;gap:7px;font:900 14.5px/1 var(--f-maru);letter-spacing:.02em}
+.vc .onic{width:28px;height:28px;display:block;border-radius:8px;border:var(--ol)}
+.vc .ondots{flex:1;display:flex;justify-content:center;align-items:center;gap:5px}
+.vc .ondots i{width:8px;height:8px;border-radius:99px;border:1.5px solid var(--ink);background:#fff;transition:width .2s}
+.vc .ondots i.done{background:var(--ink)}
+.vc .ondots i.on{width:22px;background:var(--you)}
+.vc .onsc{flex:1;min-height:0;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:4px 20px 8px}
+.vc .onst{position:relative;flex:1 1 0;min-height:132px;max-height:340px;border:var(--ol);border-radius:28px;box-shadow:var(--sh);overflow:hidden}
+.vc .onimg{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);height:91%;width:auto;max-width:88%;object-fit:contain;object-position:50% 100%}
+.vc .ont{flex:none;margin-top:18px;font:900 23px/1.35 var(--f-maru);letter-spacing:.01em}
+.vc .onbd{flex:none;margin-top:6px;font:500 13.5px/1.75 var(--f-maru);color:var(--ink2)}
+.vc .onx{flex:none;margin-top:12px}
+.vc .onx .opt{margin-bottom:10px}
+.vc .onl{display:block;margin:0 2px 6px;font:900 12px/1.3 var(--f-maru)}
+.vc .onlg{display:flex;flex-wrap:wrap;gap:6px 8px}
+.vc .onlg span{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px 0 5px;border:1.5px solid var(--ink);border-radius:99px;background:#fff;font:700 11.5px/1 var(--f-maru)}
+.vc .onlg svg{width:18px;height:18px;display:block;overflow:visible}
+.vc .onpaid{display:flex;align-items:center;gap:7px;padding:7px 12px 7px 9px;border:1.5px dashed rgba(36,40,70,.5);border-radius:12px;font:700 11px/1.5 var(--f-maru);color:var(--ink2)}
+.vc .onpaid .ic{width:14px;height:14px;stroke-width:2.2}
+.vc .onft{flex:none;padding:8px 20px 12px}
+.vc .onalt{height:38px;display:grid;place-items:center}
+.vc .onsc.in-r{animation:on-r .22s ease-out}
+.vc .onsc.in-l{animation:on-l .22s ease-out}
+@keyframes on-r{from{transform:translateX(22px);opacity:.3}}
+@keyframes on-l{from{transform:translateX(-22px);opacity:.3}}
+
 /* ---------- phone-width: the mock fills the screen ---------- */
 @media (max-width:520px){
   html{scroll-snap-type:y proximity}
   .pg-head{padding-block:8px;gap:8px;align-items:center;scroll-snap-align:start}
   .pg-head p{display:none}
   .pg-head h1{font-size:14px}
+  .seg button{padding:7px 9px}
+  .pg-ctl .seg{margin-right:2px}
   .pg-head .tx{flex:1 1 auto}
   .stage{padding:0;gap:0}
   .phone{width:100%;height:max(640px,100vh);height:max(640px,100dvh);padding:0;border-radius:0;background:none;box-shadow:none;scroll-snap-align:start}
@@ -611,6 +670,7 @@ body[data-plan="paid"] .lki{display:none}
 }
 @media (prefers-reduced-motion:reduce){
   .vc .bar .y{transition:none}
-  .vc .shb,.vc .aiw,.vw.in{animation:none}
+  .vc .shb,.vc .aiw,.vw.in,.vc .onsc.in-r,.vc .onsc.in-l{animation:none}
+  .vc .ondots i{transition:none}
   .vc .dots i,.vc .skl{animation:none}
 }

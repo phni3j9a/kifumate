@@ -637,7 +637,15 @@ function finishRun() {
   gm.an = r.kind;
   if (!paid()) DB.usage.freeToday++;
   else if (r.kind === 'pre') DB.usage.precise++;
-  if (onGame(gm)) { renderGame(); if (AI.open) renderAI(); toast('解析が終わりました'); }
+  if (onGame(gm)) {
+    renderGame();
+    if (AI.open) renderAI();
+    if (DB.celebrated) toast('解析が終わりました');
+    else {
+      DB.celebrated = true;
+      ask('はじめての解析ができました', 'グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。', '見てみる', () => { if (CUR === gm) setPly(startPly()); }, { single: true, img: 'learn-first' });
+    }
+  }
   else { if (!topNav() || topNav().t !== 'game') show(); toast(`解析が終わりました（${gm.self ? oppName(gm) + ' 戦' : gm.date}）`); }
 }
 A.analyze = () => startAnalysis(CUR, paid() ? S.kind : 'std');

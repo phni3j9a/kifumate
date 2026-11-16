@@ -47,6 +47,11 @@
       <p>棋譜の取り込みから解析、分岐、AI解説、戦績、設定まで、主な流れを通して操作できます。</p>
     </div>
     <div class="pg-ctl">
+      <span class="lb">状態</span>
+      <div class="seg" role="group" aria-label="データの状態">
+        <button type="button" data-state="first" aria-pressed="false">初回起動</button>
+        <button type="button" data-state="lived" aria-pressed="true">利用中</button>
+      </div>
       <span class="lb">プラン</span>
       <div class="seg" role="group" aria-label="プラン">
         <button type="button" data-plan="free" aria-pressed="false">無料</button>
@@ -58,6 +63,9 @@
   <main class="stage">
     <div class="phone"><div class="screen vc" id="scr">
       <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+
+      <!-- onboarding, on the first launch -->
+      <section class="vw" data-b="vonb" hidden></section>
 
       <!-- the three tab screens -->
       <section class="vw" data-b="vroot">
@@ -112,7 +120,7 @@
 
       <div class="toast" data-b="toast" role="status" hidden></div>
       <div class="aiw" data-b="aiw" hidden>
-        <div class="aih2"><b>AI解説</b><span class="smp">サンプル</span><span class="aihr"><button type="button" class="sty" data-b="aisty" data-a="aistyle" aria-label="解説スタイルを変えて作り直す" hidden></button><button type="button" class="rb" data-b="aiex" data-a="aisize" aria-label="大きくする"></button><button type="button" class="rb" data-a="aiclose" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></span></div>
+        <div class="aih2"><img class="aiav" data-b="aiav" alt="" draggable="false"><b>AIコーチ</b><span class="smp">サンプル</span><span class="aihr"><button type="button" class="sty" data-b="aisty" data-a="aistyle" aria-label="解説スタイルを変えて作り直す" hidden></button><button type="button" class="rb" data-b="aiex" data-a="aisize" aria-label="大きくする"></button><button type="button" class="rb" data-a="aiclose" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></span></div>
         <div class="aim" data-b="aim"></div>
         <form class="aif" data-b="aif" data-f="ai" hidden><input id="ai-q" type="text" enterkeyhint="send" autocomplete="off" placeholder="この対局について質問する" aria-label="質問"><button type="submit" class="rb" aria-label="送る"><svg class="ic"><use href="#i-send"/></svg></button></form>
       </div>
@@ -132,6 +140,8 @@
     <aside class="notes">
       <h2>画面を直接開く</h2>
       <div class="jump">
+        <button type="button" data-jump="onb">オンボーディング</button>
+        <button type="button" data-jump="empty">空の一覧（初回）</button>
         <button type="button" data-jump="list">棋譜一覧</button>
         <button type="button" data-jump="import">取り込み</button>
         <button type="button" data-jump="fresh">取り込み直後（未解析）</button>
@@ -142,6 +152,14 @@
         <button type="button" data-jump="set">設定</button>
         <button type="button" data-jump="plan">有料プラン</button>
       </div>
+      <h2>オンボーディングとマスコット</h2>
+      <ul>
+        <li>上の「状態」を「初回起動」にすると、何も保存されていない状態からオンボーディングが始まります。素材集の7場面（ようこそ／取り込む／グラフを読む／分岐を試す／コーチに質問／目標を決める／はじめよう）の順です。左右のスワイプでも進められ、どの場面からでもスキップできます。</li>
+        <li>入力は2か所だけで、どちらも空のまま進めます。「棋譜を取り込む」で対局者名、「目標を決める」で練習したい戦法と目標です。</li>
+        <li>対局者名を登録しないまま取り込むと、「あなたはどちらですか？」と聞き、選んだ名前を登録します。</li>
+        <li>最初の解析が終わると、マスコットが見どころを案内します。</li>
+        <li>マスコットは、オンボーディングのほか、AIコーチのアイコン（場面で表情が変わります）、空の一覧、検索結果なし、読み取れない棋譜、重複、バックアップ、アプリアイコンに使いました。解析画面の盤まわりには置いていません。</li>
+      </ul>
       <h2>通しで試せる流れ</h2>
       <ul>
         <li>棋譜一覧の「取り込む」→「貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は1〜3分ほどかかる見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
@@ -170,7 +188,7 @@
         <li>分岐中の評価値は、候補手の読み筋に沿って進めた局面でだけ出ます。それ以外の手は「解析データなし」になります。</li>
         <li>AIの文章は、解析データから組み立てたサンプルです。質問は、表示される候補にだけ答えます。</li>
         <li>棋譜・評価値・候補手はダミーで、実際の解析エンジンの出力ではありません。価格と利用上限も仮の数字です。</li>
-        <li>空の状態、通信が切れたとき、上限に達したときなどの画面は、次の段階で足します。</li>
+        <li>通信が切れたときと、解析の上限に達したときの画面は、次の段階で足します（素材集にそのための絵があります）。</li>
       </ul>
     </aside>
   </main>
@@ -187,6 +205,7 @@ if (!window.KIFU || !window.KIFU2) { document.querySelector('.stage').textConten
 /*#include app/game.js*/
 /*#include app/ai.js*/
 /*#include app/screens.js*/
+/*#include app/onboarding.js*/
 /*#include app/boot.js*/
 })();
 </script>

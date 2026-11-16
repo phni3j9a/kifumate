@@ -133,7 +133,7 @@ function aiQuestions() {
   const f = aiFacts(), qs = [];
   if (f.my[0]) {
     const p = f.my[0], best = (P[p.ply - 1].cands || [])[0];
-    qs.push({ q: `${p.ply}手目はどう指せばよかった？`, a: () => blk('答え', ENG, [
+    qs.push({ q: `${p.ply}手目はどう指せばよかった？`, face: 'chat-idea', a: () => blk('答え', ENG, [
       `${before(p.ply)} での解析の最善手は ${mv(best.ja)}（評価値 ${fmtVal(best)}）です。読み筋は ${best.pv.map(mv).join(' ')}。`,
       `実戦の ${ref(p.ply)} は評価値 ${fmtVal(P[p.ply])} になりました。指す前の局面を開いて「試す」を押すと、この読み筋を盤の上で進められます。`]) });
   }
@@ -143,7 +143,7 @@ function aiQuestions() {
       return `<button type="button" class="mref pre" data-a="jump" data-v="${p.ply}">${p.ply}手目の局面</button> ${who}に${p.tsume.len}手詰め（${p.tsume.line.map((x) => mv(x.ja)).join(' ')}）。${nx && nx.missedTsume ? '実戦では逃しました。' : '実戦でもこの手を指しています。'}`;
     }), '<small>解析で証明できた1手詰め・3手詰めだけを挙げています。</small>']) });
   }
-  qs.push({ q: '次に何を練習するといい？', a: () => blk('答え', ADV, [
+  qs.push({ q: '次に何を練習するといい？', face: 'chat-cheer', a: () => blk('答え', ADV, [
     `この対局で評価値を大きく下げた手は${f.my.length}回${f.missed.length ? `、詰みの見逃しは${f.missed.length}回` : ''}でした。`,
     f.missed.length ? '学習目標に合わせると、いまは短い詰将棋（1手・3手）を続けるのが近道です。' : f.my.length ? `${ref(f.my[0].ply)} の局面を、分岐で指し直して確かめてみましょう。相手の手を自分で指してみると、ねらいが分かりやすくなります。` : '同じ戦法の対局を続けて、形に慣れていきましょう。'], true) });
   return qs;
@@ -151,7 +151,7 @@ function aiQuestions() {
 
 /* ---------- rendering ---------- */
 function aiBody(st) {
-  if (st === 'lock') return '<div class="lk"><svg class="ic"><use href="#i-lock"/></svg><b>AI対局解説は有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で解説します。続けてチャットで質問できます。</span><button type="button" class="bt you sm" data-a="nav" data-v="plan">有料プランを見る</button></div>';
+  if (st === 'lock') return `<div class="lk">${pic('onb-5', 'lkim')}<b>AIコーチは有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で解説します。続けてチャットで質問できます。</span><button type="button" class="bt you sm" data-a="nav" data-v="plan">有料プランを見る</button></div>`;
   if (st === 'need') {
     const running = RUN && RUN.id === CUR.id;
     return `<div class="lk"><svg class="ic"><use href="#i-spark"/></svg><b>${running ? '解析が終わると、解説を作れます' : '解説には、解析結果が必要です'}</b><span>AIは、解析で出た評価値・候補手・詰みをもとに解説します。</span>${running ? '' : '<button type="button" class="bt pri sm" data-a="aianalyze">この対局を解析する</button>'}</div>`;
@@ -166,13 +166,15 @@ function aiBody(st) {
   }
   const ai = CUR.ai, qs = aiQuestions().filter((x) => !ai.chat.some((c) => c.q === x.q));
   let h = ai.html + '<p class="ain">評価値・候補手・詰みは解析結果の値です。文章はAIが作ります（このモックの文章は、解析データから組み立てたサンプルです）。</p>';
-  ai.chat.forEach((c) => { h += `<p class="cq">${esc(c.q)}</p>` + (c.a || '<section class="blk"><span class="dots"><i></i><i></i><i></i></span></section>'); });
+  ai.chat.forEach((c) => { h += `<p class="cq">${esc(c.q)}</p><div class="ca">${pic(c.a ? c.face : 'chat-thinking', 'cav')}<div>${c.a || '<section class="blk"><span class="dots"><i></i><i></i><i></i></span></section>'}</div></div>`; });
   if (qs.length) h += `<div class="sqs">${qs.map((x) => `<button type="button" class="sq" data-a="aiask" data-v="${esc(x.q)}">${esc(x.q)}</button>`).join('')}</div>`;
   return h;
 }
+const AI_FACE = { lock: 'chat-default', need: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
 function renderAI(keepScroll) {
   if (!AI.open) return;
   const st = aiStage(), y = R.aim.scrollTop;
+  R.aiav.src = IMG[AI_FACE[st]] || '';
   R.aisty.hidden = st !== 'ready';
   if (st === 'ready') R.aisty.innerHTML = `${CUR.ai.focus}・${CUR.ai.detail}<svg class="ic"><use href="#i-refresh"/></svg>`;
   R.aif.hidden = st !== 'ready';
@@ -180,8 +182,8 @@ function renderAI(keepScroll) {
   R.aim.scrollTop = keepScroll ? y : 0;
   layoutAI();
 }
-function askAI(q, answer) {
-  const gm = CUR, c = { q, a: '' };
+function askAI(q, answer, face) {
+  const gm = CUR, c = { q, a: '', face: face || 'chat-explaining' };
   gm.ai.chat.push(c);
   renderAI(true);
   R.aim.scrollTop = R.aim.scrollHeight;
@@ -209,7 +211,7 @@ A.aigen = () => {
     renderAI();
   }, 1500);
 };
-A.aiask = (q) => { const x = aiQuestions().find((o) => o.q === q); if (x) askAI(x.q, x.a); };
+A.aiask = (q) => { const x = aiQuestions().find((o) => o.q === q); if (x) askAI(x.q, x.a, x.face); };
 SCR.addEventListener('submit', (e) => {
   e.preventDefault();
   const f = e.target.dataset.f;
@@ -218,7 +220,7 @@ SCR.addEventListener('submit', (e) => {
     if (!q || !CUR || !CUR.ai) return;
     inp.value = '';
     const x = aiQuestions().find((o) => o.q === q);
-    askAI(q, x ? x.a : () => blk('答え', 'モック', ['モックでは、下に出ている候補の質問にだけ答えます。実際のアプリでは、この対局の解析結果をもとにAIが答えます。']));
+    askAI(q, x ? x.a : () => blk('答え', 'モック', ['モックでは、下に出ている候補の質問にだけ答えます。実際のアプリでは、この対局の解析結果をもとにAIが答えます。']), x ? x.face : 'chat-listening');
   } else if (f === 'name') {
     const inp = document.getElementById('name-in'), n = inp.value.trim();
     if (!n) return;

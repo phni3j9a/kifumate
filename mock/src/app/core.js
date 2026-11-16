@@ -50,7 +50,7 @@ A.closesheet = closeSheet;
 let dlgOk = null;
 function ask(title, text, okLabel, onOk, o) {
   o = o || {};
-  R.dlgb.innerHTML = `<b>${title}</b><p>${text}</p><div class="dla">${o.single ? '' : '<button type="button" class="bt" data-a="dlgno">やめる</button>'}<button type="button" class="bt ${o.danger ? '' : 'pri'}" ${o.danger ? 'style="background:var(--coral)"' : ''} data-a="dlgok">${okLabel}</button></div>`;
+  R.dlgb.innerHTML = `${o.img ? pic(o.img, 'dli') : ''}<b>${title}</b><p>${text}</p><div class="dla">${o.single ? '' : '<button type="button" class="bt" data-a="dlgno">やめる</button>'}<button type="button" class="bt ${o.danger ? '' : 'pri'}" ${o.danger ? 'style="background:var(--coral)"' : ''} data-a="dlgok">${okLabel}</button></div>`;
   dlgOk = onOk || null;
   R.toast.hidden = true;
   R.dlg.hidden = false;
@@ -63,16 +63,18 @@ function closeLayers() { closeSheet(); R.dlg.hidden = true; closeAI(); R.toast.h
 /* which of the three containers is showing: the tab screens, a pushed page, or the game screen */
 /* restore: put the scroll position back where it was left (coming back, or switching tabs) */
 function show(anim, restore) {
-  const t = topNav(), which = !t ? 'root' : t.t === 'game' ? 'game' : 'page';
+  const t = topNav(), which = ONB.on ? 'onb' : !t ? 'root' : t.t === 'game' ? 'game' : 'page';
+  R.vonb.hidden = which !== 'onb';
   R.vroot.hidden = which !== 'root';
   R.vpage.hidden = which !== 'page';
   R.vgame.hidden = which !== 'game';
   SCR.dataset.view = which;
   if (which !== 'game') SCR.dataset.turn = '-';
-  if (which === 'root') renderRoot(restore);
+  if (which === 'onb') renderOnb();
+  else if (which === 'root') renderRoot(restore);
   else if (which === 'page') renderPage(t, restore);
   else enterGame(t);
-  if (anim) {
+  if (anim && which !== 'onb') {
     const el = which === 'root' ? R.vroot : which === 'page' ? R.vpage : R.vgame;
     el.classList.remove('in');
     void el.offsetWidth;
