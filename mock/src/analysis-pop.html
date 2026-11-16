@@ -56,7 +56,7 @@ body{background:var(--pg-bg);color:var(--pg-fg);font-family:var(--f-ui);font-siz
   box-shadow:0 22px 44px -22px rgba(0,0,0,.5)}
 .screen{position:relative;isolation:isolate;width:100%;height:100%;border-radius:43px;overflow:hidden;
   display:flex;flex-direction:column;font-size:13px;line-height:1.35;-webkit-font-smoothing:antialiased;
-  user-select:none;-webkit-user-select:none}
+  user-select:none;-webkit-user-select:none;container-type:size;container-name:scr}
 .screen button{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;
   padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .screen button:focus-visible{outline:2px solid currentColor;outline-offset:1px}
@@ -66,6 +66,9 @@ body{background:var(--pg-bg);color:var(--pg-fg);font-family:var(--f-ui);font-siz
   padding:7px 30px 0;font:600 13px/1 var(--f-ui)}
 .sb .isl{position:absolute;left:50%;top:9px;width:78px;height:22px;margin-left:-39px;border-radius:12px;background:#0B0B0D}
 .sb svg{display:block}
+.body{flex:1;min-height:0;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+.sp{display:block;flex:1 1 0;min-height:0}
+.sp-b{flex:1.5 1 10px;min-height:10px}
 body[data-plan="paid"] .lki{display:none}
 
 /* ============ screen: pop ============ */
@@ -78,28 +81,31 @@ body[data-plan="paid"] .lki{display:none}
 /* header: the win-rate bar is the header */
 .vc .hd{flex:none;height:42px;display:flex;align-items:center;gap:10px;padding:0 12px}
 .vc .wr{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
-.vc .wl{display:flex;align-items:center;justify-content:space-between;gap:6px;height:16px;font:700 10.5px/1 var(--f-maru);white-space:nowrap}
-.vc .wl b{display:inline-block;min-width:2.2em;font:900 13px/1 var(--f-maru);font-variant-numeric:tabular-nums}
-.vc .wl .l b{text-align:right;margin-right:2px}
-.vc .wl .r b{margin-left:2px}
-.vc .jg{font:900 10.5px/1 var(--f-maru);padding:2px 8px 3px;border:1.5px solid var(--ink);border-radius:99px;background:#fff}
+.vc .wl{display:flex;align-items:center;gap:6px;height:16px;white-space:nowrap}
+.vc .wl .nm{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;font:700 11.5px/1.35 var(--f-maru)}
+.vc .wl .nm.r{text-align:right}
+.vc .jg{flex:none;font:900 10.5px/1 var(--f-maru);padding:2px 8px 3px;border:1.5px solid var(--ink);border-radius:99px;background:#fff}
 .vc .jg[data-who="you"]{background:var(--you)}
 .vc .jg[data-who="opp"]{background:var(--opp)}
-.vc .bar{position:relative;height:13px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
+.vc .bar{position:relative;height:16px;border:var(--ol);border-radius:99px;background:var(--opp);overflow:hidden}
+.vc .bar b{position:absolute;top:0;bottom:0;z-index:1;display:flex;align-items:center;font:900 9.5px/1 var(--f-maru);font-variant-numeric:tabular-nums}
+.vc .bar .pl{left:6px}
+.vc .bar .pr{right:6px}
 .vc .bar .y{position:absolute;left:0;top:0;bottom:0;background:var(--you);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
 .vc .bar .nt{position:absolute;left:50%;top:0;bottom:0;margin-left:-1px;border-left:2px dotted rgba(36,40,70,.5)}
 
-/* players and piece stands */
-.vc .pl{flex:none;height:26px;display:flex;align-items:center;gap:6px;padding:0 12px}
-.vc .pl .av{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:10px;line-height:1;background:var(--opp)}
-.vc .pl[data-me] .av{background:var(--you)}
-.vc .pl .nm{font:700 12.5px/1 var(--f-maru);white-space:nowrap}
-.vc .pl .me{display:none;font:900 9.5px/1 var(--f-maru);background:var(--ink);color:#fff;padding:3px 6px;border-radius:99px;flex:none}
-.vc .pl[data-me] .me{display:inline-block}
-.vc .pl .tg{font:500 10.5px/1 var(--f-maru);color:var(--ink2);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.vc .tn{display:none;font:900 9.5px/1 var(--f-maru);background:var(--mint);border:1.5px solid var(--ink);padding:2px 6px;border-radius:99px;flex:none}
-.screen[data-turn="s"] .pl[data-side="s"] .tn,.screen[data-turn="g"] .pl[data-side="g"] .tn{display:inline-block}
-.vc .tray{margin-left:auto;flex:none;display:flex;align-items:center;height:23px;padding:0 4px 0 3px;border:1.5px solid var(--ink);border-radius:8px;background:#fff}
+/* piece stands: one row, you on the left and the opponent on the right (the same sides as the bar above) */
+.vc .pls{flex:none;height:26px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 12px;overflow:hidden}
+.vc .pp{display:flex;align-items:center;gap:5px;min-width:0;flex:none}
+.vc .pp .id{display:flex;align-items:center;gap:4px;flex:none;padding:1px 8px 1px 1px;border:1.5px solid transparent;border-radius:99px}
+.vc .pp[data-who="opp"] .id{padding:1px 1px 1px 8px}
+.vc .pp .av{width:19px;height:19px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:9.5px;line-height:1;background:var(--you)}
+.vc .pp[data-who="opp"] .av{background:var(--opp)}
+.vc .pp .wd{font:900 10px/1.2 var(--f-maru);white-space:nowrap}
+.screen[data-turn="s"] .pp[data-side="s"] .id,.screen[data-turn="g"] .pp[data-side="g"] .id{background:var(--mint);border-color:var(--ink)}
+.vc .pls.dense .hk svg{width:15px;height:16.2px}
+.vc .pls.dense .hk b{font-size:9px}
+.vc .tray{flex:none;display:flex;align-items:center;height:23px;padding:0 4px 0 3px;border:1.5px solid var(--ink);border-radius:8px;background:#fff}
 .vc .hk{display:flex;align-items:flex-end;height:20px;padding:0 1px;border-radius:5px}
 .vc .hk.on{background:var(--you)}
 .vc .hk svg{display:block;width:17px;height:18.4px;overflow:visible}
@@ -110,7 +116,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .t0{font:700 9.5px/1 var(--f-maru);color:var(--ink2);padding:0 3px}
 
 /* board */
-.vc .bdw{flex:none;padding:0 8px;cursor:pointer}
+.vc .bdw{flex:none;padding:2px 8px 0;cursor:pointer}
 .bd{display:block;width:100%;height:auto;overflow:visible}
 .vc .b-sh{fill:var(--ink)}
 .vc .b-rim{fill:#FFCB6B;stroke:var(--ink);stroke-width:5}
@@ -150,7 +156,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .b-ck text{font:900 23px/1 var(--f-maru);fill:var(--ink)}
 
 /* move controls */
-.vc .ct{flex:none;display:grid;grid-template-columns:34px 34px 1fr 34px 34px;gap:7px;align-items:center;padding:2px 12px 6px}
+.vc .ct{flex:none;display:grid;grid-template-columns:34px 34px 1fr 34px 34px;gap:7px;align-items:center;padding:4px 12px 6px}
 .vc .ct .rb{width:34px;height:34px}
 .vc .now{position:relative;height:34px;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;border-radius:99px;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);white-space:nowrap}
 .vc .now:active{transform:translateY(2px);box-shadow:none}
@@ -163,8 +169,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .mk-good{background:var(--mint)}
 
 /* recommendation card + graph */
-.vc .lower{flex:1;min-height:0;display:flex;flex-direction:column;gap:5px;padding:0 12px 10px;overflow-y:auto;overscroll-behavior:contain}
-.vc .cs{flex:none}
+.vc .cs{flex:none;margin:0 12px}
 .vc .tbs{display:flex;align-items:flex-end;gap:4px;min-height:29px;padding:0 1px 0 16px;position:relative;z-index:1;margin-bottom:-2px}
 .vc .tbx{flex:none;height:24px;display:flex;align-items:center;gap:4px;padding:0 10px;border:var(--ol);border-radius:10px 10px 0 0;background:#FFE9A8;font:900 11px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
 .vc .tbx.on{height:27px;background:#fff;color:var(--ink);border-bottom-color:#fff}
@@ -181,7 +186,8 @@ body[data-plan="paid"] .lki{display:none}
 .vc .bc .w{grid-column:2;grid-row:1/3;width:43px;height:43px;border-radius:50%;border:var(--ol);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
 .vc .bc .w b{font:900 14px/1 var(--f-maru)}
 .vc .bc .w span{font:700 9px/1 var(--f-maru)}
-.vc .gc{flex:1 1 auto;min-height:100px;display:flex;flex-direction:column;padding:4px 5px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
+/* the graph takes spare height first, up to a width-based cap; anything beyond that is shared out as spacing */
+.vc .gc{flex:1000 0 133px;max-height:160px;max-height:calc(29px + 34cqw);margin:5px 12px 0;display:flex;flex-direction:column;padding:4px 5px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
 .vc .ro{flex:none;height:20px;display:flex;align-items:center;gap:6px;padding:0 5px;font:700 10.5px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
 .vc .ro b{font:900 12.5px/1 var(--f-maru);color:var(--ink);font-variant-numeric:tabular-nums}
 .vc .ro .dl{font:900 10.5px/1 var(--f-maru);color:var(--ink);padding:2px 6px 3px;border:1.5px solid var(--ink);border-radius:99px;background:#fff;font-variant-numeric:tabular-nums}
@@ -195,8 +201,10 @@ body[data-plan="paid"] .lki{display:none}
 .vc .g-ph1{fill:#FFF7DF}
 .vc .g-up{fill:#FFE27A}
 .vc .g-dn{fill:#C3D3FF}
-.vc .g-mid{stroke:var(--ink);opacity:.3}
-.vc .g-q{stroke:var(--ink);opacity:.09}
+.vc .g-gl{stroke:var(--ink);opacity:.11}
+.vc .g-g0{stroke:var(--ink);opacity:.4}
+.vc .g-yl{font:700 8px/1 var(--f-maru);fill:var(--ink2);font-variant-numeric:tabular-nums}
+.vc .g-ll{font:900 8.5px/1 var(--f-maru);fill:var(--ink2)}
 .vc .g-sep{stroke:var(--ink);opacity:.3}
 .vc .g-ln{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .vc .g-stem{stroke:var(--ink);opacity:.4}
@@ -219,6 +227,34 @@ body[data-plan="paid"] .lki{display:none}
 .vc .g-tip{position:absolute;top:-5px;z-index:5;transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap;display:flex;align-items:baseline;gap:6px;
   padding:4px 8px;border-radius:8px;background:#fff;color:var(--ink);border:1.5px solid var(--ink);font:700 11px/1.3 var(--f-maru)}
 .vc .g-tip b{font-weight:900;font-size:12px}
+
+/* taller screens: the pieces of the screen grow a little before any space is left over */
+@container scr (min-height:810px){
+  .vc .pls{height:30px}
+  .vc .pp .av{width:21px;height:21px;font-size:10.5px}
+  .vc .pp .wd{font-size:11px}
+  .vc .wl .nm{font-size:12.5px}
+  .vc .tray{height:26px}
+  .vc .hk{height:23px}
+  .vc .hk svg{width:19.5px;height:21.1px}
+  .vc .hk b{font-size:11px}
+  .vc .ct{grid-template-columns:38px 38px 1fr 38px 38px;padding:5px 12px 8px}
+  .vc .ct .rb{width:38px;height:38px}
+  .vc .now{height:38px}
+  .vc .now .n2{font-size:16px}
+  .vc .tbs{min-height:31px}
+  .vc .tbx{height:26px;font-size:11.5px}
+  .vc .tbx.on{height:29px}
+  .vc .aib{height:27px;font-size:11.5px}
+  .vc .bc{min-height:62px;padding:5px 10px 7px 13px}
+  .vc .bc .m{font-size:23px}
+  .vc .bc .p{font-size:12px}
+  .vc .bc .w{width:48px;height:48px}
+  .vc .bc .w b{font-size:15.5px}
+  .vc .ro{height:23px;font-size:11px}
+  .vc .ro b{font-size:13px}
+  .vc .gc{flex-basis:142px;max-height:164px;max-height:calc(32px + 34cqw)}
+}
 
 /* toast and sheets */
 .vc .toast{position:absolute;left:50%;top:44%;z-index:5;transform:translate(-50%,-50%);max-width:84%;padding:8px 14px;border-radius:99px;background:var(--ink);color:#fff;
@@ -284,7 +320,7 @@ body[data-plan="paid"] .lki{display:none}
   <header class="pg-head">
     <div class="tx">
       <h1>解析画面 ポップ案</h1>
-      <p>3案のうちC（ポップ）をもとに、盤面と形勢グラフを作り込みました。3案を並べた比較ページはそのまま残しています。</p>
+      <p>C（ポップ）をもとにした解析画面です。盤面と形勢グラフを作り込んでいます。</p>
     </div>
     <div class="pg-ctl">
       <span class="lb">プラン</span>
@@ -298,17 +334,22 @@ body[data-plan="paid"] .lki{display:none}
   <main class="stage">
     <div class="phone"><div class="screen vc" id="scr">
       <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+      <div class="body">
       <header class="hd">
         <button type="button" class="rb" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
         <div class="wr" role="img" data-b="bar">
-          <div class="wl"><span class="l">あなた<b data-b="barl"></b></span><span class="jg" data-b="jg"></span><span class="r"><b data-b="barr"></b>相手</span></div>
-          <div class="bar"><span class="y" data-b="bary"></span><i class="nt"></i></div>
+          <div class="wl"><span class="nm" data-b="youname"></span><span class="jg" data-b="jg"></span><span class="nm r" data-b="oppname"></span></div>
+          <div class="bar"><span class="y" data-b="bary"></span><i class="nt"></i><b class="pl" data-b="barl"></b><b class="pr" data-b="barr"></b></div>
         </div>
         <button type="button" class="rb" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
       </header>
-      <div class="pl" data-side="g"><span class="av">☖</span><span class="nm" data-b="gname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="gtags"></span><span class="tray" data-b="ghand"></span></div>
+      <div class="pls" data-b="pls">
+        <div class="pp" data-who="you"><span class="id"><span class="av" data-b="youav"></span><span class="wd" data-b="youwd"></span></span><span class="tray" data-b="youhand"></span></div>
+        <div class="pp" data-who="opp"><span class="tray" data-b="opphand"></span><span class="id"><span class="wd" data-b="oppwd"></span><span class="av" data-b="oppav"></span></span></div>
+      </div>
+      <i class="sp"></i>
       <div class="bdw" data-b="board"></div>
-      <div class="pl" data-side="s"><span class="av">☗</span><span class="nm" data-b="sname"></span><span class="me">あなた</span><span class="tn">手番</span><span class="tg" data-b="stags"></span><span class="tray" data-b="shand"></span></div>
+      <i class="sp"></i>
       <div class="ct">
         <button type="button" class="rb" data-act="first" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
         <button type="button" class="rb" data-act="prev" aria-label="1手戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
@@ -316,12 +357,14 @@ body[data-plan="paid"] .lki{display:none}
         <button type="button" class="rb" data-act="next" aria-label="1手進む"><svg class="ic"><use href="#i-next"/></svg></button>
         <button type="button" class="rb" data-act="last" aria-label="最後へ"><svg class="ic"><use href="#i-last"/></svg></button>
       </div>
-      <div class="lower">
-        <div class="cs" data-b="cands"></div>
-        <div class="gc">
-          <div class="ro" data-b="ro"></div>
-          <div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div>
-        </div>
+      <i class="sp"></i>
+      <div class="cs" data-b="cands"></div>
+      <i class="sp"></i>
+      <div class="gc">
+        <div class="ro" data-b="ro"></div>
+        <div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div>
+      </div>
+      <i class="sp sp-b"></i>
       </div>
       <div class="toast" data-b="toast" role="status" hidden></div>
       <div class="shw" data-b="sheet" hidden>
@@ -334,33 +377,31 @@ body[data-plan="paid"] .lki{display:none}
     </div></div>
 
     <aside class="notes">
+      <h2>今回変えたところ</h2>
+      <ul>
+        <li>形勢グラフの縦軸を評価値にして、−3000 から +3000 まで 1000 刻みの目盛りを入れました。プラスがあなたの有利です。グラフ上の数字と棋譜一覧の数字も評価値にそろえました。</li>
+        <li>対局者名は形勢バーの左右に、持ち駒はその下の1行の左右に置きました。どちらも左があなた、右が相手です。手番の側は「あなたの番」「相手の番」と緑で出ます。</li>
+        <li>戦型と囲いの表示は、この画面から外しました。</li>
+        <li>縦に長い画面では、グラフだけが伸びないようにしました。グラフは横幅に応じた高さで止まり、次に操作ボタンやカードが少し大きくなり、それでも余る分は各段の間隔に均等に配ります。</li>
+      </ul>
       <h2>盤面</h2>
       <ul>
-        <li>縁のある盤にして、符号を縁に載せました。自陣と敵陣は地の色をわずかに変えています。</li>
-        <li>駒に厚みを付けました。玉はあなたが黄、相手が青で、すぐ見つかります。</li>
-        <li>直前に動いた駒に、指し手の評価（◎ 好手・△ 疑問手・× 悪手）を付けます。動かす前の升は点線で残ります。</li>
+        <li>縁のある盤に符号を載せ、自陣と敵陣は地の色をわずかに変えています。</li>
+        <li>駒には厚みがあり、玉はあなたが黄、相手が青です。</li>
+        <li>直前に動いた駒に、指し手の評価（◎ 好手・△ 疑問手・× 悪手）が付きます。動かす前の升は点線で残ります。</li>
         <li>手番側の駒や持ち駒をタップすると、動ける場所が出ます。王手のときは玉に印が出ます。</li>
-        <li>持ち駒は名前の横の駒台にまとめました。</li>
       </ul>
       <h2>形勢グラフ</h2>
       <ul>
-        <li>横幅いっぱいにして、高さも増やしました。画面の縦に余裕があるほど大きくなります。</li>
-        <li>上の列にあなたの手、下の列に相手の手の評価を並べました。「詰」は詰みが見つかった地点です。</li>
-        <li>序盤・中盤・終盤の区切りを入れました。</li>
-        <li>グラフの上に、その手で勝率が何％から何％になったかを出します。悪手や疑問手のときは、右の表示から最善手の局面へ戻れます。</li>
+        <li>上の列にあなたの手、下の列に相手の手の評価が並びます。「詰」は詰みが見つかった地点です。</li>
+        <li>グラフの上に、その手で評価値がいくつからいくつになったかを出します。悪手や疑問手のときは、右の表示から最善手の局面へ戻れます。</li>
         <li>手数の付いたつまみを左右にドラッグして動かせます。印の近くをタップすると、その手に合わせます。</li>
-      </ul>
-      <h2>合わせて変えたところ</h2>
-      <ul>
-        <li>グラフの高さを確保するため、形勢バーを最上段の1行にまとめました（画面タイトルはなくしています）。</li>
-        <li>「AIに聞く」は、おすすめカードの右上に移しました。</li>
-        <li>詰みがあるときは、おすすめのタブが「詰み」に変わります。</li>
       </ul>
       <h2>まだ仮のもの</h2>
       <ul>
         <li>動ける場所をタップしても、まだ駒は動きません（分岐して試す機能は次の段階）。</li>
         <li>序盤・中盤・終盤の区切りは、簡単な規則で決めた仮のものです。</li>
-        <li>棋譜と評価値は前回と同じダミーです。水匠の出力ではありません。</li>
+        <li>棋譜と評価値はダミーです。水匠の出力ではありません。</li>
       </ul>
     </aside>
   </main>
@@ -373,7 +414,7 @@ body[data-plan="paid"] .lki{display:none}
 const G = window.KIFU;
 if (!G || !G.positions) { document.querySelector('.stage').textContent = 'サンプル棋譜のデータを読み込めませんでした。'; return; }
 const P = G.positions, N = P.length - 1, M = G.meta;
-const SELF = M.self === 'gote' ? 'g' : 's';
+const SELF = M.self === 'gote' ? 'g' : 's', OTHER = SELF === 's' ? 'g' : 's';
 const S = { ply: 0, plan: 'paid', sel: 0, sheet: null, pick: null, targets: [] };
 const SCR = document.getElementById('scr');
 const R = {};
@@ -393,6 +434,14 @@ const kindOfMark = (p) => (p.mark ? MKC[p.mark] : p.missedTsume ? 'dub' : null);
 const cpOf = (o) => (o.mate != null ? (o.mate > 0 ? 3000 : -3000) : o.cp);
 const wrSelf = (o) => { const w = 100 / (1 + Math.exp(-cpOf(o) / 600)); return SELF === 's' ? w : 100 - w; };
 const pct = (w) => Math.max(1, Math.min(99, Math.round(w)));
+/* evaluation from your side: plus means you are ahead. Clamped to ±3000 for the graph. */
+const valOf = (o) => (SELF === 's' ? 1 : -1) * cpOf(o);
+const sgn = (v) => (v > 0 ? '+' + v : v < 0 ? '−' + -v : '±0');
+const fmtVal = (o) => {
+  if (o.end) return o.end === '詰み' ? (M.winner === (SELF === 's' ? 'sente' : 'gote') ? '+' : '−') + '詰み' : '終局';
+  if (o.mate != null) return ((o.mate > 0) === (SELF === 's') ? '+' : '−') + '詰み';
+  return sgn(valOf(o));
+};
 const JN = ['互角', 'やや有利', '有利', '優勢', '勝勢'];
 const judge = (o) => { const c = cpOf(o), a = Math.abs(c); return { lv: a < 150 ? 0 : a < 450 ? 1 : a < 1000 ? 2 : a < 2000 ? 3 : 4, side: c >= 0 ? 's' : 'g' }; };
 const plyLabel = (p) => (p ? p + '手目' : '開始局面');
@@ -632,43 +681,48 @@ const MARKED = new Set(MARKS.map((m) => m.i));
 
 /* ---------- graph ---------- */
 let GF = null;
+const AXIS = [3000, 2000, 1000, 0, -1000, -2000, -3000];
 function buildGraph() {
   const host = R.graph, W = host.clientWidth, H = host.clientHeight;
   if (W < 60 || H < 50) return;
-  const padL = 23, padR = 11, top = 2, axis = 19, bot = H - axis, y0 = top + 3, y1 = bot - 3, mid = (y0 + y1) / 2;
-  const X = (i) => padL + ((W - padL - padR) * i) / N, Y = (i) => y0 + (y1 - y0) * (1 - wrSelf(P[i]) / 100);
+  const padL = 35, padR = 10, axis = 19, bot = H - axis, y0 = 6, y1 = bot - 5, xl = padL - 5, xr = W - 2;
+  const X = (i) => padL + ((W - padL - padR) * i) / N;
+  const YV = (v) => y0 + ((y1 - y0) * (3000 - Math.max(-3000, Math.min(3000, v)))) / 6000;
+  const Y = (i) => YV(valOf(P[i])), mid = YV(0);
   const hs = (X(1) - X(0)) / 2, f1 = (n) => n.toFixed(1);
-  let bands = '', seps = '', labs = '';
+  let bands = '', seps = '', labs = '', grid = '';
   PH.forEach((ph, k) => {
-    const xa = k ? X(ph.a) - hs : 1, xb = k === PH.length - 1 ? W - 1 : X(ph.b) + hs;
-    if (k % 2 === 0) bands += `<rect class="g-ph1" x="${f1(xa)}" y="${top}" width="${f1(xb - xa)}" height="${bot - top}" rx="5"/>`;
-    if (k) seps += `<line class="g-sep" x1="${f1(xa)}" x2="${f1(xa)}" y1="${top}" y2="${bot + 6}"/>`;
-    const lx = (Math.max(xa, padL - 8) + xb) / 2;
+    const xa = k ? X(ph.a) - hs : xl, xb = k === PH.length - 1 ? xr : X(ph.b) + hs, lx = (xa + xb) / 2;
+    if (k % 2 === 0) bands += `<rect class="g-ph1" x="${f1(xa)}" y="${y0}" width="${f1(xb - xa)}" height="${f1(y1 - y0)}"/>`;
+    if (k) seps += `<line class="g-sep" x1="${f1(xa)}" x2="${f1(xa)}" y1="${y0}" y2="${bot + 6}"/>`;
     labs += `<text class="g-ph" data-x="${f1(lx)}" x="${f1(lx)}" y="${H - 5}" text-anchor="middle">${ph.n}</text>`;
   });
+  for (const v of AXIS) {
+    const y = f1(YV(v));
+    grid += `<line class="${v ? 'g-gl' : 'g-g0'}" x1="${xl}" x2="${xr}" y1="${y}" y2="${y}"/><text class="g-yl" x="${xl - 3}" y="${y}" dy=".35em" text-anchor="end">${v ? sgn(v) : '0'}</text>`;
+  }
   let d = '';
   for (let i = 0; i <= N; i++) d += (i ? 'L' : 'M') + f1(X(i)) + ' ' + f1(Y(i));
-  const area = `${d}L${f1(X(N))} ${mid}L${f1(X(0))} ${mid}Z`;
+  const area = `${d}L${f1(X(N))} ${f1(mid)}L${f1(X(0))} ${f1(mid)}Z`;
   const lastX = [[-99, -99], [-99, -99]];
   let stems = '', mk = '';
   for (const m of MARKS) {
     const lane = m.self ? 0 : 1, x = X(m.i), row = x - lastX[lane][0] >= 13 ? 0 : 1;
     lastX[lane][row] = x;
-    const y = lane === 0 ? y0 + 8 + row * 11.5 : y1 - 8 - row * 11.5, cy = Y(m.i);
+    const y = lane === 0 ? y0 + 9 + row * 11.5 : y1 - 9 - row * 11.5, cy = Y(m.i);
     if (Math.abs(cy - y) > 9) stems += `<line class="g-stem" x1="${f1(x)}" x2="${f1(x)}" y1="${f1(y)}" y2="${f1(cy)}"/>`;
     mk += `<g class="g-m ${m.kind}" data-i="${m.i}" transform="translate(${f1(x)} ${f1(y)})">${m.kind === 'mate' ? '<rect class="bg" x="-6.5" y="-6.5" width="13" height="13" rx="3.5"/><text y="3.1" text-anchor="middle">詰</text>' : `<circle class="bg" r="6.3"/>${glyph(m.kind, 2.6)}`}</g>`;
   }
   host.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
-    <defs><clipPath id="gu"><rect x="0" y="0" width="${W}" height="${mid}"/></clipPath><clipPath id="gd"><rect x="0" y="${mid}" width="${W}" height="${H - mid}"/></clipPath></defs>
-    ${bands}
-    <line class="g-q" x1="${padL - 6}" x2="${W - 3}" y1="${f1((y0 + mid) / 2)}" y2="${f1((y0 + mid) / 2)}"/><line class="g-q" x1="${padL - 6}" x2="${W - 3}" y1="${f1((y1 + mid) / 2)}" y2="${f1((y1 + mid) / 2)}"/>
+    <defs><clipPath id="gu"><rect x="0" y="0" width="${W}" height="${f1(mid)}"/></clipPath><clipPath id="gd"><rect x="0" y="${f1(mid)}" width="${W}" height="${f1(H - mid)}"/></clipPath></defs>
+    ${bands}${grid}
     <path class="g-up" d="${area}" clip-path="url(#gu)"/><path class="g-dn" d="${area}" clip-path="url(#gd)"/>
-    <line class="g-mid" x1="${padL - 6}" x2="${W - 3}" y1="${f1(mid)}" y2="${f1(mid)}"/>
     ${seps}<path class="g-ln" d="${d}"/>${stems}
-    <circle class="g-av you" cx="9" cy="${f1(y0 + 8)}" r="5.5"/><circle class="g-av opp" cx="9" cy="${f1(y1 - 8)}" r="5.5"/>
+    <circle class="g-av you" cx="${padL + 4}" cy="${y0 + 9}" r="4"/><text class="g-ll" x="${padL + 11}" y="${y0 + 9}" dy=".35em">あなた</text>
+    <circle class="g-av opp" cx="${padL + 4}" cy="${f1(y1 - 9)}" r="4"/><text class="g-ll" x="${padL + 11}" y="${f1(y1 - 9)}" dy=".35em">相手</text>
     ${labs}
-    <line class="g-hov" y1="${top}" y2="${bot}" visibility="hidden"/>
-    <line class="g-cur" y1="${top}" y2="${bot + 2}"/>${mk}<circle class="g-dot" r="4.5"/>
+    <line class="g-hov" y1="${y0}" y2="${bot}" visibility="hidden"/>
+    <line class="g-cur" y1="${y0 - 3}" y2="${bot + 2}"/>${mk}<circle class="g-dot" r="4.5"/>
     <g class="g-hd"><rect x="-15" y="0" width="30" height="16" rx="8"/><text y="11.6" text-anchor="middle"></text></g>
   </svg><div class="g-tip" hidden><b></b><span></span></div>`;
   GF = { W, padL, span: W - padL - padR, X, Y, hy: bot + 2, cur: host.querySelector('.g-cur'), dot: host.querySelector('.g-dot'), hd: host.querySelector('.g-hd'), hov: host.querySelector('.g-hov'), tip: host.querySelector('.g-tip') };
@@ -707,7 +761,7 @@ function bindGraph() {
     const g = GF; if (!g || e.pointerType !== 'mouse') return;
     const i = plyAt(e), x = g.X(i);
     g.hov.setAttribute('x1', x); g.hov.setAttribute('x2', x); g.hov.setAttribute('visibility', 'visible');
-    g.tip.firstChild.textContent = pct(wrSelf(P[i])) + '%';
+    g.tip.firstChild.textContent = fmtVal(P[i]);
     g.tip.lastChild.textContent = plyLabel(i) + (i ? ' ' + han(P[i].move.ja) : '');
     g.tip.style.left = Math.max(60, Math.min(g.W - 60, x)) + 'px';
     g.tip.hidden = false;
@@ -720,14 +774,15 @@ function bindGraph() {
 
 /* ---------- panels ---------- */
 function readoutHTML(p) {
-  const pos = P[p], w = pct(wrSelf(pos));
-  if (!p) return `<span>開始局面</span><b>${w}%</b>`;
-  const w0 = pct(wrSelf(P[p - 1])), d = w - w0;
-  let h = `<span>あなたの勝率</span><b>${w0}% → ${w}%</b><span class="dl${d > 0 ? ' up' : d < 0 ? ' dn' : ''}">${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}</span>`;
-  if (pos.missedTsume && P[p - 1].tsume) h += `<button type="button" class="rl" data-jump="${p - 1}" data-k="dub">${pos.missedTsume}手詰めあり ›</button>`;
+  const pos = P[p];
+  if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
+  const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
+  let h = `<span>評価値</span><b>${fmtVal(prev)} → ${fmtVal(pos)}</b>`;
+  if (plain(prev) && plain(pos)) { const d = valOf(pos) - valOf(prev); h += `<span class="dl${d > 0 ? ' up' : d < 0 ? ' dn' : ''}">${sgn(d)}</span>`; }
+  if (pos.missedTsume && prev.tsume) h += `<button type="button" class="rl" data-jump="${p - 1}" data-k="dub">${pos.missedTsume}手詰めあり ›</button>`;
   else if (pos.mark === '好手') h += '<span class="rn">好手！</span>';
   else if (pos.mark) {
-    const best = (P[p - 1].cands || [])[0];
+    const best = (prev.cands || [])[0];
     if (best && best.usi !== pos.move.usi) h += `<button type="button" class="rl" data-jump="${p - 1}" data-k="${MKC[pos.mark]}">最善は ${mv(best.ja)} ›</button>`;
   }
   return h;
@@ -754,7 +809,7 @@ function movesHTML() {
   let h = '';
   for (let i = 0; i <= N; i++) {
     const p = P[i];
-    h += `<button type="button" class="mr" data-ply="${i}"><span class="mn">${i || ''}</span><span class="mm">${i ? mv(p.move.ja) : '開始局面'}</span><span>${marksOf(p)}</span><span class="me2">${pct(wrSelf(p))}%</span></button>`;
+    h += `<button type="button" class="mr" data-ply="${i}"><span class="mn">${i || ''}</span><span class="mm">${i ? mv(p.move.ja) : '開始局面'}</span><span>${marksOf(p)}</span><span class="me2">${fmtVal(p)}</span></button>`;
   }
   return h;
 }
@@ -784,13 +839,16 @@ function markCurrent() {
 }
 function renderBoard() {
   R.board.innerHTML = boardSVG(S.ply);
-  R.ghand.innerHTML = trayHTML(POS[S.ply].hands.g, 'g');
-  R.shand.innerHTML = trayHTML(POS[S.ply].hands.s, 's');
+  R.youhand.innerHTML = trayHTML(POS[S.ply].hands[SELF], SELF);
+  R.opphand.innerHTML = trayHTML(POS[S.ply].hands[OTHER], OTHER);
+  R.pls.classList.toggle('dense', Object.keys(POS[S.ply].hands.s).length + Object.keys(POS[S.ply].hands.g).length >= 10);
 }
 function renderCands() { R.cands.innerHTML = candsHTML(S.ply); renderBoard(); }
 function renderPly() {
   const p = S.ply, pos = P[p];
   SCR.dataset.turn = p === N ? '-' : turnSide(p);
+  R.youwd.textContent = p < N && turnSide(p) === SELF ? 'あなたの番' : 'あなた';
+  R.oppwd.textContent = p < N && turnSide(p) === OTHER ? '相手の番' : '相手';
   R.plyno.textContent = plyLabel(p);
   R.move.textContent = pos.move ? han(pos.move.ja) : '';
   R.mark.innerHTML = marksOf(pos);
@@ -838,10 +896,11 @@ function toast(msg) {
 function clearPick() { if (S.pick) { S.pick = null; S.targets = []; renderBoard(); } }
 
 /* ---------- static content ---------- */
-const tags = (t) => [...t.strategy.slice(-1), ...t.castle.slice(0, 1)].join('・');
-R.gname.textContent = M.gote; R.sname.textContent = M.sente;
-R.gtags.textContent = tags(M.tags.gote); R.stags.textContent = tags(M.tags.sente);
-SCR.querySelector(`.pl[data-side="${SELF}"]`).setAttribute('data-me', '');
+const nameOf = (side) => (side === 's' ? M.sente : M.gote);
+R.youname.textContent = nameOf(SELF); R.oppname.textContent = nameOf(OTHER);
+R.youav.textContent = SELF === 's' ? '☗' : '☖'; R.oppav.textContent = OTHER === 's' ? '☗' : '☖';
+SCR.querySelector('.pp[data-who="you"]').dataset.side = SELF;
+SCR.querySelector('.pp[data-who="opp"]').dataset.side = OTHER;
 R.moves.innerHTML = movesHTML();
 R.graph.setAttribute('aria-valuemax', N);
 bindGraph();
