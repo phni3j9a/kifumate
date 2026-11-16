@@ -427,17 +427,17 @@ function planPage() {
   const ok = '<span class="ok"><svg class="ic"><use href="#i-check"/></svg></span>', no = '<span class="no">—</span>';
   const head = paid()
     ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今週）', u.precise, u.preciseMax, '局')}${meter('解析の合計（今週）', u.total, u.totalMax, '局', '合計には精密解析も含みます。毎週 月曜の午前0時（日本時間）に 0 に戻ります')}</div>`
-    : `<div class="cd pwl">${pic('onb-5', 'pwi')}<div><div class="prc"><small>月額</small>780<small>円</small></div><p>精密な解析、指すたびに更新される評価値、AIコーチの解説と質問が使えます。</p></div></div>`;
+    : `<div class="cd pwl">${pic('onb-5', 'pwi')}<div><div class="prc"><small>月額</small>780<small>円</small></div><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div></div>`;
   return { title: '有料プラン', html: `<div class="pgc">${head}
     <table class="cmp"><thead><tr><th>できること</th><th>無料</th><th>有料</th></tr></thead><tbody>
       ${rowc('棋譜の保存・再生<br>戦績の集計', ok, ok)}
-      ${rowc('対局の解析', `<b>週${u.freeMax}局</b><br>候補1手`, `<b>精密解析 週${u.preciseMax}局</b><br>候補3手・深い読み<br>合計 週${u.totalMax}局`)}
-      ${rowc('分岐して手を試す', `${ok}<br>読み筋の評価値`, ok)}
-      ${rowc('リアルタイム解析', no, `${ok}<br>指すたびに評価値`)}
-      ${rowc('AIコーチ', no, '<b>解説と質問</b><br>精密解析した対局')}
+      ${rowc('対局の解析', `<b>ふつうの解析<br>週${u.freeMax}局</b><br>候補1手`, `<b>精密解析<br>週${u.preciseMax}局</b><br>候補3手・深い読み<br>合計 週${u.totalMax}局`)}
+      ${rowc('分岐して手を試す', ok, ok)}
+      ${rowc('分岐中の解析', no, ok)}
+      ${rowc('AIコーチ', no, '<b>解説と質問</b>')}
     </tbody></table>
-    <p class="hint">リアルタイム解析は月${u.rtMax}分（解析が動いている間を数えます）、AIコーチは月${u.aiMax}回まで使えます。残りが少なくなったら、お知らせします。</p>
-    <p class="mockn"><b>モック</b>　価格は仮の数字です。週の区切り（月曜の午前0時）と、リアルタイム解析・AIコーチの上限の期間（月ごと）は、仮に置いています。</p>
+    <p class="hint">分岐中の解析は月${u.rtMax}分（解析が動いている間を数えます）、AIコーチは月${u.aiMax}回まで使えます。残りが少なくなったら、お知らせします。</p>
+    <p class="mockn"><b>モック</b>　価格は仮の数字です。週の区切り（月曜の午前0時）と、分岐中の解析・AIコーチの上限の期間（月ごと）は、仮に置いています。</p>
     <div class="acts">${paid() ? '<button type="button" class="bt wide" data-a="toast" data-v="実際のアプリでは、ストアの定期購入の画面が開きます">プランを管理する</button>' : '<button type="button" class="bt pri wide" data-a="subscribe">月額780円で登録する</button><small>毎月自動で更新されます。解約はいつでも、ストアの設定からできます。</small>'}</div>
     <div class="lnk"><button type="button" class="tx-b" data-a="restorebuy">購入を復元</button><button type="button" class="tx-b" data-a="toast" data-v="利用規約のページを開きます（モック）">利用規約</button><button type="button" class="tx-b" data-a="toast" data-v="プライバシーポリシーのページを開きます（モック）">プライバシーポリシー</button></div></div>` };
 }

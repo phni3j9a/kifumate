@@ -48,7 +48,7 @@ const fs = require('fs');
   await wait(9000); await has('解析中', 'queued game started after the first finished');
   await wait(9500); await hasNot('解析待ち');
   await act('back'); await act('tab', 'set'); await has('10 / 20局', 'two precise analyses counted'); await has('33 / 100局', 'and both count toward the weekly total');
-  await hasNot('リアルタイム解析（今月）', 'real-time minutes are not shown in the settings');
+  await hasNot('分岐中の解析（今月）', 'real-time minutes are not shown in the settings');
   await jump('queue'); await has('解析待ち', 'queue shortcut'); await has('いまの解析が終わると、続けて始まります');
 
   // 4. free plan: count goes down by one per analysis; saved precise results stay readable
@@ -70,11 +70,12 @@ const fs = require('fs');
   await jump('limit'); await has('今週の精密解析は残り0局'); await has('ふつうの解析（候補1手）は使えます');
   await jump('set'); await act('nav', 'about'); await has('送らないもの 対局者名'); await act('back');
   await act('nav', 'backup'); await has('iPhone と Android の間では、有料プランは引き継げません'); await act('back');
-  await act('nav', 'plan'); await has('合計 週100局'); await has('AIコーチは月100回まで'); await has('精密解析した対局');
+  await act('nav', 'plan'); await has('合計 週100局'); await has('AIコーチは月100回まで');
+  await has('ふつうの解析 週10局'); await has('分岐中の解析'); await hasNot('指すたびに評価値'); await hasNot('読み筋の評価値'); await hasNot('精密解析した対局', 'plan table');
 
   // 4c. the coach's uses and the real-time minutes are only mentioned when less than a tenth is left
   await jump('branch'); await wait(900); await hasNot('残り', 'no remaining minutes while plenty is left');
-  await jump('low'); await has('リアルタイム解析は、今月あと24分使えます'); await has('残り24分');
+  await jump('low'); await has('分岐中の解析は、今月あと24分使えます'); await has('残り24分');
   await act('ai'); await has('AIコーチは、今月あと7回使えます'); await act('aigen'); await wait(1800); await has('今月あと6回');
   for (let i = 0; i < 6; i++) { await click('#scr .sq'); await wait(1000); }
   await has('今月のAIコーチは上限に達しました', 'the coach stops at the limit, and the text stays readable'); await has('この対局のまとめ'); await act('aiclose');

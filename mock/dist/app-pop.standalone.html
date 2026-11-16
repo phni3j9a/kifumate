@@ -917,7 +917,7 @@ body[data-plan="free"] .vc .aib{background:#fff}
         <button type="button" data-jump="plan">有料プラン</button>
         <button type="button" data-jump="queue">解析の順番待ち</button>
         <button type="button" data-jump="limit">上限に達したとき</button>
-        <button type="button" data-jump="low">残りが少ないとき（AIコーチ・リアルタイム）</button>
+        <button type="button" data-jump="low">残りが少ないとき（AIコーチ・分岐中の解析）</button>
         <button type="button" data-jump="offline">解析中に通信が切れたとき</button>
         <button type="button" data-jump="fail">解析が失敗したとき</button>
       </div>
@@ -952,8 +952,8 @@ body[data-plan="free"] .vc .aib{background:#fff}
         <li>他社の対局サービスの名前は、画面にも説明文にも使いません。</li>
         <li>解析の回数は週ごとです。無料は週10局。有料は合計で週100局、そのうち精密解析は週20局までです。</li>
         <li>AIコーチは、精密解析した対局で使えます。ふつうの解析の対局では、精密解析でやり直す案内を出します。</li>
-        <li>AIコーチは100回、リアルタイム解析は300分が上限です。どちらも設定には出さず、残りが1割を切ったときだけ知らせます（上の「残りが少ないとき」で見られます）。</li>
-        <li>リアルタイム解析の時間は、解析が動いている間を数えます。</li>
+        <li>AIコーチは100回、分岐中の解析は300分が上限です。どちらも設定には出さず、残りが1割を切ったときだけ知らせます（上の「残りが少ないとき」で見られます）。</li>
+        <li>分岐中の解析の時間は、解析が動いている間を数えます。</li>
         <li>1局面あたりの探索時間は、ふつうの解析が250ms、精密解析が1000msです。</li>
         <li>有料プランは、iPhone と Android の間では引き継ぎません。棋譜と設定はバックアップで移せます。</li>
         <li>見本の対局を用意します（空の一覧の「見本の対局で試してみる」）。</li>
@@ -968,8 +968,8 @@ body[data-plan="free"] .vc .aib{background:#fff}
         <li>無料プランの分岐は、駒を自由に動かせます。評価値が出るのは、保存済みの読み筋に沿って進めたときだけです。候補の2位・3位は鍵付きで存在を見せています。</li>
         <li>有料プランをやめたあとも、保存済みの精密解析（候補3手）とAIコーチの文章は読めます。新しく作ることだけができなくなります。</li>
         <li>詰みは、印（詰）と、候補の「詰み」タブ・「3手詰め」の札で示します。評価値の欄には「詰み」と書かず、3000を超える差はどれも「3000以上」と書きます。</li>
-        <li>リアルタイム解析には、盤の上にオン・オフの切り替えを置きました。しばらく操作がないと自動で休止し、次の手でまた動き出します。残り時間は、1割を切るまで出しません。</li>
-        <li>有料プランの画面には、AIコーチとリアルタイム解析の上限を小さく書いています（買う前に分からない上限を避けるためです）。</li>
+        <li>分岐中の解析には、盤の上にオン・オフの切り替えを置きました。しばらく操作がないと自動で休止し、次の手でまた動き出します。残り時間は、1割を切るまで出しません。</li>
+        <li>有料プランの画面には、AIコーチと分岐中の解析の上限を小さく書いています（買う前に分からない上限を避けるためです）。</li>
         <li>AIコーチは、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
         <li>取り込みは1局ずつです。同じ棋譜をもう一度取り込もうとすると、保存せずに知らせます（取り込みを2回試すと見られます）。</li>
       </ul>
@@ -977,8 +977,8 @@ body[data-plan="free"] .vc .aib{background:#fff}
       <ul>
         <li>1手詰め・3手詰めの表示を残すかどうか（モックは残して、見せ方を単純にしました）。</li>
         <li>週の区切り（モックは月曜の午前0時・日本時間）。</li>
-        <li>AIコーチ100回とリアルタイム解析300分の期間（モックは月ごと）と、AIコーチの1回の数え方（モックは、解説の作成と質問1つを、それぞれ1回）。</li>
-        <li>操作がないときに、リアルタイム解析を休止するまでの時間（モックは30秒）。</li>
+        <li>AIコーチ100回と分岐中の解析300分の期間（モックは月ごと）と、AIコーチの1回の数え方（モックは、解説の作成と質問1つを、それぞれ1回）。</li>
+        <li>操作がないときに、分岐中の解析を休止するまでの時間（モックは30秒）。</li>
         <li>中止や失敗した解析を回数に数えるかどうか（モックは数えません）。</li>
         <li>取り込みで読めなかったときの理由の出し分けと、重複とみなす基準。</li>
       </ul>
@@ -1799,7 +1799,7 @@ function readoutHTML() {
     const n = S.br.at, q = S.br.base + n, a = brShown(), rs = rtState();
     let h = `<span class="bk">分岐 ${n}手目</span>`;
     if (rtBusy()) return h + '<span>解析中…</span>';
-    if (!a) return h + `<span>${rs === 'on' ? '評価値 —' : rs === 'offline' ? '通信できないため、評価値は出ません' : rs === 'limit' ? '今月のリアルタイム解析は残り0分' : rs === 'off' ? 'リアルタイム解析はオフ' : '評価値は出ません'}</span>`;
+    if (!a) return h + `<span>${rs === 'on' ? '評価値 —' : rs === 'offline' ? '通信できないため、評価値は出ません' : rs === 'limit' ? '今月の分岐中の解析は残り0分' : rs === 'off' ? '分岐中の解析はオフ' : '評価値は出ません'}</span>`;
     h += `${EVQ}<b>${fmtVal(a)}</b>`;
     if (q <= N && mode === 'done') h += `<span>本譜の${q}手目は</span><b>${fmtVal(P[q])}</b>`;
     else if (rs !== 'on') h += '<span>保存した読み筋</span>';
@@ -1850,15 +1850,15 @@ function branchCard() {
   const e = brNow(), rs = rtState(), a = brShown();
   const top = !OWN ? '最善' : e.turn === SELF ? 'おすすめ' : '相手の最善';
   let h = `<div class="tbs"><span class="tbx on">${a && a.next ? top : '分岐'}</span>`;
-  if (rs === 'free') h += '<button type="button" class="tbx lkt" data-a="lockinfo" data-v="rt"><svg class="ic"><use href="#i-lock"/></svg>リアルタイム解析</button>';
+  if (rs === 'free') h += '<button type="button" class="tbx lkt" data-a="lockinfo" data-v="rt"><svg class="ic"><use href="#i-lock"/></svg>分岐中の解析</button>';
   h += aiBtn() + '</div>';
-  if (rtBusy()) return h + say(`${S.rtWarm ? '解析中' : '準備中'}<span class="dots"><i></i><i></i><i></i></span>`, S.rtWarm ? 'この局面の評価値と最善手を調べています' : 'リアルタイム解析の準備をしています');
+  if (rtBusy()) return h + say(`${S.rtWarm ? '解析中' : '準備中'}<span class="dots"><i></i><i></i><i></i></span>`, S.rtWarm ? 'この局面の評価値と最善手を調べています' : '解析の準備をしています');
   if (a && a.next) return h + `<div class="bc"><span class="m">${mv(a.next.ja)}</span><span class="pw"><span class="p">${a.pv.map(mv).join(' ') || '　'}</span>${tryBtn('次の手', 'この読み筋を1手進める')}</span>${pie(a)}</div>`;
-  if (a) return h + `<div class="bc say"><span class="m">読み筋はここまで</span><span class="pw"><span class="p">${rs === 'free' ? 'この先は、リアルタイム解析で調べられます' : rs === 'on' ? 'モック：この先の解析データはありません' : 'この先は、リアルタイム解析で調べられます'}</span></span>${pie(a)}</div>`;
-  if (rs === 'free') return h + say('自由に指して試せます', 'この先の評価値は、リアルタイム解析で出ます');
-  if (rs === 'off') return h + say('リアルタイム解析はオフ', '駒は自由に動かせます。時間は使いません', '<button type="button" class="bt pri sm x" data-a="rttoggle">オンにする</button>');
+  if (a) return h + `<div class="bc say"><span class="m">読み筋はここまで</span><span class="pw"><span class="p">${rs === 'free' ? 'この先は、分岐中の解析で調べられます' : rs === 'on' ? 'モック：この先の解析データはありません' : 'この先は、分岐中の解析で調べられます'}</span></span>${pie(a)}</div>`;
+  if (rs === 'free') return h + say('自由に指して試せます', 'この先の評価値は、分岐中の解析で出ます');
+  if (rs === 'off') return h + say('分岐中の解析はオフ', '駒は自由に動かせます。時間は使いません', '<button type="button" class="bt pri sm x" data-a="rttoggle">オンにする</button>');
   if (rs === 'offline') return h + say('通信できません', 'つながると、評価値と最善手が出ます');
-  if (rs === 'limit') return h + say('今月のリアルタイム解析は残り0分', '月が変わると、また300分使えます');
+  if (rs === 'limit') return h + say('今月の分岐中の解析は残り0分', '月が変わると、また300分使えます');
   return h + say('解析データなし', 'モック：候補の手順に沿った局面だけ値が出ます');
 }
 function candsHTML() {
@@ -1969,7 +1969,7 @@ function renderNow() {
   R.brl1.hidden = R.brl2.hidden = !e;
   if (e) {
     const rs = rtState();
-    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 <b>オン</b>${rtLow() ? `・残り${rtLeft()}分` : ''}` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `分岐中の解析 <b>オン</b>${rtLow() ? `・残り${rtLeft()}分` : ''}` : rs === 'off' ? '分岐中の解析 <b>オフ</b>' : rs === 'offline' ? '分岐中の解析 <b>通信なし</b>' : rs === 'limit' ? '分岐中の解析 <b>残り0分</b>' : '分岐中の解析 <svg class="ic"><use href="#i-lock"/></svg>');
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   }
 }
@@ -2046,7 +2046,7 @@ function commitMove(m) {
     rtIdle = setTimeout(() => { S.rtWarm = false; }, wait + 30000);
   }
   renderPly();
-  if (rtState() === 'on' && rtLow() && !S.told.rtlow) { S.told.rtlow = true; toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`); }
+  if (rtState() === 'on' && rtLow() && !S.told.rtlow) { S.told.rtlow = true; toast(`分岐中の解析は、今月あと${rtLeft()}分使えます`); }
   else if (first && !S.told.br) { S.told.br = true; toast('分岐は保存されません。本譜や戦績は変わりません'); }
 }
 function tryMove(pk, f, r) {
@@ -2120,7 +2120,7 @@ A.kind = (v) => { S.kind = v; renderCands(); };
 const LOCKS = () => ({
   cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
   precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
-  rt: ['リアルタイム解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。'],
+  rt: ['分岐中の解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。'],
 });
 A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
@@ -2138,7 +2138,7 @@ A.rttoggle = () => {
   S.rtOn = !S.rtOn; S.rtUntil = 0; S.rtWarm = false;
   renderPly();
   stopRt();
-  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指した手から評価値が出ます' : 'リアルタイム解析をオフにしました');
+  toast(S.rtOn ? '分岐中の解析をオンにしました。次に指した手から評価値が出ます' : '分岐中の解析をオフにしました');
 };
 A.evalhelp = () => {
   const mark = (k, t, d) => `<div class="evm">${onbMark(k)}<div><b>${t}</b><span>${d}</span></div></div>`;
@@ -2557,7 +2557,7 @@ A.aigen = () => {
 };
 A.aiask = (q) => {
   if (!needNet(() => A.aiask(q))) return;
-  if (q === '@pos') { const i = S.ply; askAI(S.br ? `${i}手目から分かれた局面について教えて` : i ? `${i}手目の局面について教えて` : '開始局面について教えて', () => (S.br ? blk('答え', ENG, ['分岐の局面は、リアルタイム解析の結果をもとに答えます。<span class="mk0">モック</span>ここでは、本譜の局面にだけ答えます。']) : posAnswer(i)), 'chat-explaining'); return; }
+  if (q === '@pos') { const i = S.ply; askAI(S.br ? `${i}手目から分かれた局面について教えて` : i ? `${i}手目の局面について教えて` : '開始局面について教えて', () => (S.br ? blk('答え', ENG, ['分岐の局面は、分岐中の解析の結果をもとに答えます。<span class="mk0">モック</span>ここでは、本譜の局面にだけ答えます。']) : posAnswer(i)), 'chat-explaining'); return; }
   const x = aiQuestions().find((o) => o.q === q);
   if (x) askAI(x.q, x.a, x.face);
 };
@@ -3012,17 +3012,17 @@ function planPage() {
   const ok = '<span class="ok"><svg class="ic"><use href="#i-check"/></svg></span>', no = '<span class="no">—</span>';
   const head = paid()
     ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今週）', u.precise, u.preciseMax, '局')}${meter('解析の合計（今週）', u.total, u.totalMax, '局', '合計には精密解析も含みます。毎週 月曜の午前0時（日本時間）に 0 に戻ります')}</div>`
-    : `<div class="cd pwl">${pic('onb-5', 'pwi')}<div><div class="prc"><small>月額</small>780<small>円</small></div><p>精密な解析、指すたびに更新される評価値、AIコーチの解説と質問が使えます。</p></div></div>`;
+    : `<div class="cd pwl">${pic('onb-5', 'pwi')}<div><div class="prc"><small>月額</small>780<small>円</small></div><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div></div>`;
   return { title: '有料プラン', html: `<div class="pgc">${head}
     <table class="cmp"><thead><tr><th>できること</th><th>無料</th><th>有料</th></tr></thead><tbody>
       ${rowc('棋譜の保存・再生<br>戦績の集計', ok, ok)}
-      ${rowc('対局の解析', `<b>週${u.freeMax}局</b><br>候補1手`, `<b>精密解析 週${u.preciseMax}局</b><br>候補3手・深い読み<br>合計 週${u.totalMax}局`)}
-      ${rowc('分岐して手を試す', `${ok}<br>読み筋の評価値`, ok)}
-      ${rowc('リアルタイム解析', no, `${ok}<br>指すたびに評価値`)}
-      ${rowc('AIコーチ', no, '<b>解説と質問</b><br>精密解析した対局')}
+      ${rowc('対局の解析', `<b>ふつうの解析<br>週${u.freeMax}局</b><br>候補1手`, `<b>精密解析<br>週${u.preciseMax}局</b><br>候補3手・深い読み<br>合計 週${u.totalMax}局`)}
+      ${rowc('分岐して手を試す', ok, ok)}
+      ${rowc('分岐中の解析', no, ok)}
+      ${rowc('AIコーチ', no, '<b>解説と質問</b>')}
     </tbody></table>
-    <p class="hint">リアルタイム解析は月${u.rtMax}分（解析が動いている間を数えます）、AIコーチは月${u.aiMax}回まで使えます。残りが少なくなったら、お知らせします。</p>
-    <p class="mockn"><b>モック</b>　価格は仮の数字です。週の区切り（月曜の午前0時）と、リアルタイム解析・AIコーチの上限の期間（月ごと）は、仮に置いています。</p>
+    <p class="hint">分岐中の解析は月${u.rtMax}分（解析が動いている間を数えます）、AIコーチは月${u.aiMax}回まで使えます。残りが少なくなったら、お知らせします。</p>
+    <p class="mockn"><b>モック</b>　価格は仮の数字です。週の区切り（月曜の午前0時）と、分岐中の解析・AIコーチの上限の期間（月ごと）は、仮に置いています。</p>
     <div class="acts">${paid() ? '<button type="button" class="bt wide" data-a="toast" data-v="実際のアプリでは、ストアの定期購入の画面が開きます">プランを管理する</button>' : '<button type="button" class="bt pri wide" data-a="subscribe">月額780円で登録する</button><small>毎月自動で更新されます。解約はいつでも、ストアの設定からできます。</small>'}</div>
     <div class="lnk"><button type="button" class="tx-b" data-a="restorebuy">購入を復元</button><button type="button" class="tx-b" data-a="toast" data-v="利用規約のページを開きます（モック）">利用規約</button><button type="button" class="tx-b" data-a="toast" data-v="プライバシーポリシーのページを開きます（モック）">プライバシーポリシー</button></div></div>` };
 }
@@ -3317,7 +3317,7 @@ const JUMPS = {
     JUMPS.branch();
     Object.assign(DB.usage, { ai: DB.usage.aiMax - 7, rt: DB.usage.rtMax - 24 });
     renderNow();
-    toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`);
+    toast(`分岐中の解析は、今月あと${rtLeft()}分使えます`);
     S.told.rtlow = true;
   },
   /* one analysis runs at a time: a second one waits for its turn */

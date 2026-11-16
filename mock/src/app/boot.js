@@ -103,7 +103,7 @@ const JUMPS = {
     JUMPS.branch();
     Object.assign(DB.usage, { ai: DB.usage.aiMax - 7, rt: DB.usage.rtMax - 24 });
     renderNow();
-    toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`);
+    toast(`分岐中の解析は、今月あと${rtLeft()}分使えます`);
     S.told.rtlow = true;
   },
   /* one analysis runs at a time: a second one waits for its turn */
