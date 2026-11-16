@@ -29,9 +29,10 @@ const resultText = () => { const w = winnerSide(); return w ? (w === SELF ? YOU(
    positions along that line, and a game that ended in mate). An engine score that merely says
    "mate" is shown as a large advantage, not as a fact. */
 const fmtVal = (o) => {
-  if (o.end) return o.end === '詰み' ? ((M.winner === 'gote' ? 'g' : 's') === SELF ? '+' : '−') + '詰み' : '終局';
-  if (o.mate != null) return ((o.mate > 0) === (SELF === 's') ? '+' : '−') + (o._pv ? '詰み' : '3000以上');
-  return sgn(valOf(o));
+  if (o.end) return '終局';
+  const v = valOf(o);
+  if (o.mate != null || Math.abs(v) >= 3000) return (v > 0 ? '+' : '−') + '3000以上';
+  return sgn(v);
 };
 function markProven() {
   for (let i = 0; i <= N; i++) {
@@ -61,8 +62,12 @@ const rtBusy = () => !!S.br && rtState() === 'on' && performance.now() < S.rtUnt
    on every plan (nothing new is analysed); off those lines only real-time analysis can answer. */
 const brShown = () => { const e = brNow(); return e && e.an.known && !rtBusy() ? e.an : null; };
 const waiting = () => !!CUR && QUEUE.some((q) => q.id === CUR.id);
-const freeLeft = () => Math.max(0, DB.usage.freeMax - DB.usage.freeToday);
-const preciseLeft = () => Math.max(0, DB.usage.preciseMax - DB.usage.precise);
+const freeLeft = () => Math.max(0, DB.usage.freeMax - DB.usage.free);
+/* paid plan: every analysis counts toward the weekly total, and a precise one toward its own limit as well */
+const totalLeft = () => Math.max(0, DB.usage.totalMax - DB.usage.total);
+const preciseLeft = () => Math.min(totalLeft(), Math.max(0, DB.usage.preciseMax - DB.usage.precise));
+const canRun = (kind) => (!paid() ? freeLeft() : kind === 'pre' ? preciseLeft() : totalLeft()) > 0;
+const WEEK = '月曜の午前0時';
 const onGame = (gm) => { const t = topNav(); return !!t && t.t === 'game' && t.id === gm.id; };
 /* how many candidates this record has: three after a precise analysis, else one. What was saved stays
    readable when the plan changes; the plan only limits making new analyses. */
@@ -102,7 +107,9 @@ function enterGame(t) {
   renderGame();
   if (fresh && S.ply > 0 && R.toast.hidden) toast(OWN ? 'あなたの最初の悪手から表示しています' : '最初の悪手から表示しています');
 }
-function leaveGame() { if (S.br) { S.br = null; clearSel(); } }
+/* the real-time analysis stops with the branch: switched off, left, or idle for a while */
+function stopRt() { clearTimeout(rtTimer); clearTimeout(rtIdle); S.rtWarm = false; S.rtUntil = 0; }
+function leaveGame() { stopRt(); if (S.br) { S.br = null; clearSel(); } }
 
 /* ---------- game phases (a simple stand-in rule for the mock) ---------- */
 function phases() {
@@ -367,7 +374,8 @@ function readoutHTML() {
   if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
   if (p === N) return `<span>終局</span><b>${N}手で${resultText()}</b><span>${endNote()}</span>`;
   const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
-  let h = `${EVQ}<b>${fmtVal(prev)} → ${fmtVal(pos)}</b>`;
+  const v0 = fmtVal(prev), v1 = fmtVal(pos);
+  let h = `${EVQ}<b>${v0 === v1 && v1.endsWith('以上') ? v1 : `${v0} → ${v1}`}</b>`;
   if (plain(prev) && plain(pos)) { const d = valOf(pos) - valOf(prev); h += `<span class="dl${d > 0 ? ' up' : d < 0 ? ' dn' : ''}">${sgn(d)}</span>`; }
   if (mode !== 'done') return h;
   if (pos.missedTsume && prev.tsume) h += `<button type="button" class="rl" data-a="jump" data-v="${p - 1}">${pos.missedTsume}手詰めあり ›</button>`;
@@ -392,9 +400,10 @@ function todoCard() {
   h += aiBtn() + '</div>';
   if (waiting()) return h + say('解析待ち', 'いまの解析が終わると、続けて始まります', '<button type="button" class="bt sm x" data-a="unqueue">やめる</button>');
   if (CUR.err) return h + say('解析を終えられませんでした', '回数は減っていません。もう一度試せます', '<button type="button" class="bt pri sm x" data-a="analyze">もう一度</button>');
-  if (!paid() && !freeLeft()) return h + say('きょうの解析は残り0局', '午前0時に、また10局使えます', '<button type="button" class="bt pri sm x" data-a="nav" data-v="plan">プランを見る</button>');
-  if (paid() && kind === 'pre' && !preciseLeft()) return h + say('今月の精密解析は残り0局', 'ふつうの解析（候補1手）は使えます', '<button type="button" class="bt pri sm x" data-a="analyzestd">ふつうで解析</button>');
-  const sub = !DB.online ? '通信できません。つながると解析できます' : !paid() ? `きょうの解析　あと${freeLeft()}局` : kind === 'pre' ? `候補3手・深い読み　今月あと${preciseLeft()}局` : '候補1手・短い時間で終わります';
+  if (!paid() && !freeLeft()) return h + say('今週の解析は残り0局', `${WEEK}に、また${DB.usage.freeMax}局使えます`, '<button type="button" class="bt pri sm x" data-a="nav" data-v="plan">プランを見る</button>');
+  if (paid() && !totalLeft()) return h + say('今週の解析は残り0局', `${WEEK}に、また${DB.usage.totalMax}局使えます`);
+  if (paid() && kind === 'pre' && !preciseLeft()) return h + say('今週の精密解析は残り0局', 'ふつうの解析（候補1手）は使えます', '<button type="button" class="bt pri sm x" data-a="analyzestd">ふつうで解析</button>');
+  const sub = !DB.online ? '通信できません。つながると解析できます' : !paid() ? `今週の解析　あと${freeLeft()}局` : kind === 'pre' ? `候補3手とAIコーチ　今週あと${preciseLeft()}局` : `候補1手・AIコーチなし　今週あと${totalLeft()}局`;
   return h + say('この対局を解析する', sub, '<button type="button" class="bt pri sm x" data-a="analyze">解析する</button>');
 }
 function runCard() {
@@ -524,7 +533,7 @@ function renderNow() {
   R.brl1.hidden = R.brl2.hidden = !e;
   if (e) {
     const rs = rtState(), left = DB.usage.rtMax - DB.usage.rt;
-    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 <b>${S.rtWarm ? 'オン' : '休止中'}</b>・残り${left}分` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 ${S.rtWarm ? '<i class="tick"></i><b>計測中</b>' : '<b>休止中</b>'}・残り${left}分` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   }
 }
@@ -557,6 +566,7 @@ function setPly(p) {
 function exitBranch() {
   if (!S.br) return;
   S.ply = S.br.base; S.br = null; S.sel = 0;
+  stopRt();
   clearSel();
   renderPly();
 }
@@ -596,10 +606,11 @@ function commitMove(m) {
     S.rtUntil = performance.now() + wait;
     clearTimeout(rtTimer); clearTimeout(rtIdle);
     rtTimer = setTimeout(() => { S.rtWarm = true; if (S.br && topNav() && topNav().t === 'game') renderPly(); }, wait + 20);
-    rtIdle = setTimeout(() => { S.rtWarm = false; if (S.br && topNav() && topNav().t === 'game') renderNow(); }, wait + 30000);
+    /* nothing moved for a while: the analysis goes to sleep, and the minutes stop being counted */
+    rtIdle = setTimeout(() => { S.rtWarm = false; if (S.br && topNav() && topNav().t === 'game') { renderNow(); toast('しばらく操作がないので、リアルタイム解析を休止しました。次に指すと再開します'); } }, wait + 30000);
   }
   renderPly();
-  if (first && !S.told.br) { S.told.br = true; toast(rtState() === 'on' ? '分岐は保存されません。リアルタイム解析は、指している間だけ時間を使います' : '分岐は保存されません。本譜や戦績は変わりません'); }
+  if (first && !S.told.br) { S.told.br = true; toast(rtState() === 'on' ? '分岐は保存されません。リアルタイム解析は、動いている間ずっと時間を数えます' : '分岐は保存されません。本譜や戦績は変わりません'); }
 }
 function tryMove(pk, f, r) {
   const v = view(), g = gridOf(v.pos), to = toSq(f, r);
@@ -670,31 +681,40 @@ A.kf = () => { const d = dparts(CUR.date); openSheet(S.br ? '分岐の手順' : 
 A.kind = (v) => { S.kind = v; renderCands(); };
 /* every lock explains what it is and offers the plan page, the same way */
 const LOCKS = {
-  cands: ['2位・3位の候補は、精密解析で出ます', '精密解析（有料プラン）では、候補を3手まで比べられます。月60局まで使えます。'],
-  precise: ['精密解析は、有料プランで使えます', '候補を3手まで出し、より深く読みます。月60局まで使えます。'],
-  rt: ['リアルタイム解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。月300分まで使えます。'],
+  cands: ['2位・3位の候補は、精密解析で出ます', '精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週30局まで使えます。'],
+  precise: ['精密解析は、有料プランで使えます', '候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週30局まで使えます。'],
+  rt: ['リアルタイム解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。月300分まで使えます（解析が動いている間を数えます）。'],
 };
 A.lockinfo = (k) => ask(LOCKS[k][0], LOCKS[k][1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' });
-const preciseCost = () => `精密解析を1局分使います（今月あと${preciseLeft()}局）。`;
+const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
+/* a record that already has an ordinary analysis is done again as a precise one */
+function redoPrecise(after) {
+  if (!preciseLeft()) { limitDialog(CUR); return; }
+  ask('精密解析でやり直しますか', `${preciseCost()}候補が3手まで出て、AIコーチも使えるようになります。いまの解析結果は、新しい結果に置きかわります。`, '精密解析する', () => { startAnalysis(CUR, 'pre'); if (after) after(); });
+}
 A.more23 = () => {
   if (!paid()) { A.lockinfo('cands'); return; }
-  ask('精密解析でやり直しますか', `${preciseCost()}候補が3手まで出ます。いまの解析結果は、新しい結果に置きかわります。`, '精密解析する', () => startAnalysis(CUR, 'pre'));
+  redoPrecise();
 };
 A.rttoggle = () => {
   if (!paid()) { A.lockinfo('rt'); return; }
   S.rtOn = !S.rtOn; S.rtUntil = 0; S.rtWarm = false;
   renderPly();
-  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指した手から評価値が出ます' : 'リアルタイム解析をオフにしました。指しても時間は使いません');
+  stopRt();
+  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指すと動き出し、休止するまで時間を数えます' : 'リアルタイム解析をオフにしました。時間は数えません');
 };
 A.evalhelp = () => {
   const mark = (k, t, d) => `<div class="evm">${onbMark(k)}<div><b>${t}</b><span>${d}</span></div></div>`;
-  openSheet('評価値と印の見かた', `<div class="evh"><p>評価値は、解析が出した形勢の点数です。<b>プラスは${YOU()}が有利</b>、マイナスは${OPP()}が有利です。</p><div class="evs"><span><b>±150</b>くらいまで<i>ほぼ互角</i></span><span><b>500</b>前後<i>有利</i></span><span><b>1000</b>以上<i>大きな差</i></span></div><p>上の「${YOU()} ○%」は、評価値から見積もった勝つ見込みです。戦績の勝率とは別のものです。</p></div>${mark('good', '好手', '解析のおすすめと同じ手で、ほかの手より良かった手')}${mark('dub', '疑問手', '評価値を少し下げた手')}${mark('bad', '悪手', '評価値を大きく下げた手')}${mark('mate', '詰みあり', '1手詰め・3手詰めが証明できた局面')}<p class="hint">「詰み」と書くのは、詰みを証明できたときだけです。それ以外の大きな差は「3000以上」と表します。</p>`, { auto: true });
+  openSheet('評価値と印の見かた', `<div class="evh"><p>評価値は、解析が出した形勢の点数です。<b>プラスは${YOU()}が有利</b>、マイナスは${OPP()}が有利です。</p><div class="evs"><span><b>±150</b>くらいまで<i>ほぼ互角</i></span><span><b>500</b>前後<i>有利</i></span><span><b>1000</b>以上<i>大きな差</i></span></div><p>上の「${YOU()} ○%」は、評価値から見積もった勝つ見込みです。戦績の勝率とは別のものです。</p></div>${mark('good', '好手', '解析のおすすめと同じ手で、ほかの手より良かった手')}${mark('dub', '疑問手', '評価値を少し下げた手')}${mark('bad', '悪手', '評価値を大きく下げた手')}${mark('mate', '詰みあり', '1手か3手で詰む手があった局面')}<p class="hint">3000を超える大きな差は、「3000以上」と表します。</p>`, { auto: true });
 };
 
 /* ---------- analysis run (simulated: the real one runs on the server and takes about 1 to 3 minutes) ---------- */
 function limitDialog(gm) {
-  if (!paid()) ask('きょうの無料解析は使い切りました', 'あしたの午前0時（日本時間）に、また10局使えます。有料プランでは、精密解析を月60局使えます。', '有料プランを見る', () => push({ t: 'plan' }), { img: 'sys-limit', no: '閉じる' });
-  else ask('今月の精密解析は使い切りました', '月が変わると、また60局使えます。ふつうの解析（候補1手）は、このまま使えます。', 'ふつうで解析する', () => startAnalysis(gm, 'std'), { img: 'sys-limit', no: '閉じる' });
+  const u = DB.usage, when = `${WEEK}（日本時間）`;
+  if (!paid()) ask('今週の無料解析は使い切りました', `${when}に、また${u.freeMax}局使えます。有料プランでは、精密解析を週${u.preciseMax}局、ふつうの解析と合わせて週${u.totalMax}局使えます。`, '有料プランを見る', () => push({ t: 'plan' }), { img: 'sys-limit', no: '閉じる' });
+  else if (!totalLeft()) ask('今週の解析は使い切りました', `${when}に、また使えます（精密解析 ${u.preciseMax}局、ふつうの解析と合わせて ${u.totalMax}局）。`, 'OK', null, { single: true, img: 'sys-limit' });
+  else if (gm.an !== 'none') ask('今週の精密解析は使い切りました', `${when}に、また${u.preciseMax}局使えます。`, 'OK', null, { single: true, img: 'sys-limit' });
+  else ask('今週の精密解析は使い切りました', `${when}に、また${u.preciseMax}局使えます。ふつうの解析（候補1手）は、このまま使えます（今週あと${totalLeft()}局）。`, 'ふつうで解析する', () => startAnalysis(gm, 'std'), { img: 'sys-limit', no: '閉じる' });
 }
 function refreshWaiting(gm) {
   if (onGame(gm)) renderPly();
@@ -702,7 +722,7 @@ function refreshWaiting(gm) {
 }
 function startAnalysis(gm, kind) {
   if (RUN && RUN.id === gm.id) { toast('この対局は解析中です'); return; }
-  if ((!paid() && !freeLeft()) || (paid() && kind === 'pre' && !preciseLeft())) { limitDialog(gm); return; }
+  if (!canRun(kind)) { limitDialog(gm); return; }
   if (RUN) {
     /* one analysis runs at a time; the rest wait their turn */
     if (!QUEUE.some((q) => q.id === gm.id)) QUEUE.push({ id: gm.id, kind });
@@ -768,8 +788,8 @@ function finishRun() {
   RUN = null;
   if (!gm) return;
   gm.an = r.kind;
-  if (!paid()) DB.usage.freeToday++;
-  else if (r.kind === 'pre') DB.usage.precise++;
+  if (!paid()) DB.usage.free++;
+  else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
     renderGame();
     if (AI.open) renderAI();
@@ -804,7 +824,7 @@ A.gmenu = () => {
   const row = (a, icon, label, sub, cls) => `<button type="button" class="mn2" data-a="${a}"><span class="mi${cls || ''}"><svg class="ic"><use href="#${icon}"/></svg></span><span>${label}${sub ? `<small>${sub}</small>` : ''}</span></button>`;
   let h = row('gfav', 'i-star', g.fav ? 'お気に入りから外す' : 'お気に入りに入れる', '', g.fav ? ' on' : '');
   h += row('ginfo', 'i-info', '対局情報', '対局者・結果・戦法と囲い（修正もここから）');
-  if (g.an === 'std' && !busy) h += row('reanalyze', 'i-refresh', '精密解析でやり直す', paid() ? `1局分使います（今月あと${preciseLeft()}局）` : '有料プランの機能です');
+  if (g.an === 'std' && !busy) h += row('reanalyze', 'i-refresh', '精密解析でやり直す', paid() ? `候補3手とAIコーチ（今週あと${preciseLeft()}局）` : '有料プランの機能です');
   if (!g.self) h += row('gflip', 'i-refresh', '盤の向きを変える', `いまは${SELF === 's' ? '先手' : '後手'}の側から見ています`);
   h += row('kifout', 'i-export', 'KIFを書き出す', 'コピー・ファイルに保存・共有');
   h += row('gdel', 'i-trash', 'この棋譜を削除', '', ' dng');
@@ -816,7 +836,7 @@ A.ginfo = () => { closeSheet(); push({ t: 'info', id: CUR.id }); };
 A.reanalyze = () => {
   closeSheet();
   if (!paid()) { A.lockinfo('precise'); return; }
-  ask('精密解析でやり直しますか', `${preciseCost()}候補が3手まで出ます。いまの解析結果は、新しい結果に置きかわります。`, '精密解析する', () => startAnalysis(CUR, 'pre'));
+  redoPrecise();
 };
 A.kifout = () => {
   openSheet('KIFを書き出す', `<textarea class="kifx" id="kifx" readonly spellcheck="false">${esc(kifText(G))}</textarea><div class="acts"><button type="button" class="bt pri wide" data-a="copykif"><svg class="ic"><use href="#i-copy"/></svg>コピーする</button><div class="two"><button type="button" class="bt" data-a="toast" data-v="ファイルの保存先を選ぶ画面が開きます（モック）"><svg class="ic"><use href="#i-file"/></svg>ファイルに保存</button><button type="button" class="bt" data-a="toast" data-v="共有先を選ぶ画面が開きます（モック）"><svg class="ic"><use href="#i-export"/></svg>共有</button></div></div>`, { auto: true });

@@ -35,10 +35,10 @@ const fs = require('fs');
 
   // 2. stop an analysis: asks first, and the quota is untouched
   await jump('fresh');
-  await has('この対局を解析する'); await has('今月あと48局');
+  await has('この対局を解析する'); await has('今週あと18局');
   await act('analyze'); await wait(900); await has('解析中');
   await act('stopan'); await has('解析を中止しますか');
-  await click('#scr .dla [data-a="dlgok"]'); await has('この対局を解析する', 'back to not analysed'); await has('今月あと48局', 'quota unchanged after stop');
+  await click('#scr .dla [data-a="dlgok"]'); await has('この対局を解析する', 'back to not analysed'); await has('今週あと18局', 'quota unchanged after stop');
 
   // 3. queue: a second analysis waits its turn, then runs
   await act('analyze'); await wait(600);
@@ -47,19 +47,29 @@ const fs = require('fs');
   await act('unqueue'); await has('この対局を解析する', 'unqueued'); await act('analyze'); await has('解析待ち', 'queued again');
   await wait(9000); await has('解析中', 'queued game started after the first finished');
   await wait(9500); await hasNot('解析待ち');
-  await act('back'); await act('tab', 'set'); await has('14 / 60局', 'two precise analyses counted');
+  await act('back'); await act('tab', 'set'); await has('14 / 30局', 'two precise analyses counted'); await has('28 / 60局', 'and both count toward the weekly total');
   await jump('queue'); await has('解析待ち', 'queue shortcut'); await has('いまの解析が終わると、続けて始まります');
 
   // 4. free plan: count goes down by one per analysis; saved precise results stay readable
   await ctl('.pg-ctl [data-state="lived"]'); await ctl('.pg-ctl [data-plan="free"]');
-  await has('あと7局', 'free count on the list');
-  await jump('fresh'); await ctl('.pg-ctl [data-plan="free"]'); await has('きょうの解析 あと7局');
-  await act('analyze'); await wait(10500); await act('back'); await has('あと6局', 'free count after one analysis');
+  await has('今週の解析 あと18局', 'free count on the list');
+  await jump('fresh'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析 あと18局');
+  await act('analyze'); await wait(10500); await act('back'); await has('あと17局', 'free count after one analysis');
   await jump('game'); await ctl('.pg-ctl [data-plan="free"]'); await has('2位', 'saved precise candidates readable on free');
   await act('ai'); await has('AIコーチは有料プランの機能です'); await act('aiclose');
-  await jump('limit'); await ctl('.pg-ctl [data-plan="free"]'); await has('きょうの解析は残り0局');
+  await jump('limit'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析は残り0局'); await has('月曜の午前0時に、また30局使えます');
   await act('nav', 'plan'); await has('月額');
   await ctl('.pg-ctl [data-plan="paid"]');
+
+  // 4b. the coach works on a precise analysis only; an ordinary one can be done again as precise
+  await jump('fresh'); await act('kind', 'std'); await has('候補1手・AIコーチなし'); await act('analyze'); await wait(10500);
+  await act('ai'); await has('AIコーチは、精密解析した対局で使えます'); await has('精密解析でやり直す');
+  await act('aianalyze'); await has('精密解析でやり直しますか'); await click('#scr .dla [data-a="dlgok"]'); await has('解析しています');
+  await wait(10500); await has('どこを中心に説明しますか', 'coach available after the precise analysis'); await act('aiclose');
+  await jump('limit'); await has('今週の精密解析は残り0局'); await has('ふつうの解析（候補1手）は使えます');
+  await jump('set'); await act('nav', 'about'); await has('送らないもの 対局者名'); await act('back');
+  await act('nav', 'backup'); await has('iPhone と Android の間では、有料プランは引き継げません'); await act('back');
+  await act('nav', 'plan'); await has('合計は週60局まで'); await has('精密解析した対局');
 
   // 5. branch: play the recommended move, look at the line, return with the back button
   await jump('branch'); await wait(900); await has('分岐 1手目'); await has('本譜（48手目）に戻る');

@@ -59,6 +59,7 @@ function resetTo(tab) {
   if (RUN) { clearInterval(RUN.timer); RUN = null; }
   QUEUE.length = 0;
   DB.online = true; DB.usage = usageInUse();
+  S.kind = 'pre'; S.rtOn = true;
   syncState();
   closeLayers();
   if (topNav() && topNav().t === 'game') leaveGame();
@@ -91,7 +92,7 @@ const JUMPS = {
   /* limits used up (free: today's analyses; paid: this month's precise analyses and real-time minutes) */
   limit: () => {
     resetTo('list');
-    Object.assign(DB.usage, { freeToday: DB.usage.freeMax, precise: DB.usage.preciseMax, rt: DB.usage.rtMax });
+    Object.assign(DB.usage, { free: DB.usage.freeMax, precise: DB.usage.preciseMax, rt: DB.usage.rtMax });
     let g = game2();
     if (!g) g = addGame2().gm;
     g.an = 'none';

@@ -27,7 +27,7 @@ function layoutAI() {
   R.aiex.innerHTML = `<svg class="ic"><use href="#${AI.full ? 'i-down' : 'i-expand'}"/></svg>`;
 }
 function setAIFull(on) { AI.full = on; layoutAI(); }
-const aiStage = () => (AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : !paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : 'setup');
+const aiStage = () => (AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : !paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : CUR.an !== 'pre' ? 'redo' : 'setup');
 
 /* ---------- facts taken from the analysis ---------- */
 /* a move named in the text: tapping it shows that position on the board. Yours are yellow, the opponent's blue. */
@@ -90,7 +90,6 @@ function secEnd(f) {
   else if (theirs) ps.push(`<button type="button" class="mref pre" data-a="jump" data-v="${theirs.ply}">${theirs.ply}手目の局面</button> で${OPP()}に${theirs.tsume.len}手詰めが生じ、そのまま詰まされました。`);
   else if (winnerSide()) ps.push(`終盤は${OPP()}が大きくリードしたまま、押し切られました。`);
   if (!ps.length) ps.push('終盤に、詰みの見逃しは見つかりませんでした。');
-  ps.push('<small>「詰み」と書くのは、1手詰め・3手詰めを証明できた局面だけです。</small>');
   return blk('終盤', ENG, ps);
 }
 function secOpening(f) {
@@ -171,8 +170,9 @@ function aiBody(st) {
   if (st === 'lock') return `<div class="lk">${pic('onb-5', 'lkim')}<b>AIコーチは有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で説明します。続けて質問もできます。</span></div>`;
   if (st === 'need') {
     const running = RUN && RUN.id === CUR.id;
-    return `<div class="lk">${pic('chat-default', 'lkav')}<b>${running ? '解析しています' : '先に、この対局の解析が必要です'}</b><span>${running ? '解析が終わると、ここで解説を作れます。' : 'AIコーチは、解析で出た評価値・候補手・詰みをもとに説明します。'}</span></div>`;
+    return `<div class="lk">${pic('chat-default', 'lkav')}<b>${running ? '解析しています' : '先に、この対局の精密解析が必要です'}</b><span>${running ? (RUN.kind === 'pre' ? '解析が終わると、ここで解説を作れます。' : 'ふつうの解析をしています。AIコーチは、精密解析した対局で使えます。') : 'AIコーチは、精密解析で出た評価値・候補手・詰みをもとに説明します。'}</span></div>`;
   }
+  if (st === 'redo') return `<div class="lk">${pic('chat-default', 'lkav')}<b>AIコーチは、精密解析した対局で使えます</b><span>この対局は「ふつうの解析」です。精密解析でやり直すと、候補が3手まで出て、解説も作れます。</span></div>`;
   if (st === 'gen') return '<p class="fl">解説を作っています…</p>' + '<div class="skl"></div>'.repeat(3) + '<div class="skl" style="width:62%"></div>' + '<div class="skl" style="margin-top:20px"></div><div class="skl" style="width:80%"></div>';
   if (st === 'setup') {
     const pr = DB.profile;
@@ -190,12 +190,16 @@ function aiBody(st) {
 /* the bottom of the sheet always holds the one thing to do next */
 function aiFoot(st) {
   if (st === 'lock') return '<button type="button" class="bt pri wide" data-a="nav" data-v="plan">有料プランを見る</button>';
-  if (st === 'need') return RUN && RUN.id === CUR.id ? '' : '<button type="button" class="bt pri wide" data-a="aianalyze">この対局を解析する</button>';
+  if (st === 'need' && RUN && RUN.id === CUR.id) return '';
+  if (st === 'need' || st === 'redo') {
+    if (!preciseLeft()) return `<p class="ailk">今週の精密解析は残り0局です。${WEEK}に、また使えます。</p>`;
+    return `<p class="ailk">精密解析を1局分使います（今週あと${preciseLeft()}局）</p><button type="button" class="bt pri wide" data-a="aianalyze">${st === 'redo' ? '精密解析でやり直す' : '精密解析する'}</button>`;
+  }
   if (st === 'setup') return `<button type="button" class="bt pri wide" data-a="aigen"><svg class="ic"><use href="#i-spark"/></svg>${CUR.ai ? 'このスタイルで作り直す' : '解説をつくる'}</button>${CUR.ai ? '<button type="button" class="tx-b" data-a="aicancel">いまの解説に戻る</button>' : ''}`;
   if (st === 'ready' && !paid()) return '<p class="ailk">新しい解説や質問は、有料プランで使えます。</p><button type="button" class="bt pri wide" data-a="nav" data-v="plan">有料プランを見る</button>';
   return '';
 }
-const AI_FACE = { lock: 'chat-default', need: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
+const AI_FACE = { lock: 'chat-default', need: 'chat-default', redo: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
 function renderAI(keepScroll) {
   if (!AI.open) return;
   const st = aiStage(), y = R.aim.scrollTop, foot = aiFoot(st);
@@ -228,7 +232,10 @@ A.aifocus = (v) => { AI.focus = v; renderAI(true); };
 A.aidetail = (v) => { AI.detail = v; renderAI(true); };
 A.aistyle = () => { AI.setup = true; AI.focus = CUR.ai.focus; AI.detail = CUR.ai.detail; renderAI(); };
 A.aicancel = () => { AI.setup = false; renderAI(); };
-A.aianalyze = () => { startAnalysis(CUR, paid() ? S.kind : 'std'); if (AI.open) renderAI(); };
+A.aianalyze = () => {
+  const after = () => { if (AI.open) renderAI(); };
+  if (CUR.an === 'none') { startAnalysis(CUR, 'pre'); after(); } else redoPrecise(after);
+};
 A.aigen = () => {
   if (!needNet(() => A.aigen())) return;
   const gm = CUR;

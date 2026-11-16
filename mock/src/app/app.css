@@ -365,6 +365,9 @@ body[data-plan="free"] .vc .aib{background:#fff}
 /* ---------- AI commentary: a sheet that leaves the board in view ---------- */
 .vc .aiw{position:absolute;left:0;right:0;bottom:0;z-index:5;max-height:92%;display:flex;flex-direction:column;background:var(--bg);border-top:var(--ol);border-radius:22px 22px 0 0;animation:c-up .2s ease-out}
 .vc .aih2{flex:none;height:48px;display:flex;align-items:center;gap:8px;padding:0 10px 0 14px}
+/* the real-time clock is running */
+.vc .brl .tick{display:inline-block;width:7px;height:7px;margin:0 4px 1px 0;border-radius:50%;background:var(--coral);vertical-align:middle;animation:c-tick 1.2s ease-in-out infinite}
+@keyframes c-tick{50%{opacity:.2}}
 .vc .aih2 b{flex:none;font:900 15px/1 var(--f-maru);white-space:nowrap}
 .vc .aiav{width:30px;height:30px;flex:none;display:block;margin-left:-4px}
 .vc .ca{display:flex;align-items:flex-start;gap:7px;margin-bottom:9px}
@@ -746,5 +749,6 @@ body[data-plan="free"] .vc .aib{background:#fff}
   .vc .bar .y{transition:none}
   .vc .shb,.vc .aiw,.vw.in,.vc .onsc.in-r,.vc .onsc.in-l{animation:none}
   .vc .ondots i{transition:none}
+  .vc .brl .tick{animation:none}
   .vc .dots i,.vc .skl{animation:none}
 }

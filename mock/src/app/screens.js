@@ -126,7 +126,7 @@ function listTab() {
   }
   const u = DB.usage, gs = DB.games.filter((g) => gameMatch(g, listFilter())), nf = fltCount();
   const chip = (v, label) => `<button type="button" class="ch" data-a="quick" data-v="${v}" aria-pressed="${UI.quick === v}">${label}</button>`;
-  return `<header class="ab"><h2>棋譜</h2><span class="abn">${DB.games.length}局</span>${paid() ? '' : `<button type="button" class="upl" data-a="nav" data-v="plan">きょうの解析 <b>あと${Math.max(0, u.freeMax - u.freeToday)}局</b><svg class="ic"><use href="#i-next"/></svg></button>`}${UI.search ? '' : '<button type="button" class="rb" data-a="search" aria-label="検索"><svg class="ic"><use href="#i-search"/></svg></button>'}</header>
+  return `<header class="ab"><h2>棋譜</h2><span class="abn">${DB.games.length}局</span>${paid() ? '' : `<button type="button" class="upl" data-a="nav" data-v="plan">今週の解析 <b>あと${Math.max(0, u.freeMax - u.free)}局</b><svg class="ic"><use href="#i-next"/></svg></button>`}${UI.search ? '' : '<button type="button" class="rb" data-a="search" aria-label="検索"><svg class="ic"><use href="#i-search"/></svg></button>'}</header>
     ${UI.search ? `<label class="sf"><svg class="ic"><use href="#i-search"/></svg><input id="q" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="対局者名・戦法・囲い" value="${esc(UI.q)}"><button type="button" data-a="search" aria-label="検索を閉じる"><svg class="ic"><use href="#i-x"/></svg></button></label>` : ''}
     ${offlineBar()}<div class="chs" role="group" aria-label="絞り込み"><button type="button" class="ch act" data-a="filter"><svg class="ic"><use href="#i-filter"/></svg>絞り込み${nf ? `<span class="n">${nf}</span>` : ''}</button>${chip('all', 'すべて')}${chip('fav', 'お気に入り')}${chip('w', '勝ち')}${chip('l', '負け')}${chip('none', '未解析')}</div>
     <div data-b2="fsum">${fsumHTML(gs.length)}</div>
@@ -219,11 +219,11 @@ function impResultHTML() {
   else h += row('', 'i-check', `あなたは${side === 's' ? '先手' : '後手'}`, `${side === auto ? `登録した名前「${esc(name)}」と一致しました。` : DB.names.includes(name) ? '手で指定しました。' : `保存すると、「${esc(name)}」を自分の対局者名に登録します。`}${seg}`);
   h += row('', 'i-check', '重複はありません', '保存済みの棋譜に、同じ対局は見つかりませんでした。') + '</div>';
   const off = side == null ? ' disabled' : '';
-  if (!paid() && !freeLeft()) return h + `<div class="acts"><button type="button" class="bt pri wide" data-a="impsave" data-v="0"${off}>保存する</button><small>きょうの解析は使い切りました。解析は、午前0時（日本時間）以降にできます。</small></div>`;
+  if (!canRun('std')) return h + `<div class="acts"><button type="button" class="bt pri wide" data-a="impsave" data-v="0"${off}>保存する</button><small>今週の解析は使い切りました。解析は、${WEEK}（日本時間）以降にできます。</small></div>`;
   /* on the paid plan the kind of analysis is chosen here, so a precise analysis is never spent unnoticed */
   const kind = paid() && preciseLeft() ? S.kind : 'std';
-  const pick = paid() ? `<div class="sg" role="group" aria-label="解析の種類"><button type="button" data-a="impkind" data-v="pre" aria-pressed="${kind === 'pre'}"${preciseLeft() ? '' : ' disabled'}>精密解析（今月あと${preciseLeft()}局）</button><button type="button" data-a="impkind" data-v="std" aria-pressed="${kind === 'std'}">ふつうの解析</button></div>` : '';
-  const note = !DB.online ? '通信できないため、解析はつながってから始まります' : RUN ? 'いまの解析が終わったら、続けて解析します' : !paid() ? `きょうの解析　あと${freeLeft()}局` : kind === 'pre' ? '精密解析を1局分使います（候補3手・深い読み）' : '候補1手・短い時間で終わります';
+  const pick = paid() ? `<div class="sg" role="group" aria-label="解析の種類"><button type="button" data-a="impkind" data-v="pre" aria-pressed="${kind === 'pre'}"${preciseLeft() ? '' : ' disabled'}>精密解析（今週あと${preciseLeft()}局）</button><button type="button" data-a="impkind" data-v="std" aria-pressed="${kind === 'std'}">ふつうの解析</button></div>` : '';
+  const note = !DB.online ? '通信できないため、解析はつながってから始まります' : RUN ? 'いまの解析が終わったら、続けて解析します' : !paid() ? `今週の解析　あと${freeLeft()}局` : kind === 'pre' ? '精密解析を1局分使います（候補3手・深い読み・AIコーチ）' : '候補1手です。AIコーチは、精密解析した対局で使えます';
   return h + `<div class="acts">${pick}<button type="button" class="bt pri wide" data-a="impsave" data-v="1"${off}>保存して解析する</button><small>${note}</small><button type="button" class="bt wide" data-a="impsave" data-v="0"${off}>保存だけする</button></div>`;
 }
 A.impkind = (v) => { S.kind = v; R.vpage.querySelector('[data-b2="impres"]').innerHTML = impResultHTML(); };
@@ -376,8 +376,8 @@ const meter = (label, used, max, unit, note) => `<div class="mtr"><span>${label}
 function settingsTab() {
   const u = DB.usage;
   const plan = paid()
-    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今月）', u.precise, u.preciseMax, '局')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分', '月が変わると 0 に戻ります')}<button type="button" class="bt sm wide" data-a="nav" data-v="plan">プランの内容を見る</button></div>`
-    : `<div class="cd plc"><div class="pn"><b>無料プラン</b></div>${meter('きょうの解析', u.freeToday, u.freeMax, '局', '毎日 午前0時（日本時間）に 0 に戻ります')}<button type="button" class="bt sm wide" data-a="nav" data-v="plan">有料プランを見る</button><div class="lnk"><button type="button" class="tx-b" data-a="restorebuy">購入を復元</button></div></div>`;
+    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今週）', u.precise, u.preciseMax, '局')}${meter('解析の合計（今週）', u.total, u.totalMax, '局', '合計には精密解析も含みます。毎週 月曜の午前0時（日本時間）に 0 に戻ります')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分', '月が変わると 0 に戻ります')}<button type="button" class="bt sm wide" data-a="nav" data-v="plan">プランの内容を見る</button></div>`
+    : `<div class="cd plc"><div class="pn"><b>無料プラン</b></div>${meter('今週の解析', u.free, u.freeMax, '局', '毎週 月曜の午前0時（日本時間）に 0 に戻ります')}<button type="button" class="bt sm wide" data-a="nav" data-v="plan">有料プランを見る</button><div class="lnk"><button type="button" class="tx-b" data-a="restorebuy">購入を復元</button></div></div>`;
   const row = (v, icon, title, sub) => `<button type="button" class="rw" data-a="nav" data-v="${v}"><span class="ri"><svg class="ic"><use href="#${icon}"/></svg></span><span class="rx"><b>${title}</b><span>${sub}</span></span><svg class="ic"><use href="#i-next"/></svg></button>`;
   return `<header class="ab"><h2>設定</h2></header><div class="pgc">${plan}
     <h3 class="st">対局と解説</h3>
@@ -388,7 +388,7 @@ function settingsTab() {
     <div class="cd"><button type="button" class="rw" data-a="replay"><span class="ri"><svg class="ic"><use href="#i-play"/></svg></span><span class="rx"><b>使い方をもう一度見る</b><span>はじめの紹介を最初から</span></span><svg class="ic"><use href="#i-next"/></svg></button>${row('about', 'i-info', 'このアプリについて', 'バージョン・ライセンス')}</div></div>`;
 }
 function namesPage() {
-  return { title: '自分の対局者名', html: `<div class="pgc"><p class="hint" style="margin:0 4px 10px">棋譜に書かれた対局者名と照らし合わせて、あなたが先手か後手か、勝ったか負けたかを判定します。名前はいくつでも登録できます。</p>
+  return { title: '自分の対局者名', html: `<div class="pgc"><p class="hint" style="margin:0 4px 10px">棋譜に書かれた対局者名と照らし合わせて、あなたが先手か後手か、勝ったか負けたかを判定します。名前はいくつでも登録できます。この端末の中だけで使い、サーバーには送りません。</p>
     <div class="cd">${DB.names.map((n, i) => `<div class="nmrow"><b>${esc(n)}</b><button type="button" data-a="namedel" data-v="${i}" aria-label="${esc(n)} を削除"><svg class="ic"><use href="#i-x"/></svg></button></div>`).join('') || '<p class="empty">まだ登録がありません。</p>'}</div>
     <form class="addr" data-f="name"><input id="name-in" class="inp" placeholder="対局者名を追加" autocomplete="off" maxlength="30" aria-label="追加する対局者名"><button type="submit" class="bt pri">追加</button></form>
     <p class="hint">どの名前にも当てはまらない棋譜や、先手と後手の両方に当てはまる棋譜は、取り込むときにどちらかを選べます。</p>
@@ -417,8 +417,7 @@ function backupPage() {
     <div class="cd bkc"><b>バックアップを書き出す</b><p>棋譜 ${n}局、解析結果、戦法と囲いの修正、AIコーチの解説と質問の履歴、学習プロフィール、設定を、1つのファイルにまとめます。</p><button type="button" class="bt pri wide" data-a="bkout"><svg class="ic"><use href="#i-export"/></svg>書き出す</button><small class="bkd">${DB.first ? 'まだ書き出していません' : '最後に書き出した日：2026年11月2日'}</small></div>
     <div class="cd bkc"><b>バックアップから復元する</b><p>書き出したファイルを選ぶと、中身を確かめてから、この端末のデータを置きかえます。iPhone と Android の間でも、棋譜や設定を移せます。</p><button type="button" class="bt wide" data-a="bkin"><svg class="ic"><use href="#i-file"/></svg>ファイルを選ぶ</button></div>
     <p class="hint">データはこの端末の中だけに保存されています。アカウント登録や自動の同期はありません。機種変更の前に、ここから書き出してください。</p>
-    <p class="hint">有料プランの購入情報は、バックアップには入りません。同じ種類の端末どうし（iPhone から iPhone、Android から Android）なら、新しい端末の「有料プラン」画面の「購入を復元」で引き継げます。</p>
-    <p class="mockn"><b>モック</b>　iPhone と Android の間で有料プランを引き継げるかは、まだ決まっていません。</p></div>` };
+    <p class="hint">有料プランの購入情報は、バックアップには入りません。同じ種類の端末どうし（iPhone から iPhone、Android から Android）なら、新しい端末の「有料プラン」画面の「購入を復元」で引き継げます。iPhone と Android の間では、有料プランは引き継げません。</p></div>` };
 }
 A.bkout = () => ask('バックアップを書き出しました', `kifumate-backup-${TODAY.replace(/-/g, '')}　棋譜 ${DB.games.length}局<br>実際のアプリでは、ここで保存先や共有先を選ぶ画面が開きます。`, 'OK', null, { single: true, img: 'sys-backup' });
 /* restoring: choose the file first, see what is in it, then confirm replacing what is on this device */
@@ -427,17 +426,18 @@ function planPage() {
   const u = DB.usage, rowc = (a, b, c) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`;
   const ok = '<span class="ok"><svg class="ic"><use href="#i-check"/></svg></span>', no = '<span class="no">—</span>';
   const head = paid()
-    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今月）', u.precise, u.preciseMax, '局')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分', '月が変わると 0 に戻ります')}</div>`
+    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今週）', u.precise, u.preciseMax, '局')}${meter('解析の合計（今週）', u.total, u.totalMax, '局', '合計には精密解析も含みます。毎週 月曜の午前0時（日本時間）に 0 に戻ります')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分', '月が変わると 0 に戻ります')}</div>`
     : `<div class="cd pwl">${pic('onb-5', 'pwi')}<div><div class="prc"><small>月額</small>780<small>円</small></div><p>精密な解析、指すたびに更新される評価値、AIコーチの解説と質問が使えます。</p></div></div>`;
   return { title: '有料プラン', html: `<div class="pgc">${head}
     <table class="cmp"><thead><tr><th>できること</th><th>無料</th><th>有料</th></tr></thead><tbody>
       ${rowc('棋譜の保存・再生<br>戦績の集計', ok, ok)}
-      ${rowc('対局の解析', '<b>1日10局</b><br>候補1手', '<b>精密解析 月60局</b><br>候補3手・深い読み<br>＋ふつうの解析')}
+      ${rowc('対局の解析', '<b>週30局</b><br>候補1手', '<b>精密解析 週30局</b><br>候補3手・深い読み<br>合計は週60局まで')}
       ${rowc('分岐して手を試す', `${ok}<br>読み筋の評価値`, ok)}
       ${rowc('リアルタイム解析', no, '<b>月300分</b><br>指すたびに評価値')}
-      ${rowc('AIコーチ', no, '<b>解説と質問</b>')}
+      ${rowc('AIコーチ', no, '<b>解説と質問</b><br>精密解析した対局')}
     </tbody></table>
-    <p class="mockn"><b>モック</b>　価格と上限は仮の数字です。有料プランでの「ふつうの解析」の回数、AIコーチの回数、月の区切りは、まだ決まっていません。</p>
+    <p class="hint">リアルタイム解析の時間は、解析が動いている間を数えます（考えていない間も含みます）。しばらく操作がないと自動で休止し、計測も止まります。</p>
+    <p class="mockn"><b>モック</b>　価格は仮の数字です。週の区切り（月曜の午前0時）と、リアルタイム解析300分の期間（月ごと）は、仮に置いています。</p>
     <div class="acts">${paid() ? '<button type="button" class="bt wide" data-a="toast" data-v="実際のアプリでは、ストアの定期購入の画面が開きます">プランを管理する</button>' : '<button type="button" class="bt pri wide" data-a="subscribe">月額780円で登録する</button><small>毎月自動で更新されます。解約はいつでも、ストアの設定からできます。</small>'}</div>
     <div class="lnk"><button type="button" class="tx-b" data-a="restorebuy">購入を復元</button><button type="button" class="tx-b" data-a="toast" data-v="利用規約のページを開きます（モック）">利用規約</button><button type="button" class="tx-b" data-a="toast" data-v="プライバシーポリシーのページを開きます（モック）">プライバシーポリシー</button></div></div>` };
 }
@@ -449,8 +449,7 @@ A.restorebuy = () => {
 A.subscribe = () => { DB.plan = 'paid'; syncPlan(); toast('有料プランに登録しました（モック）'); };
 function aboutPage() {
   const lnk = (t, v) => `<button type="button" class="rw" data-a="toast" data-v="${v}"><span class="rx"><b>${t}</b></span><svg class="ic"><use href="#i-next"/></svg></button>`;
-  return { title: 'このアプリについて', html: `<div class="pgc"><div class="abt">${pic('app-icon', 'abic')}<div><b>kifumate</b><span>棋譜の記録と振り返り</span></div></div><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>データの保存</i><span>この端末の中だけ</span><i>棋譜の解析</i><span>サーバーで行います</span><i>サーバーに送るもの</i><span>解析する対局の指し手と、AIコーチに使う解析結果・学習プロフィール</span></div>
-    <p class="mockn"><b>モック</b>　対局者名をサーバーに送るかどうかは、実装のときに決めて、ここに正しく書きます。</p>
+  return { title: 'このアプリについて', html: `<div class="pgc"><div class="abt">${pic('app-icon', 'abic')}<div><b>kifumate</b><span>棋譜の記録と振り返り</span></div></div><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>データの保存</i><span>この端末の中だけ</span><i>棋譜の解析</i><span>サーバーで行います</span><i>サーバーに送るもの</i><span>解析する対局の指し手と、AIコーチに使う解析結果・学習プロフィール</span><i>送らないもの</i><span>対局者名</span></div>
     <div class="cd" style="margin-top:12px">${lnk('利用規約', '利用規約のページを開きます（モック）')}${lnk('プライバシーポリシー', 'プライバシーポリシーのページを開きます（モック）')}${lnk('お問い合わせ', 'お問い合わせのページを開きます（モック）')}<button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>このアプリに含まれるソフトウェア</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
 }
 /* record details: who you are in it, and the strategy and castle tags with manual correction */
