@@ -1,0 +1,10 @@
+{
+ "sente": "hiyodori",
+ "gote": "tsubame",
+ "self": "gote",
+ "date": "2026-11-15",
+ "tags": {
+  "sente": {"strategy": ["居飛車", "対四間飛車急戦"], "castle": ["舟囲い"]},
+  "gote": {"strategy": ["振り飛車", "四間飛車"], "castle": ["美濃囲い", "高美濃"]}
+ }
+}

@@ -1,0 +1,188 @@
+<title>kifumate アプリ全体 ポップ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@500;700;900&display=swap">
+<style>
+/*#include app/app.css*/
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-first" viewBox="0 0 24 24"><path d="M18 5l-7 7 7 7M6.5 5v14"/></symbol>
+  <symbol id="i-last" viewBox="0 0 24 24"><path d="M6 5l7 7-7 7M17.5 5v14"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 017 0v2.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9zM18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3.4"/></symbol>
+  <symbol id="i-kifu" viewBox="0 0 24 24"><rect x="4.5" y="4" width="15" height="16" rx="2.5"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5.5 19.5v-7M12 19.5V5M18.5 19.5v-10"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.3M12 18.2v2.3M3.5 12h2.3M18.2 12h2.3M6 6l1.6 1.6M16.4 16.4L18 18M18 6l-1.6 1.6M7.6 16.4L6 18"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 00-2-2h-7a2 2 0 00-2 2v7a2 2 0 002 2h2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.8h4V7M7 7l1 12.5h8L17 7"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 11v5.2M12 7.8v.2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><rect x="6" y="5" width="12" height="15.5" rx="2"/><path d="M9.5 5V3.6h5V5M9 11h6M9 14.5h6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 6.5L4.5 11 9 15.5"/><path d="M5 11h9a5 5 0 010 10h-2.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V4M6 5h11l-2.5 4 2.5 4H6"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"/><path d="M5.5 10v8.5h13V10M10 14h4"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3L5.5 13.5H11L10 21l8-11h-5.5z"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 13v6.5h14V13"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 11-2.2-5.1M19 4.5V8h-3.5"/></symbol>
+</svg>
+
+<div class="pg">
+  <header class="pg-head">
+    <div class="tx">
+      <h1>アプリ全体のモック（ポップ案）</h1>
+      <p>棋譜の取り込みから解析、分岐、AI解説、戦績、設定まで、主な流れを通して操作できます。</p>
+    </div>
+    <div class="pg-ctl">
+      <span class="lb">プラン</span>
+      <div class="seg" role="group" aria-label="プラン">
+        <button type="button" data-plan="free" aria-pressed="false">無料</button>
+        <button type="button" data-plan="paid" aria-pressed="true">有料</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="phone"><div class="screen vc" id="scr">
+      <div class="sb"><span>9:41</span><i class="isl"></i><svg width="46" height="12" viewBox="0 0 46 12" aria-hidden="true"><path d="M1 9h2.4v3H1zM5 7h2.4v5H5zM9 4.5h2.4V12H9zM13 2h2.4v10H13z" fill="currentColor"/><rect x="22.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".45"/><rect x="24" y="3" width="13" height="6" rx="1.2" fill="currentColor"/><path d="M43 4.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg></div>
+
+      <!-- the three tab screens -->
+      <section class="vw" data-b="vroot">
+        <div class="tabc" data-b="tabc"></div>
+        <nav class="tb" data-b="tb" aria-label="メイン">
+          <button type="button" data-a="tab" data-v="list"><span class="ti"><svg class="ic"><use href="#i-kifu"/></svg></span>棋譜</button>
+          <button type="button" data-a="tab" data-v="stats"><span class="ti"><svg class="ic"><use href="#i-chart"/></svg></span>戦績</button>
+          <button type="button" data-a="tab" data-v="set"><span class="ti"><svg class="ic"><use href="#i-gear"/></svg></span>設定</button>
+        </nav>
+      </section>
+
+      <!-- pages pushed on top: import, filtered list, settings pages, record details -->
+      <section class="vw" data-b="vpage" hidden></section>
+
+      <!-- the game screen: replay, analysis, branch -->
+      <section class="vw" data-b="vgame" hidden>
+        <div class="body">
+          <header class="hd">
+            <button type="button" class="rb" data-a="back" aria-label="戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+            <div class="wr" role="img" data-b="bar">
+              <div class="wl"><span class="l"><em data-b="youl">あなた</em><b data-b="youp"></b></span><span class="jg" data-b="jg"></span><span class="r"><b data-b="oppp"></b><em data-b="oppl">相手</em></span></div>
+              <div class="bar" data-b="barb"><span class="y" data-b="bary"></span><i class="nt"></i></div>
+            </div>
+            <button type="button" class="rb" data-a="gmenu" aria-label="この対局のメニュー"><svg class="ic"><use href="#i-more"/></svg></button>
+          </header>
+          <i class="sp"></i>
+          <div class="nmr"><span class="id" data-who="opp" data-b="oppid"><span class="av" data-b="oppav"></span><span class="nm" data-b="oppname"></span><i class="tn">手番</i></span><span class="brl" data-b="brl1" hidden></span></div>
+          <div class="mid">
+            <div class="col" data-who="opp"><span class="tray" data-b="opphand"></span></div>
+            <div class="bdw" data-b="board"></div>
+            <div class="col" data-who="you"><span class="tray" data-b="youhand"></span></div>
+          </div>
+          <div class="nmr b"><span class="brl" data-b="brl2" hidden></span><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
+          <i class="sp"></i>
+          <div class="ct">
+            <button type="button" class="rb" data-a="step" data-v="first" data-b="bfirst" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
+            <button type="button" class="rb" data-a="step" data-v="prev" aria-label="1手戻る"><svg class="ic"><use href="#i-prev"/></svg></button>
+            <button type="button" class="now" data-a="kf" data-b="now" aria-label="棋譜を開く"><span class="n1" data-b="plyno"></span><span class="n2" data-b="move"></span><svg class="ic"><use href="#i-down"/></svg><span class="mkw" data-b="mark"></span></button>
+            <button type="button" class="rb" data-a="step" data-v="next" aria-label="1手進む"><svg class="ic"><use href="#i-next"/></svg></button>
+            <button type="button" class="rb" data-a="step" data-v="last" aria-label="最後へ"><svg class="ic"><use href="#i-last"/></svg></button>
+          </div>
+          <i class="sp"></i>
+          <div class="cs" data-b="cands"></div>
+          <i class="sp"></i>
+          <div class="gc">
+            <div class="ro" data-b="ro"></div>
+            <div class="gr" data-b="graph" tabindex="0" role="slider" aria-label="手数" aria-valuemin="0"></div>
+          </div>
+          <i class="sp sp-b"></i>
+        </div>
+      </section>
+
+      <div class="toast" data-b="toast" role="status" hidden></div>
+      <div class="aiw" data-b="aiw" hidden>
+        <div class="aih2"><b>AI解説</b><span class="smp">サンプル</span><span class="aihr"><button type="button" class="sty" data-b="aisty" data-a="aistyle" aria-label="解説スタイルを変えて作り直す" hidden></button><button type="button" class="rb" data-b="aiex" data-a="aisize" aria-label="大きくする"></button><button type="button" class="rb" data-a="aiclose" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></span></div>
+        <div class="aim" data-b="aim"></div>
+        <form class="aif" data-b="aif" data-f="ai" hidden><input id="ai-q" type="text" enterkeyhint="send" autocomplete="off" placeholder="この対局について質問する" aria-label="質問"><button type="submit" class="rb" aria-label="送る"><svg class="ic"><use href="#i-send"/></svg></button></form>
+      </div>
+      <div class="shw" data-b="sheet" hidden>
+        <div class="scrim" data-a="closesheet"></div>
+        <div class="shb" data-b="shb">
+          <div class="shh"><b data-b="shtitle"></b><button type="button" class="rb" data-a="closesheet" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></div>
+          <div class="shc" data-b="shc"></div>
+        </div>
+      </div>
+      <div class="dlg" data-b="dlg" hidden>
+        <div class="scrim" data-a="dlgno"></div>
+        <div class="dlb" data-b="dlgb" role="alertdialog" aria-modal="true"></div>
+      </div>
+    </div></div>
+
+    <aside class="notes">
+      <h2>画面を直接開く</h2>
+      <div class="jump">
+        <button type="button" data-jump="list">棋譜一覧</button>
+        <button type="button" data-jump="import">取り込み</button>
+        <button type="button" data-jump="fresh">取り込み直後（未解析）</button>
+        <button type="button" data-jump="game">解析画面</button>
+        <button type="button" data-jump="branch">分岐して試す</button>
+        <button type="button" data-jump="ai">AI解説</button>
+        <button type="button" data-jump="stats">戦績</button>
+        <button type="button" data-jump="set">設定</button>
+        <button type="button" data-jump="plan">有料プラン</button>
+      </div>
+      <h2>通しで試せる流れ</h2>
+      <ul>
+        <li>棋譜一覧の「取り込む」→「貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は1〜3分ほどかかる見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
+        <li>解析画面で駒をタップして動かすと、分岐になります。候補手の「試す」「次の手」で、読み筋を1手ずつ盤で進められます。左端のボタンで本譜に戻ります。</li>
+        <li>「AIに聞く」でスタイルを選んで解説を作ります。文中の手をタップすると、盤がその局面になります。続けて質問できます。</li>
+        <li>戦績で戦法や囲いの行をタップすると、その対局の一覧が開きます。</li>
+        <li>右上の「無料／有料」で、プランごとの見え方を切り替えられます。</li>
+      </ul>
+      <h2>仮に決めたこと（見ながら決めたい点）</h2>
+      <ul>
+        <li>下のタブは「棋譜・戦績・設定」の3つです。解析とAI解説は、対局の画面の中に置きました。</li>
+        <li>解析画面の右上の☆を「…」メニューに変えました。お気に入り・対局情報・解析のやり直し・KIF書き出し・削除が入ります。☆は一覧のカードにあります。</li>
+        <li>戦法と囲いは「…」→「対局情報」で見られ、そこで手で直せます。自分の手番の修正も同じ画面です。</li>
+        <li>解析済みの対局は、あなたの最初の悪手の局面から開きます。</li>
+        <li>無料プランの分岐は、駒は自由に動かせて評価値が出ない形にしました。候補の2位・3位は鍵付きで存在を見せています。</li>
+        <li>AI解説は、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
+        <li>取り込みは1局ずつです。同じ棋譜をもう一度取り込もうとすると、保存せずに知らせます（取り込みを2回試すと見られます）。</li>
+      </ul>
+      <h2>モックの制限</h2>
+      <ul>
+        <li>中まで開ける対局は2局だけです（11/8 の kawasemi 戦と、取り込む対局）。ほかはカードだけで、カードの小さなグラフも作り物です。</li>
+        <li>分岐中の評価値は、候補手の読み筋に沿って進めた局面でだけ出ます。それ以外の手は「解析データなし」になります。</li>
+        <li>AIの文章は、解析データから組み立てたサンプルです。質問は、表示される候補にだけ答えます。</li>
+        <li>棋譜・評価値・候補手はダミーで、水匠の出力ではありません。価格と利用上限も仮の数字です。</li>
+        <li>空の状態、通信が切れたとき、上限に達したときなどの画面は、次の段階で足します。</li>
+      </ul>
+    </aside>
+  </main>
+</div>
+
+<script>window.KIFU = /*__GAME__*/null; window.KIFU2 = /*__GAME2__*/null;</script>
+<script>
+(() => {
+'use strict';
+if (!window.KIFU || !window.KIFU2) { document.querySelector('.stage').textContent = 'サンプル棋譜のデータを読み込めませんでした。'; return; }
+/*#include app/data.js*/
+/*#include app/shogi.js*/
+/*#include app/core.js*/
+/*#include app/game.js*/
+/*#include app/ai.js*/
+/*#include app/screens.js*/
+/*#include app/boot.js*/
+})();
+</script>

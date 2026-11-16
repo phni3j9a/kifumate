@@ -8,12 +8,13 @@ cshogi（盤面・合法手生成・KI2表記・詰み探索）の上で動く�
 これはモックの見た目を確認するためのデータであり、実際の将棋エンジン
 （やねうら王＋水匠）の出力ではない。
 
-使い方（sample-game.json は seed 101 の対局を深さ6・1局面30秒上限で解析したもの）:
+使い方（sample-game.json は seed 101、sample-game-2.json は seed 4 の対局を、どちらも深さ6・1局面30秒上限で解析したもの。
+2局目は data/sample-game-2.meta.json で対局者名・日付・自分の手番を上書きしている）:
   python3 gen_sample_game.py bench                              # 探索速度の確認
   python3 gen_sample_game.py selfplay GAMES.json 101 117        # 自己対局（4並列）。点数順に保存
   python3 gen_sample_game.py show GAMES.json                    # 候補対局の一覧
   python3 gen_sample_game.py analyze GAMES.json 0 OUT.json 6 30 # 全局解析して OUT.json と OUT.json.raw.json を出力
-  python3 gen_sample_game.py rebuild OUT.json                   # raw から JSON だけ作り直す
+  python3 gen_sample_game.py rebuild OUT.json [META.json]       # raw から JSON だけ作り直す（META.json で対局者名などを上書き）
   python3 gen_sample_game.py verify OUT.json                    # 自己検証
 時間制限つきの探索と並列実行のため、再実行しても完全に同じ結果になるとは限らない。
 """
@@ -952,10 +953,11 @@ def cmd_analyze(games_path, gidx, out_path, depth=5, tlimit=40.0):
     build_json(g, raw, out_path)
 
 
-def cmd_rebuild(out_path):
+def cmd_rebuild(out_path, meta_path=None):
     d = json.load(open(out_path + ".raw.json"))
     raw = {int(k): v for k, v in d["raw"].items()}
-    build_json(d["game"], raw, out_path)
+    meta_over = json.load(open(meta_path, encoding="utf-8")) if meta_path else None
+    build_json(d["game"], raw, out_path, meta_over)
 
 
 def natural_alt(b, m):
@@ -978,7 +980,7 @@ def natural_alt(b, m):
     return False
 
 
-def build_json(g, raw, out_path):
+def build_json(g, raw, out_path, meta_over=None):
     usis = g["usis"]
     N = len(usis)
     rng = random.Random(20261108)
@@ -1158,12 +1160,14 @@ def build_json(g, raw, out_path):
             d = move_dict(b, m)
             # line は先頭が move(int)、以降は int か usi
             seq = []
+            seq_usi = []
             n = 0
             for x in line:
                 mv = x if isinstance(x, int) else b.move_from_usi(x)
                 if not b.is_legal(mv):
                     break
                 seq.append(ki2(b, mv))
+                seq_usi.append(move_to_usi(mv))
                 b.push(mv)
                 n += 1
             for _ in range(n):
@@ -1171,6 +1175,7 @@ def build_json(g, raw, out_path):
             d["cp"] = c_cp
             d["mate"] = c_mate
             d["pv"] = seq
+            d["pvUsi"] = seq_usi   # 読み筋を盤上で再生するためのUSI表記（pv と同じ並び）
             cl.append(d)
         pos["cands"] = cl
         pos["mark"] = None
@@ -1265,6 +1270,8 @@ def build_json(g, raw, out_path):
                       "探索の候補を添えたもの）で、指し手評価は36手目以降に付けている。"),
         "seed": g["seed"],
     }
+    if meta_over:
+        meta.update(meta_over)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"meta": meta, "positions": positions}, f, ensure_ascii=False, indent=1)
@@ -1341,11 +1348,15 @@ def cmd_verify(path):
         # pv の合法性は KI2 から逆引きして確認
         for ci, c in enumerate(p["cands"]):
             n = 0
-            for s in c["pv"]:
+            if len(c.get("pvUsi", [])) != len(c["pv"]):
+                errs.append(f"{i}: cand{ci} pvUsi の長さが pv と違う")
+            for k, s in enumerate(c["pv"]):
                 hit = [m for m in b.legal_moves if ki2(b, m) == s]
                 if len(hit) != 1:
                     errs.append(f"{i}: cand{ci} pv '{s}' が合法手に一意対応しない({len(hit)})")
                     break
+                if k < len(c.get("pvUsi", [])) and move_to_usi(hit[0]) != c["pvUsi"][k]:
+                    errs.append(f"{i}: cand{ci} pvUsi[{k}] が pv と食い違う")
                 b.push(hit[0])
                 n += 1
             for _ in range(n):
@@ -1447,7 +1458,7 @@ if __name__ == "__main__":
         tl = float(sys.argv[6]) if len(sys.argv) > 6 else 40.0
         cmd_analyze(sys.argv[2], int(sys.argv[3]), sys.argv[4], depth, tl)
     elif cmd == "rebuild":
-        cmd_rebuild(sys.argv[2])
+        cmd_rebuild(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
     elif cmd == "verify":
         ok = cmd_verify(sys.argv[2])
         sys.exit(0 if ok else 1)

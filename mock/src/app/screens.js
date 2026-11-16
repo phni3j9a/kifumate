@@ -1,0 +1,445 @@
+/* ---------- the other screens: list, import, statistics, settings ---------- */
+const WD = '日月火水木金土';
+const dparts = (d) => { const [y, m, dd] = d.split('-').map(Number); return { y, m, d: dd, w: WD[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()] }; };
+const dshort = (d) => { const o = dparts(d); return `${o.m}/${o.d}（${o.w}）`; };
+const dlong = (d) => { const o = dparts(d); return `${o.y}年${o.m}月${o.d}日（${o.w}）`; };
+const daysAgo = (d) => Math.round((Date.parse(TODAY + 'T00:00:00Z') - Date.parse(d + 'T00:00:00Z')) / 86400000);
+const tally = (gs) => { const w = gs.filter(wonBySelf).length; return { n: gs.length, w, l: gs.length - w, r: gs.length ? Math.round((100 * w) / gs.length) : 0 }; };
+const hasSt = (t, n) => (n === '未分類' ? !t.st.length : t.st.includes(n));
+const hasCs = (t, n) => (n === '未分類' ? !t.cs.length : t.cs.includes(n));
+
+function gameMatch(g, f) {
+  if (f.scope === 'self' && !g.self) return false;
+  if (f.scope === 'other' && g.self) return false;
+  if (f.period && daysAgo(g.date) > +f.period) return false;
+  if (f.fav && !g.fav) return false;
+  if (f.an === 'none' && g.an !== 'none') return false;
+  if (f.side || f.res || f.myst || f.mycs || f.opst) {
+    if (!g.self) return false;
+    if (f.side && g.self !== f.side) return false;
+    if (f.res && (f.res === 'w') !== wonBySelf(g)) return false;
+    if (f.myst && !hasSt(myTags(g), f.myst)) return false;
+    if (f.opst && !hasSt(opTags(g), f.opst)) return false;
+    if (f.mycs && !hasCs(myTags(g), f.mycs)) return false;
+  }
+  if (f.q) {
+    const hay = [g.sente, g.gote, ...g.tags.s.st, ...g.tags.s.cs, ...g.tags.g.st, ...g.tags.g.cs].join(' ').toLowerCase();
+    if (!hay.includes(f.q.toLowerCase())) return false;
+  }
+  return true;
+}
+function listFilter() {
+  const f = { ...UI.flt, q: UI.q.trim() };
+  if (UI.quick === 'fav') f.fav = true;
+  else if (UI.quick === 'w' || UI.quick === 'l') f.res = UI.quick;
+  else if (UI.quick === 'none') f.an = 'none';
+  return f;
+}
+const fltCount = () => Object.keys(FL0).filter((k) => UI.flt[k]).length;
+
+/* ---------- game cards ---------- */
+/* evaluation curve for the card: real for the two sample records, made up (but ending on the right side) for the rest */
+function valsFor(g) {
+  if (g._v && g._vs === g.self) return g._v;
+  const sign = g.self === 'g' ? -1 : 1;
+  let out;
+  if (g.data) out = g.data.positions.map((p) => sign * (p.mate != null ? (p.mate > 0 ? 3000 : -3000) : p.cp));
+  else {
+    let s = 0;
+    for (const ch of g.id + g.date) s = (s * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const n = 34, end = sign * (g.win === 's' ? 1 : -1) * (2200 + rnd() * 800);
+    let w = 0;
+    out = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      w += (rnd() - 0.5) * 560 * (t < 0.25 ? 0.2 : 1);
+      if (t > 0.3 && rnd() < 0.09) w += (rnd() - 0.5) * 2000;
+      w *= 0.95;
+      out.push(Math.round(w * (1 - t * t * t) + end * t * t * t));
+    }
+  }
+  g._v = out; g._vs = g.self;
+  return out;
+}
+let SPN = 0;
+function spark(vals) {
+  const W = 62, H = 28, mid = H / 2, n = vals.length - 1, id = 'sp' + (++SPN);
+  const X = (i) => 1 + ((W - 2) * i) / n, Y = (v) => mid - ((mid - 2) * Math.max(-3000, Math.min(3000, v))) / 3000;
+  let d = '';
+  vals.forEach((v, i) => { d += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); });
+  const area = `${d}L${X(n).toFixed(1)} ${mid}L${X(0).toFixed(1)} ${mid}Z`;
+  return `<svg class="spk" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs><clipPath id="${id}u"><rect width="${W}" height="${mid}"/></clipPath><clipPath id="${id}d"><rect y="${mid}" width="${W}" height="${mid}"/></clipPath></defs><path class="g-up" d="${area}" clip-path="url(#${id}u)"/><path class="g-dn" d="${area}" clip-path="url(#${id}d)"/><line class="spz" x1="0" x2="${W}" y1="${mid}" y2="${mid}"/><path class="spl" d="${d}"/></svg>`;
+}
+function gameCard(g) {
+  const own = !!g.self, w = wonBySelf(g), run = RUN && RUN.id === g.id;
+  const stamp = own ? `<span class="rs ${w ? 'w' : 'l'}" role="img" aria-label="${w ? '勝ち' : '負け'}">${w ? '勝' : '負'}</span>` : '<span class="rs o" role="img" aria-label="自分以外の対局">観戦</span>';
+  let tags;
+  if (own) {
+    const my = myTags(g), op = opTags(g), cs = csFinal(my);
+    tags = stNames(my).map((n) => `<i class="t">${n}</i>`).join('') + (cs ? `<i class="t">${cs}</i>` : '') + (!my.st.length && !cs ? '<i class="t un">未分類</i>' : '') + (stNames(op).length ? `<i class="t op"><small>相手</small>${stNames(op)[0]}</i>` : '');
+  } else {
+    tags = ['s', 'g'].map((s) => `<i class="t op"><small>${s === 's' ? '☗' : '☖'}</small>${stNames(g.tags[s])[0] || '未分類'}</i>`).join('');
+  }
+  const right = run ? `<span class="runpill" data-runpill>解析中 ${RUN.done}/${RUN.total}</span>` : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
+  return `<div class="gcd" role="button" tabindex="0" data-a="open" data-v="${g.id}">${stamp}<div class="gin"><div class="g1"><b>${own ? esc(oppName(g)) : `${esc(g.sente)} 対 ${esc(g.gote)}`}</b><span class="sd">${own ? (g.self === 's' ? '☗先手' : '☖後手') : '自分以外'}</span></div><div class="tg">${tags}</div><div class="g3"><span>${dshort(g.date)}・${g.plies}手</span>${g.an === 'pre' && paid() && !run ? '<span class="pre">精密</span>' : ''}</div></div><div class="gx">${right}<button type="button" class="fv" data-a="fav" data-v="${g.id}" aria-pressed="${g.fav}" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button></div></div>`;
+}
+function listHTML(gs) {
+  if (!gs.length) return '<p class="empty">条件に合う棋譜がありません。</p>';
+  let h = '', cur = '';
+  [...gs].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).forEach((g) => {
+    const k = g.date.slice(0, 7);
+    if (k !== cur) { cur = k; h += `<h3 class="mh">${+k.slice(0, 4)}年${+k.slice(5)}月</h3>`; }
+    h += gameCard(g);
+  });
+  return h;
+}
+function fsumHTML(n) {
+  const f = UI.flt, parts = [];
+  if (f.scope) parts.push(f.scope === 'self' ? '自分の対局' : '自分以外');
+  if (f.side) parts.push(f.side === 's' ? '先手' : '後手');
+  if (f.period) parts.push(`直近${f.period}日`);
+  if (f.myst) parts.push(`自分：${f.myst}`);
+  if (f.mycs) parts.push(`囲い：${f.mycs}`);
+  if (f.opst) parts.push(`相手：${f.opst}`);
+  if (UI.q.trim()) parts.push(`「${esc(UI.q.trim())}」`);
+  if (!parts.length) return '';
+  return `<div class="fsum"><span>${parts.join('・')}　${n}局</span><button type="button" data-a="fclear">解除</button></div>`;
+}
+
+/* ---------- tab: list ---------- */
+function listTab() {
+  const u = DB.usage, gs = DB.games.filter((g) => gameMatch(g, listFilter())), nf = fltCount();
+  const chip = (v, label) => `<button type="button" class="ch" data-a="quick" data-v="${v}" aria-pressed="${UI.quick === v}">${label}</button>`;
+  return `<header class="ab"><h2>棋譜</h2><span class="abn">${DB.games.length}局</span>${paid() ? '' : `<button type="button" class="upl" data-a="nav" data-v="plan">きょうの解析 <b>あと${u.freeMax - u.freeToday}局</b></button>`}<button type="button" class="rb" data-a="search" aria-label="検索" aria-pressed="${UI.search}"><svg class="ic"><use href="#i-search"/></svg></button></header>
+    ${UI.search ? `<label class="sf"><svg class="ic"><use href="#i-search"/></svg><input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="対局者名・戦法・囲い" value="${esc(UI.q)}"><button type="button" data-a="search" aria-label="検索を閉じる"><svg class="ic"><use href="#i-x"/></svg></button></label>` : ''}
+    <div class="chs" role="group" aria-label="絞り込み"><button type="button" class="ch" data-a="filter"><svg class="ic"><use href="#i-filter"/></svg>絞り込み${nf ? `<span class="n">${nf}</span>` : ''}</button>${chip('all', 'すべて')}${chip('fav', 'お気に入り')}${chip('w', '勝ち')}${chip('l', '負け')}${chip('none', '未解析')}</div>
+    <div data-b2="fsum">${fsumHTML(gs.length)}</div>
+    <div class="gl fabpad" data-b2="gl">${listHTML(gs)}</div>
+    <button type="button" class="fab" data-a="nav" data-v="import"><svg class="ic"><use href="#i-plus"/></svg>取り込む</button>`;
+}
+function refreshList() {
+  const gl = R.tabc.querySelector('[data-b2="gl"]'), fs = R.tabc.querySelector('[data-b2="fsum"]');
+  if (!gl) return;
+  const gs = DB.games.filter((g) => gameMatch(g, listFilter()));
+  gl.innerHTML = listHTML(gs);
+  fs.innerHTML = fsumHTML(gs.length);
+}
+function filterSheetHTML() {
+  const f = UI.flt, own = DB.games.filter((g) => g.self);
+  const grp = (key, label, opts) => `<h3 class="fgrp">${label}</h3><div class="opt">${opts.map(([v, t]) => `<button type="button" class="ch" data-a="fset" data-v="${key}:${v}" aria-pressed="${(f[key] || '') === v}">${t}</button>`).join('')}</div>`;
+  const names = (arr) => uniq(arr).map((s) => [s, s]);
+  const n = DB.games.filter((g) => gameMatch(g, listFilter())).length;
+  return grp('scope', '対象', [['', 'すべて'], ['self', '自分の対局'], ['other', '自分以外']])
+    + grp('side', '手番', [['', 'すべて'], ['s', '☗先手'], ['g', '☖後手']])
+    + grp('period', '期間', [['', 'すべて'], ['30', '直近30日'], ['90', '直近90日']])
+    + grp('myst', '自分の戦法', [['', 'すべて'], ['居飛車', '居飛車（全部）'], ['振り飛車', '振り飛車（全部）'], ...names(own.flatMap((g) => myTags(g).st.slice(1))), ['未分類', '未分類']])
+    + grp('mycs', '自分の囲い', [['', 'すべて'], ...names(own.flatMap((g) => myTags(g).cs)), ['未分類', '未分類']])
+    + grp('opst', '相手の戦法', [['', 'すべて'], ['居飛車', '居飛車（全部）'], ['振り飛車', '振り飛車（全部）'], ...names(own.flatMap((g) => opTags(g).st.slice(1)))])
+    + `<div class="acts"><button type="button" class="bt pri wide" data-a="closesheet">${n}局を表示</button></div>`;
+}
+A.open = (id) => {
+  const g = gameById(id);
+  if (!g.data) { toast('モックで中まで開けるのは、サンプル棋譜の入った対局（11/8 kawasemi 戦と、取り込んだ対局）だけです'); return; }
+  push({ t: 'game', id });
+};
+A.fav = (id, el) => { const g = gameById(id); g.fav = !g.fav; el.setAttribute('aria-pressed', g.fav); if (UI.quick === 'fav' && !topNav()) refreshList(); };
+const listTop = () => { const el = R.tabc.querySelector('.gl'); if (el) el.scrollTop = 0; };
+A.quick = (v) => { UI.quick = v; show(); listTop(); };
+A.search = () => {
+  UI.search = !UI.search;
+  if (!UI.search) UI.q = '';
+  show();
+  if (UI.search) { const q = document.getElementById('q'); if (q) q.focus(); }
+};
+A.filter = () => openSheet('絞り込み', filterSheetHTML(), { id: 'flt', h: '70%' });
+A.fset = (v) => {
+  const i = v.indexOf(':'), y = R.shc.scrollTop;
+  UI.flt[v.slice(0, i)] = v.slice(i + 1);
+  R.shc.innerHTML = filterSheetHTML();
+  R.shc.scrollTop = y;
+  renderRoot();
+  listTop();
+};
+A.fclear = () => { UI.flt = { ...FL0 }; UI.q = ''; UI.search = false; show(); };
+SCR.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.id === 'q') { UI.q = t.value; refreshList(); }
+  else if (t.id === 'kif-in') { IMP.text = t.value; const r = R.vpage.querySelector('[data-b2="impres"]'); if (r) r.innerHTML = impResultHTML(); }
+  else if (t.id === 'goal-in') DB.profile.goal = t.value;
+});
+
+/* ---------- import ---------- */
+const IMP = { tab: 'paste', text: '', file: '', side: 'g' };
+const game2 = () => DB.games.find((g) => g.data === window.KIFU2);
+const impState = () => (IMP.tab === 'file' ? (IMP.file ? 'ok' : '') : !IMP.text.trim() ? '' : /手数-+指手|^\s*\d+\s+\S+/m.test(IMP.text) ? 'ok' : 'bad');
+function impResultHTML() {
+  const st = impState(), row = (cls, icon, title, body) => `<div class="vl"><span class="ck${cls}"><svg class="ic"><use href="#${icon}"/></svg></span><div class="vx"><b>${title}</b>${body}</div></div>`;
+  if (!st) return '<p class="hint">対局サービスへのログインや連携は要りません。棋譜のテキストかファイルがあれば取り込めます。</p>';
+  if (st === 'bad') return `<div class="cd vr">${row(' ng', 'i-x', 'KIF形式として読み取れませんでした', '「手数----指手」の行と、その下に指し手が入っているか確かめてください。')}</div>`;
+  const m = window.KIFU2.meta, u = DB.usage, dup = game2(), auto = m.self === 'gote' ? 'g' : 's';
+  let h = `<div class="cd vr">${row('', 'i-check', '棋譜を読み取れました', `<div class="vs"><i>日付</i><span>${dlong(m.date)}</span><i>先手</i><span>☗ ${esc(m.sente)}</span><i>後手</i><span>☖ ${esc(m.gote)}</span><i>結果</i><span>${m.plies}手で${m.winner === 'sente' ? '先手' : '後手'}の勝ち（${esc(m.endReason)}）</span></div>`)}`;
+  if (dup) {
+    return h + row(' wn', 'i-info', '同じ棋譜がすでに保存されています', '二重に保存すると戦績も二重に数えられるため、取り込みません。') + `</div><div class="acts"><button type="button" class="bt pri wide" data-a="open" data-v="${dup.id}">保存済みの棋譜を開く</button></div>`;
+  }
+  const side = IMP.side;
+  h += row('', 'i-check', side ? `あなたは${side === 's' ? '先手' : '後手'}` : '自分の対局ではない', `${side === auto ? `登録した名前「${esc(side === 's' ? m.sente : m.gote)}」と一致しました。` : side ? '手で指定しました。' : '保存と再生・解析はできます。戦績には数えません。'}<div class="sg s" role="group" aria-label="あなたの手番">${[['s', '☗先手'], ['g', '☖後手'], ['', '自分ではない']].map(([v, t]) => `<button type="button" data-a="impside" data-v="${v}" aria-pressed="${(side || '') === v}">${t}</button>`).join('')}</div>`);
+  h += row('', 'i-check', '重複はありません', '保存済みの棋譜に、同じ対局は見つかりませんでした。') + '</div>';
+  return h + `<div class="acts"><button type="button" class="bt pri wide" data-a="impsave" data-v="1">保存して解析する</button><small>${paid() ? `精密解析　今月あと${u.preciseMax - u.precise}局` : `無料の解析　きょうは あと${u.freeMax - u.freeToday}局`}</small><button type="button" class="bt wide" data-a="impsave" data-v="0">保存だけする</button></div>`;
+}
+function importPage() {
+  const tab = (v, t) => `<button type="button" data-a="imptab" data-v="${v}" aria-pressed="${IMP.tab === v}">${t}</button>`;
+  const input = IMP.tab === 'paste'
+    ? `<textarea id="kif-in" class="ta kif" spellcheck="false" autocomplete="off" aria-label="KIF形式の棋譜" placeholder="KIF形式の棋譜をここに貼り付けます">${esc(IMP.text)}</textarea><div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="bt sm" data-a="imppaste"><svg class="ic"><use href="#i-paste"/></svg>貼り付け</button>${IMP.text ? '<button type="button" class="bt sm" data-a="impclear">消す</button>' : ''}</div>`
+    : IMP.file ? `<div class="fpick"><span class="fchip"><svg class="ic"><use href="#i-file"/></svg>${esc(IMP.file)}</span><button type="button" class="tx-b" data-a="impclear">ほかのファイルを選ぶ</button></div>`
+      : '<div class="fpick"><button type="button" class="bt sm" data-a="impfile"><svg class="ic"><use href="#i-file"/></svg>ファイルを選ぶ</button><span>.kif / .kifu のファイルを選べます</span></div>';
+  return { title: '棋譜を取り込む', close: true, html: `<div class="pgc"><div class="sg" role="group">${tab('paste', '貼り付け')}${tab('file', 'ファイルから')}</div><div style="margin-top:10px">${input}</div><p class="mockn"><b>モック</b>　「貼り付け」「ファイルを選ぶ」を押すと、サンプルの棋譜が入ります。何を入れても、サンプルの対局として扱います。</p><div data-b2="impres">${impResultHTML()}</div></div>` };
+}
+A.imptab = (v) => { IMP.tab = v; show(); };
+A.imppaste = () => { IMP.text = kifText(window.KIFU2); show(); };
+A.impfile = () => { IMP.file = 'kifu_20261115.kif'; show(); };
+A.impclear = () => { IMP.text = ''; IMP.file = ''; show(); };
+A.impside = (v) => { IMP.side = v || null; R.vpage.querySelector('[data-b2="impres"]').innerHTML = impResultHTML(); };
+function addGame2() {
+  const gm = gameFromData(window.KIFU2, 'none', false);
+  gm.self = IMP.side || null;
+  DB.games.unshift(gm);
+  IMP.text = ''; IMP.file = '';
+  return gm;
+}
+A.impsave = (v) => {
+  const gm = addGame2();
+  NAV.length = 0; UI.tab = 'list'; UI.scroll.list = 0;
+  push({ t: 'game', id: gm.id });
+  if (v === '1') startAnalysis(gm, paid() ? 'pre' : 'std');
+  else toast('保存しました');
+};
+
+/* ---------- tab: statistics ---------- */
+let TREND = null;
+function trendSVG(chron) {
+  const pts = [];
+  for (let i = 4; i < chron.length; i++) { const win = chron.slice(Math.max(0, i - 9), i + 1); pts.push({ r: Math.round((100 * win.filter(wonBySelf).length) / win.length), d: chron[i].date, n: win.length }); }
+  TREND = null;
+  if (pts.length < 2) return '<p class="empty">5局以上になると表示されます。</p>';
+  const W = 320, H = 108, pl = 30, pr = 36, pt = 10, pb = 18, f1 = (n) => n.toFixed(1);
+  const X = (k) => pl + ((W - pl - pr) * k) / (pts.length - 1), Y = (r) => pt + ((H - pt - pb) * (100 - r)) / 100;
+  let d = '', dots = '';
+  pts.forEach((p, k) => { d += (k ? 'L' : 'M') + f1(X(k)) + ' ' + f1(Y(p.r)); if (k < pts.length - 1) dots += `<circle class="t-pt" cx="${f1(X(k))}" cy="${f1(Y(p.r))}" r="2.3"/>`; });
+  const last = pts[pts.length - 1], lx = X(pts.length - 1), ly = Y(last.r), o = (s) => { const q = dparts(s); return `${q.m}/${q.d}`; };
+  TREND = { pts, X, W, pl, pr };
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="直近10局の勝率の推移。最新は${last.r}%">
+    ${[0, 50, 100].map((r) => `<line class="${r === 50 ? 't-g5' : 't-gl'}" x1="${pl}" x2="${W - pr}" y1="${f1(Y(r))}" y2="${f1(Y(r))}"/><text class="t-yl" x="${pl - 5}" y="${f1(Y(r))}" dy=".35em" text-anchor="end">${r}%</text>`).join('')}
+    <path class="t-ar" d="${d}L${f1(lx)} ${f1(Y(0))}L${f1(X(0))} ${f1(Y(0))}Z" opacity=".55"/><path class="t-ln" d="${d}"/>${dots}
+    <line class="t-hv" y1="${pt}" y2="${H - pb}" visibility="hidden"/>
+    <circle class="t-end" cx="${f1(lx)}" cy="${f1(ly)}" r="4.5"/><text class="t-el" x="${f1(lx + 8)}" y="${f1(ly)}" dy=".35em">${last.r}%</text>
+    <text class="t-yl" x="${pl}" y="${H - 4}">${o(pts[0].d)}</text><text class="t-yl" x="${W - pr}" y="${H - 4}" text-anchor="end">${o(last.d)}</text>
+  </svg><div class="g-tip" hidden><b></b><span></span></div>`;
+}
+function statRows(gs, dim) {
+  const tagOf = dim === 'opst' ? opTags : myTags;
+  let h = '';
+  const row = (name, list, cls, depth) => {
+    const t = tally(list);
+    return `<button type="button" class="sr${cls}" data-a="strow" data-v="${name}"${depth ? ` style="padding-left:${16 * depth}px"` : ''}><span class="sn">${name}</span><span class="sc">${t.n}局 ${t.w}勝${t.l}敗</span><b class="sv">${t.r}%</b><svg class="ic"><use href="#i-next"/></svg><span class="sbar${t.w ? '' : ' z'}"><i style="width:${t.r}%"></i></span></button>`;
+  };
+  if (dim === 'mycs') {
+    const names = uniq(gs.flatMap((g) => myTags(g).cs)), of = (n) => gs.filter((g) => myTags(g).cs.includes(n));
+    const emit = (n, depth) => { h += row(n, of(n), depth ? ' kid' : '', depth); names.filter((k) => CS_PARENT[k] === n).forEach((k) => emit(k, depth + 1)); };
+    names.filter((n) => !names.includes(CS_PARENT[n])).sort((a, b) => of(b).length - of(a).length).forEach((n) => emit(n, 0));
+  } else {
+    for (const fam of ['居飛車', '振り飛車']) {
+      const fg = gs.filter((g) => tagOf(g).st[0] === fam);
+      if (!fg.length) continue;
+      h += row(fam, fg, '', 0);
+      const of = (n) => fg.filter((g) => tagOf(g).st.includes(n));
+      uniq(fg.flatMap((g) => tagOf(g).st.slice(1))).sort((a, b) => of(b).length - of(a).length).forEach((n) => { h += row(n, of(n), ' kid', 1); });
+    }
+  }
+  const un = gs.filter((g) => (dim === 'mycs' ? !myTags(g).cs.length : !tagOf(g).st.length));
+  if (un.length) h += row('未分類', un, ' un', 0);
+  return h || '<p class="empty">対局がありません。</p>';
+}
+const statGames = () => DB.games.filter((g) => g.self && (!UI.st.period || daysAgo(g.date) <= +UI.st.period) && (!UI.st.side || g.self === UI.st.side));
+function statsTab() {
+  const st = UI.st, gs = statGames(), t = tally(gs);
+  const seg = (key, opts) => `<div class="sg s" role="group">${opts.map(([v, l]) => `<button type="button" data-a="stset" data-v="${key}:${v}" aria-pressed="${st[key] === v}">${l}</button>`).join('')}</div>`;
+  const chron = [...gs].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const half = (label, list) => { const x = tally(list); return `<span>${label}</span><span class="sbar${x.w ? '' : ' z'}"><i style="width:${x.r}%"></i></span><span>${x.w}勝${x.l}敗</span>`; };
+  if (!t.n) return `<header class="ab"><h2>戦績</h2></header><div class="pgc"><div class="frow">${seg('period', [['', 'すべて'], ['90', '90日'], ['30', '30日']])}${seg('side', [['', 'すべて'], ['s', '先手'], ['g', '後手']])}</div><p class="empty">この条件の対局はありません。</p></div>`;
+  return `<header class="ab"><h2>戦績</h2><span class="abn">自分の対局 ${t.n}局</span></header>
+    <div class="pgc">
+      <div class="frow">${seg('period', [['', 'すべて'], ['90', '90日'], ['30', '30日']])}${seg('side', [['', 'すべて'], ['s', '先手'], ['g', '後手']])}</div>
+      <div class="cd smy"><span class="dnt" style="background:conic-gradient(var(--you) 0 ${t.r}%, var(--opp) 0)"><span><b>${t.r}%</b><i>勝率</i></span></span><div class="big">${t.w}勝 ${t.l}敗<small>${t.n}局</small></div><div class="hf">${half('☗先手', gs.filter((g) => g.self === 's'))}${half('☖後手', gs.filter((g) => g.self === 'g'))}</div></div>
+      <h3 class="st">最近の勝敗（左が古い対局）</h3>
+      <div class="cd hs">${chron.slice(-20).map((g) => `<i class="${wonBySelf(g) ? '' : 'l'}" title="${dshort(g.date)} ${esc(oppName(g))}"></i>`).join('')}<div class="lg"><span><i></i>勝ち</span><span><i class="l"></i>負け</span></div></div>
+      <h3 class="st">直近10局の勝率の推移</h3>
+      <div class="cd tr" data-b2="trend">${trendSVG(chron)}</div>
+      <h3 class="st">戦法・囲いごとの成績</h3>
+      <div class="sg" role="group">${[['myst', '自分の戦法'], ['opst', '相手の戦法'], ['mycs', '自分の囲い']].map(([v, l]) => `<button type="button" data-a="stset" data-v="dim:${v}" aria-pressed="${st.dim === v}">${l}</button>`).join('')}</div>
+      <div class="cd srs" style="margin-top:10px">${statRows(gs, st.dim)}</div>
+      <p class="hint">行をタップすると、その対局の一覧が開きます。複数の戦法や囲いに当てはまる対局は、それぞれの行に数えます（合計の対局数は重複しません）。</p>
+    </div>`;
+}
+A.stset = (v) => { const i = v.indexOf(':'); UI.st[v.slice(0, i)] = v.slice(i + 1); show(); };
+A.strow = (name) => {
+  const dim = UI.st.dim, lab = { myst: '自分の戦法', opst: '相手の戦法', mycs: '自分の囲い' }[dim];
+  push({ t: 'flist', title: name, lab, f: { scope: 'self', [dim]: name, period: UI.st.period, side: UI.st.side } });
+};
+function flistPage(t) {
+  const gs = DB.games.filter((g) => gameMatch(g, t.f)), x = tally(gs);
+  return { title: esc(t.title), sub: `${t.lab}・${x.n}局 ${x.w}勝${x.l}敗`, html: `<div class="gl">${listHTML(gs)}</div>` };
+}
+SCR.addEventListener('pointermove', (e) => {
+  const box = e.target.closest('[data-b2="trend"]');
+  if (!box || !TREND) return;
+  const svg = box.querySelector('svg'), tip = box.querySelector('.g-tip'), hv = box.querySelector('.t-hv');
+  if (!svg || !tip) return;
+  const r = svg.getBoundingClientRect(), T = TREND, x = ((e.clientX - r.left) / r.width) * T.W;
+  const k = Math.max(0, Math.min(T.pts.length - 1, Math.round(((x - T.pl) / (T.W - T.pl - T.pr)) * (T.pts.length - 1)))), p = T.pts[k], q = dparts(p.d);
+  hv.setAttribute('x1', T.X(k)); hv.setAttribute('x2', T.X(k)); hv.setAttribute('visibility', 'visible');
+  tip.firstChild.textContent = p.r + '%';
+  tip.lastChild.textContent = `${q.m}/${q.d} までの${p.n}局`;
+  tip.style.left = Math.max(70, Math.min(r.width - 70, (T.X(k) / T.W) * r.width)) + 'px';
+  tip.style.top = '6px';
+  tip.hidden = false;
+});
+SCR.addEventListener('pointerout', (e) => {
+  const box = e.target.closest('[data-b2="trend"]');
+  if (!box || (e.relatedTarget && box.contains(e.relatedTarget))) return;
+  const tip = box.querySelector('.g-tip'), hv = box.querySelector('.t-hv');
+  if (tip) tip.hidden = true;
+  if (hv) hv.setAttribute('visibility', 'hidden');
+});
+
+/* ---------- tab: settings, and its pages ---------- */
+const meter = (label, used, max, unit, note) => `<div class="mtr"><span>${label}</span><b>${used} / ${max}${unit}</b><div class="mt"><i style="width:${Math.min(100, (100 * used) / max)}%"></i></div>${note ? `<small>${note}</small>` : ''}</div>`;
+function settingsTab() {
+  const u = DB.usage;
+  const plan = paid()
+    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今月）', u.precise, u.preciseMax, '局')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分')}<button type="button" class="bt sm wide" data-a="nav" data-v="plan">プランの内容を見る</button></div>`
+    : `<div class="cd plc"><div class="pn"><b>無料プラン</b></div>${meter('きょうの解析', u.freeToday, u.freeMax, '局', '毎日 午前0時（日本時間）に 0 に戻ります')}<button type="button" class="bt you sm wide" data-a="nav" data-v="plan">有料プランを見る</button></div>`;
+  const row = (v, icon, title, sub) => `<button type="button" class="rw" data-a="nav" data-v="${v}"><span class="ri"><svg class="ic"><use href="#${icon}"/></svg></span><span class="rx"><b>${title}</b><span>${sub}</span></span><svg class="ic"><use href="#i-next"/></svg></button>`;
+  return `<header class="ab"><h2>設定</h2></header><div class="pgc">${plan}
+    <h3 class="st">対局と解説</h3>
+    <div class="cd">${row('names', 'i-user', '自分の対局者名', esc(DB.names.join('、')) || '未登録')}${row('profile', 'i-flag', '学習プロフィール', `練習中：${DB.profile.practice.join('・') || 'なし'}`)}</div>
+    <h3 class="st">データ</h3>
+    <div class="cd">${row('backup', 'i-box', 'バックアップと復元', '機種変更のときはここから')}</div>
+    <h3 class="st">このアプリ</h3>
+    <div class="cd">${row('about', 'i-info', 'このアプリについて', 'バージョン・ライセンス')}</div></div>`;
+}
+function namesPage() {
+  return { title: '自分の対局者名', html: `<div class="pgc"><p class="hint" style="margin:0 4px 10px">棋譜に書かれた対局者名と照らし合わせて、あなたが先手か後手か、勝ったか負けたかを判定します。名前はいくつでも登録できます。</p>
+    <div class="cd">${DB.names.map((n, i) => `<div class="nmrow"><b>${esc(n)}</b><button type="button" data-a="namedel" data-v="${i}" aria-label="${esc(n)} を削除"><svg class="ic"><use href="#i-x"/></svg></button></div>`).join('') || '<p class="empty">まだ登録がありません。</p>'}</div>
+    <form class="addr" data-f="name"><input id="name-in" class="inp" placeholder="対局者名を追加" autocomplete="off" maxlength="30" aria-label="追加する対局者名"><button type="submit" class="bt pri">追加</button></form>
+    <p class="hint">どの名前にも当てはまらない棋譜や、先手と後手の両方に当てはまる棋譜は、取り込むときに手番を選べます。</p></div>` };
+}
+A.namedel = (i) => { const n = DB.names.splice(+i, 1)[0]; show(); toast(`「${n}」を外しました`); };
+function profilePage() {
+  const pr = DB.profile, all = [...ST_MASTER['居飛車'], ...ST_MASTER['振り飛車']].filter((s) => !s.startsWith('対'));
+  return { title: '学習プロフィール', html: `<div class="pgc">${paid() ? '' : '<p class="mockn" style="margin:0 0 10px">AI対局解説（有料プラン）で使われる設定です。</p>'}
+    <h3 class="st">練習したい戦法</h3><div class="opt">${all.map((s) => `<button type="button" class="ch" data-a="pract" data-v="${s}" aria-pressed="${pr.practice.includes(s)}">${s}</button>`).join('')}</div>
+    <h3 class="st">学習目標</h3><textarea id="goal-in" class="ta" style="height:92px" maxlength="200" aria-label="学習目標" placeholder="例：初段になりたい、終盤を強くしたい">${esc(pr.goal)}</textarea>
+    <h3 class="st">いつもの解説スタイル</h3><div class="opt">${FOCUS.map((x) => `<button type="button" class="ch" data-a="dfocus" data-v="${x}" aria-pressed="${DB.style.focus === x}">${x}</button>`).join('')}</div>
+    <div class="sg" role="group" aria-label="詳しさ">${DETAIL.map((x) => `<button type="button" data-a="ddetail" data-v="${x}" aria-pressed="${DB.style.detail === x}">${x}</button>`).join('')}</div>
+    <p class="hint">変更はすぐに保存され、次に作る解説から反映されます。解説を作るときに、その対局だけ別のスタイルにもできます。</p></div>` };
+}
+A.pract = (v) => { const a = DB.profile.practice, i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); show(); };
+A.dfocus = (v) => { DB.style.focus = v; show(); };
+A.ddetail = (v) => { DB.style.detail = v; show(); };
+function backupPage() {
+  const n = DB.games.length;
+  return { title: 'バックアップと復元', html: `<div class="pgc">
+    <div class="cd bkc"><b>バックアップを書き出す</b><p>棋譜 ${n}局、解析結果、戦法と囲いの修正、AI解説とチャット、学習プロフィール、設定を、1つのファイルにまとめます。</p><button type="button" class="bt pri wide" data-a="bkout"><svg class="ic"><use href="#i-export"/></svg>書き出す</button></div>
+    <div class="cd bkc"><b>バックアップから復元する</b><p>書き出したファイルを選ぶと、この端末のデータがその内容に置きかわります。iPhone と Android の間でも移せます。</p><button type="button" class="bt wide" data-a="bkin"><svg class="ic"><use href="#i-file"/></svg>ファイルを選んで復元</button></div>
+    <p class="hint">データはこの端末の中だけに保存されています。アカウント登録や自動の同期はありません。機種変更の前に、ここから書き出してください。</p>
+    <p class="hint">有料プランの購入情報は、バックアップには入りません。新しい端末では「購入を復元」から引き継ぎます。</p></div>` };
+}
+A.bkout = () => ask('バックアップを書き出しました', `kifumate-backup-${TODAY.replace(/-/g, '')}　棋譜 ${DB.games.length}局<br>実際のアプリでは、ここで保存先や共有先を選ぶ画面が開きます。`, 'OK', null, { single: true });
+A.bkin = () => ask('バックアップから復元しますか', 'いまこの端末にあるデータは、バックアップの内容に置きかわります。元には戻せません。', '復元する', () => toast('復元しました（モックでは何も変わりません）'), { danger: true });
+function planPage() {
+  const u = DB.usage, rowc = (a, b, c) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`;
+  const head = paid()
+    ? `<div class="cd plc"><div class="pn"><b>有料プラン</b><i>利用中</i></div>${meter('精密解析（今月）', u.precise, u.preciseMax, '局')}${meter('リアルタイム解析（今月）', u.rt, u.rtMax, '分')}</div>`
+    : '<div class="cd pwl"><div class="prc"><small>月額</small>780<small>円</small></div><span class="pvn">価格と上限は仮のものです</span><p>毎月自動で更新されます。解約はいつでも、ストアの設定からできます。</p></div>';
+  return { title: '有料プラン', html: `<div class="pgc">${head}
+    <table class="cmp"><thead><tr><th>できること</th><th>無料</th><th>有料</th></tr></thead><tbody>
+      ${rowc('棋譜の保存・再生・戦績', '<b>○</b>', '<b>○</b>')}
+      ${rowc('全局解析', '<b>1日10局</b><br>候補1手', '<b>精密解析 月60局</b><br>候補3手・深い読み')}
+      ${rowc('分岐して手を試す', '<b>○</b><br>評価値は出ない', '<b>○</b>')}
+      ${rowc('リアルタイム局面解析', '—', '<b>月300分</b><br>指すたびに更新')}
+      ${rowc('AI対局解説・質問', '—', '<b>○</b>')}
+    </tbody></table>
+    <div class="acts">${paid() ? '<button type="button" class="bt wide" data-a="toast" data-v="実際のアプリでは、ストアの定期購入の画面が開きます">プランを管理する</button>' : '<button type="button" class="bt pri wide" data-a="subscribe">有料プランに登録する</button>'}</div>
+    <div class="lnk"><button type="button" class="tx-b" data-a="toast" data-v="購入情報を確認しました（モック）">購入を復元</button><button type="button" class="tx-b" data-a="toast" data-v="利用規約のページを開きます（モック）">利用規約</button><button type="button" class="tx-b" data-a="toast" data-v="プライバシーポリシーのページを開きます（モック）">プライバシー</button></div></div>` };
+}
+A.subscribe = () => { DB.plan = 'paid'; syncPlan(); toast('有料プランに登録しました（モック）'); };
+function aboutPage() {
+  return { title: 'このアプリについて', html: `<div class="pgc"><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>解析エンジン</i><span>やねうら王</span><i>評価関数</i><span>水匠11 Plus</span><i>解析の場所</i><span>サーバー（端末では動かしません）</span></div>
+    <div class="cd" style="margin-top:12px"><button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>解析エンジン・評価関数・使用ライブラリ</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
+}
+/* record details: who you are in it, and the strategy and castle tags with manual correction */
+function infoPage(t) {
+  const g = gameById(t.id);
+  const side = (s) => {
+    const tg = g.tags[s], mine = g.self === s, c = mine ? '' : ' op';
+    return `<div class="tgb"><div class="th"><span class="av${mine ? ' y' : ''}">${s === 's' ? '☗' : '☖'}</span>${esc(s === 's' ? g.sente : g.gote)}${mine ? '（あなた）' : ''}<em>${tg.edited ? '手で修正' : '自動判定'}</em></div><div class="tgl"><i>戦法</i><span class="tv">${stNames(tg).map((n) => `<span class="t${c}">${n}</span>`).join('') || '<span class="t un">未分類</span>'}</span><button type="button" class="ed" data-a="tagedit" data-v="${s}:st">修正</button><i>囲い</i><span class="tv">${tg.cs.map((n) => `<span class="t${c}">${n}</span>`).join('<span class="ar">→</span>') || '<span class="t un">未分類</span>'}</span><button type="button" class="ed" data-a="tagedit" data-v="${s}:cs">修正</button></div></div>`;
+  };
+  const an = RUN && RUN.id === g.id ? '解析中' : g.an === 'pre' ? '精密解析ずみ' : g.an === 'std' ? '解析ずみ' : 'まだ解析していません';
+  return { title: '対局情報', html: `<div class="pgc"><div class="cd kv"><i>日付</i><span>${dlong(g.date)}</span><i>結果</i><span>${g.plies}手で${g.win === 's' ? '先手' : '後手'}の勝ち（${esc(g.end)}）</span><i>解析</i><span>${an}</span></div>
+    <h3 class="st">あなたの手番</h3><div class="sg" role="group">${[['s', `☗ ${esc(g.sente)}`], ['g', `☖ ${esc(g.gote)}`], ['', '自分ではない']].map(([v, l]) => `<button type="button" data-a="gside" data-v="${v}" aria-pressed="${(g.self || '') === v}">${l}</button>`).join('')}</div>
+    <p class="hint">登録した対局者名から自動で判定しています。ちがうときはここで直せます。「自分ではない」にすると、戦績には数えません。</p>
+    <h3 class="st">戦法と囲い</h3><div class="cd">${side('s')}${side('g')}</div>
+    <p class="hint">自動判定がちがうときは「修正」から直せます。分からないものは「未分類」のままにできます。囲いが途中で変わった対局は、通った形を順に記録します。</p></div>` };
+}
+A.gside = (v) => {
+  const g = gameById(topNav().id);
+  g.self = v || null;
+  if (CUR === g) { const p = S.ply; loadGame(g); S.ply = p; }
+  show();
+};
+let TE = null;
+function tagSheetHTML() {
+  const g = gameById(TE.id), tg = g.tags[TE.side];
+  const done = '<div class="acts"><button type="button" class="bt pri wide" data-a="closesheet">これでよい</button></div>';
+  if (TE.kind === 'st') {
+    const fam = tg.st[0] || '';
+    return `<p class="optl">大きな分類</p><div class="sg" role="group">${['居飛車', '振り飛車', ''].map((f) => `<button type="button" data-a="tagfam" data-v="${f}" aria-pressed="${fam === f}">${f || '未分類'}</button>`).join('')}</div>`
+      + (fam ? `<p class="optl" style="margin-top:14px">戦法（当てはまるものをいくつでも）</p><div class="opt">${ST_MASTER[fam].map((n) => `<button type="button" class="ch" data-a="tagtog" data-v="${n}" aria-pressed="${tg.st.includes(n)}">${n}</button>`).join('')}</div>` : '<p class="hint">分からないときは「未分類」のままにできます。</p>') + done;
+  }
+  return `<p class="optl">囲い（途中で変わったものも、いくつでも）</p><div class="opt">${CS_MASTER.map((n) => `<button type="button" class="ch" data-a="tagtog" data-v="${n}" aria-pressed="${tg.cs.includes(n)}">${n}</button>`).join('')}</div><p class="hint">何も選ばなければ「未分類」になります。</p>` + done;
+}
+A.tagedit = (v) => {
+  const [side, kind] = v.split(':'), g = gameById(topNav().id);
+  TE = { id: g.id, side, kind };
+  openSheet(`${side === 's' ? '☗' : '☖'} ${side === 's' ? g.sente : g.gote} の${kind === 'st' ? '戦法' : '囲い'}`, tagSheetHTML(), { auto: true, onClose: () => show() });
+};
+A.tagfam = (v) => { const tg = gameById(TE.id).tags[TE.side]; tg.st = v ? [v] : []; tg.edited = true; R.shc.innerHTML = tagSheetHTML(); };
+A.tagtog = (v) => {
+  const tg = gameById(TE.id).tags[TE.side];
+  if (TE.kind === 'st') { const i = tg.st.indexOf(v); if (i > 0) tg.st.splice(i, 1); else tg.st.push(v); }
+  else tg.cs = CS_MASTER.filter((n) => (n === v ? !tg.cs.includes(n) : tg.cs.includes(n)));
+  tg.edited = true;
+  R.shc.innerHTML = tagSheetHTML();
+};
+
+/* ---------- rendering the tab screens and the pushed pages ---------- */
+const TABS = { list: listTab, stats: statsTab, set: settingsTab };
+function renderRoot(restore) {
+  const old = R.tabc.querySelector('.gl, .pgc');
+  const y = restore ? UI.scroll[UI.tab] || 0 : old && R.tabc.dataset.tab === UI.tab ? old.scrollTop : 0;
+  R.tabc.dataset.tab = UI.tab;
+  R.tabc.innerHTML = TABS[UI.tab]();
+  R.tb.querySelectorAll('button').forEach((b) => { if (b.dataset.v === UI.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  const el = R.tabc.querySelector('.gl, .pgc');
+  if (el) el.scrollTop = y;
+}
+const PAGES = { import: importPage, flist: flistPage, names: namesPage, profile: profilePage, backup: backupPage, plan: planPage, about: aboutPage, info: infoPage };
+function renderPage(t, restore) {
+  const pg = PAGES[t.t](t), sel = '.pgc, .gl';
+  const old = R.vpage.querySelector(sel), y = restore ? t.y || 0 : old && R.vpage.dataset.key === t.t ? old.scrollTop : 0;
+  R.vpage.dataset.key = t.t;
+  R.vpage.innerHTML = `<header class="ph"><button type="button" class="rb" data-a="back" aria-label="${pg.close ? '閉じる' : '戻る'}"><svg class="ic"><use href="#${pg.close ? 'i-x' : 'i-prev'}"/></svg></button><h2>${pg.title}${pg.sub ? `<small>${pg.sub}</small>` : ''}</h2></header>${pg.html}`;
+  const now = R.vpage.querySelector(sel);
+  if (now) now.scrollTop = y;
+}
