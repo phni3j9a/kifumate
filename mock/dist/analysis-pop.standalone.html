@@ -100,20 +100,23 @@ body[data-plan="paid"] .lki{display:none}
 .vc .bar .o{position:absolute;left:0;top:0;bottom:0;background:var(--opp);border-right:var(--ol);transition:width .28s cubic-bezier(.3,.9,.4,1)}
 .vc .bar .nt{position:absolute;left:50%;top:0;bottom:0;margin-left:-1px;border-left:2px dotted rgba(36,40,70,.5)}
 
-/* players and piece stands sit beside the board: the opponent top-left, you bottom-right */
-.vc .mid{flex:none;display:flex;align-items:stretch;gap:3px;padding:2px 3px 0}
-.vc .col{flex:none;width:24px;min-height:0;display:flex;flex-direction:column;align-items:center;gap:5px;padding:1px 0 5px}
+/* names sit above (opponent, left) and below (you, right) the board; only the piece stands are beside it */
+.vc .nmr{flex:none;height:21px;display:flex;align-items:center;padding:0 4px}
+.vc .nmr.b{justify-content:flex-end}
+.vc .id{display:flex;align-items:center;gap:4px;min-width:0;max-width:72%;padding:1px 8px 1px 1px;border:1.5px solid transparent;border-radius:99px}
+.vc .id[data-who="you"]{padding:1px 1px 1px 8px}
+.vc .id .av{width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:8px;line-height:1;background:var(--opp)}
+.vc .id[data-who="you"] .av{background:var(--you)}
+.vc .id .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 11.5px/1.3 var(--f-maru)}
+.vc .id .tn{display:none;flex:none;font:900 9.5px/1 var(--f-maru)}
+.screen[data-turn="s"] .id[data-side="s"],.screen[data-turn="g"] .id[data-side="g"]{background:var(--mint);border-color:var(--ink)}
+.screen[data-turn="s"] .id[data-side="s"] .tn,.screen[data-turn="g"] .id[data-side="g"] .tn{display:block}
+.vc .mid{flex:none;display:flex;align-items:stretch;gap:3px;padding:0 3px}
+.vc .col{flex:none;width:24px;min-height:0;display:flex;flex-direction:column;align-items:center;padding:2px 0 8px}
 .vc .col[data-who="you"]{justify-content:flex-end}
-.vc .col .id{flex:none;width:23px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:1px 0 6px;border:1.5px solid transparent;border-radius:12px}
-.vc .col[data-who="you"] .id{flex-direction:column-reverse;padding:6px 0 1px}
-.vc .col .av{width:18px;height:18px;flex:none;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-size:9px;line-height:1;background:var(--opp)}
-.vc .col[data-who="you"] .av{background:var(--you)}
-.vc .col .nm{writing-mode:vertical-rl;max-height:104px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 11px/1 var(--f-maru);letter-spacing:.02em}
-.vc .col .tn{display:none;writing-mode:vertical-rl;font:900 9.5px/1 var(--f-maru);letter-spacing:.12em}
-.screen[data-turn="s"] .col[data-side="s"] .id,.screen[data-turn="g"] .col[data-side="g"] .id{background:var(--mint);border-color:var(--ink)}
-.screen[data-turn="s"] .col[data-side="s"] .tn,.screen[data-turn="g"] .col[data-side="g"] .tn{display:block}
 .vc .tray{flex:none;width:24px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:3px 0;border:1.5px solid var(--ink);border-radius:9px;background:#fff}
-.vc .tray:empty{display:none}
+.vc .tray.none{border-style:dashed;border-color:rgba(36,40,70,.4);background:transparent}
+.vc .t0{writing-mode:vertical-rl;padding:3px 0;font:700 8.5px/1 var(--f-maru);letter-spacing:.2em;color:var(--ink2)}
 .vc .hk{position:relative;width:22px;height:23px;display:grid;place-items:center;border-radius:6px}
 .vc .hk.on{background:var(--you)}
 .vc .hk svg{display:block;width:19px;height:20.5px;overflow:visible}
@@ -163,7 +166,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .b-ck text{font:900 23px/1 var(--f-maru);fill:var(--ink)}
 
 /* move controls */
-.vc .ct{flex:none;display:grid;grid-template-columns:34px 34px 1fr 34px 34px;gap:7px;align-items:center;padding:4px 12px 6px}
+.vc .ct{flex:none;display:grid;grid-template-columns:34px 34px 1fr 34px 34px;gap:7px;align-items:center;padding:2px 12px 6px}
 .vc .ct .rb{width:34px;height:34px}
 .vc .now{position:relative;height:34px;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;border-radius:99px;background:#fff;border:var(--ol);box-shadow:0 2px 0 var(--ink);white-space:nowrap}
 .vc .now:active{transform:translateY(2px);box-shadow:none}
@@ -194,7 +197,7 @@ body[data-plan="paid"] .lki{display:none}
 .vc .bc .w b{font:900 14px/1 var(--f-maru)}
 .vc .bc .w span{font:700 9px/1 var(--f-maru)}
 /* the graph takes spare height first, up to a width-based cap; anything beyond that is shared out as spacing */
-.vc .gc{flex:1000 0 124px;max-height:166px;margin:5px 12px 0;display:flex;flex-direction:column;padding:4px 5px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
+.vc .gc{flex:1000 0 112px;max-height:166px;margin:5px 12px 0;display:flex;flex-direction:column;padding:4px 5px 1px;background:#fff;border:var(--ol);border-radius:14px;box-shadow:var(--sh)}
 .vc .ro{flex:none;height:20px;display:flex;align-items:center;gap:6px;padding:0 5px;font:700 10.5px/1 var(--f-maru);color:var(--ink2);white-space:nowrap}
 .vc .ro b{font:900 12.5px/1 var(--f-maru);color:var(--ink);font-variant-numeric:tabular-nums}
 .vc .ro .dl{font:900 10.5px/1 var(--f-maru);color:var(--ink);padding:2px 6px 3px;border:1.5px solid var(--ink);border-radius:99px;background:#fff;font-variant-numeric:tabular-nums}
@@ -240,7 +243,8 @@ body[data-plan="paid"] .lki{display:none}
 @supports (height:1cqh){
   .body{--u:clamp(0px, (100cqh - 720px) / 18, 10px);--cb:calc(34px + var(--u) * .7)}
   .vc .hd{height:calc(42px + var(--u) * .4)}
-  .vc .ct{grid-template-columns:var(--cb) var(--cb) 1fr var(--cb) var(--cb);padding:calc(4px + var(--u) * .2) 12px calc(6px + var(--u) * .2)}
+  .vc .nmr{height:calc(21px + var(--u) * .2)}
+  .vc .ct{grid-template-columns:var(--cb) var(--cb) 1fr var(--cb) var(--cb);padding:calc(2px + var(--u) * .2) 12px calc(6px + var(--u) * .2)}
   .vc .ct .rb{width:var(--cb);height:var(--cb)}
   .vc .now{height:var(--cb)}
   .vc .now .n2{font-size:calc(15px + var(--u) * .12)}
@@ -343,11 +347,13 @@ body[data-plan="paid"] .lki{display:none}
         <button type="button" class="rb" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button>
       </header>
       <i class="sp"></i>
+      <div class="nmr"><span class="id" data-who="opp"><span class="av" data-b="oppav"></span><span class="nm" data-b="oppname"></span><i class="tn">手番</i></span></div>
       <div class="mid">
-        <div class="col" data-who="opp"><span class="id"><span class="av" data-b="oppav"></span><span class="nm" data-b="oppname"></span><i class="tn">手番</i></span><span class="tray" data-b="opphand"></span></div>
+        <div class="col" data-who="opp"><span class="tray" data-b="opphand"></span></div>
         <div class="bdw" data-b="board"></div>
-        <div class="col" data-who="you"><span class="tray" data-b="youhand"></span><span class="id"><span class="av" data-b="youav"></span><span class="nm" data-b="youname"></span><i class="tn">手番</i></span></div>
+        <div class="col" data-who="you"><span class="tray" data-b="youhand"></span></div>
       </div>
+      <div class="nmr b"><span class="id" data-who="you"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
       <i class="sp"></i>
       <div class="ct">
         <button type="button" class="rb" data-act="first" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
@@ -379,7 +385,7 @@ body[data-plan="paid"] .lki{display:none}
       <h2>今回変えたところ</h2>
       <ul>
         <li>形勢グラフの縦軸を評価値にして、−3000 から +3000 まで 1000 刻みの目盛りを入れました。プラスがあなたの有利です。グラフ上の数字と棋譜一覧の数字も評価値にそろえました。</li>
-        <li>対局者名と持ち駒を盤の両脇に置きました。相手が左上、あなたが右下です。手番の側は名前が緑になり「手番」と出ます。形勢バーも同じ向き（左が相手、右があなた）にそろえました。</li>
+        <li>持ち駒を盤の両脇に置きました。相手が左上、あなたが右下です。名前は盤の上（相手）と下（あなた）にあり、手番の側は緑になって「手番」と出ます。形勢バーも同じ向き（左が相手、右があなた）にそろえました。</li>
         <li>戦型と囲いの表示は、この画面から外しました。</li>
         <li>縦に長い画面では、グラフだけが伸びないようにしました。画面の高さに合わせて操作ボタン・カード・グラフが少しずつ大きくなり、グラフは横幅と高さに応じた上限で止まります。それでも余る分は各段の間隔に配ります。</li>
       </ul>
@@ -698,7 +704,9 @@ function buildGraph() {
   });
   for (const v of AXIS) {
     const y = f1(YV(v));
-    grid += `<line class="${v ? 'g-gl' : 'g-g0'}" x1="${xl}" x2="${xr}" y1="${y}" y2="${y}"/><text class="g-yl" x="${xl - 3}" y="${y}" dy=".35em" text-anchor="end">${v ? sgn(v) : '0'}</text>`;
+    grid += `<line class="${v ? 'g-gl' : 'g-g0'}" x1="${xl}" x2="${xr}" y1="${y}" y2="${y}"/>`;
+    /* when the plot is short, the ±2000 labels are dropped so the numbers do not touch; the lines stay */
+    if ((y1 - y0) / 6 >= 11 || Math.abs(v) !== 2000) grid += `<text class="g-yl" x="${xl - 3}" y="${y}" dy=".35em" text-anchor="end">${v ? sgn(v) : '0'}</text>`;
   }
   let d = '';
   for (let i = 0; i <= N; i++) d += (i ? 'L' : 'M') + f1(X(i)) + ' ' + f1(Y(i));
@@ -838,8 +846,11 @@ function markCurrent() {
 }
 function renderBoard() {
   R.board.innerHTML = boardSVG(S.ply);
-  R.youhand.innerHTML = trayHTML(POS[S.ply].hands[SELF], SELF);
-  R.opphand.innerHTML = trayHTML(POS[S.ply].hands[OTHER], OTHER);
+  for (const [el, side] of [[R.youhand, SELF], [R.opphand, OTHER]]) {
+    const html = trayHTML(POS[S.ply].hands[side], side);
+    el.classList.toggle('none', !html);
+    el.innerHTML = html || '<i class="t0">なし</i>';
+  }
 }
 function renderCands() { R.cands.innerHTML = candsHTML(S.ply); renderBoard(); }
 function renderPly() {
@@ -895,8 +906,8 @@ function clearPick() { if (S.pick) { S.pick = null; S.targets = []; renderBoard(
 const nameOf = (side) => (side === 's' ? M.sente : M.gote);
 R.youname.textContent = nameOf(SELF); R.oppname.textContent = nameOf(OTHER);
 R.youav.textContent = SELF === 's' ? '☗' : '☖'; R.oppav.textContent = OTHER === 's' ? '☗' : '☖';
-SCR.querySelector('.col[data-who="you"]').dataset.side = SELF;
-SCR.querySelector('.col[data-who="opp"]').dataset.side = OTHER;
+SCR.querySelector('.id[data-who="you"]').dataset.side = SELF;
+SCR.querySelector('.id[data-who="opp"]').dataset.side = OTHER;
 R.moves.innerHTML = movesHTML();
 R.graph.setAttribute('aria-valuemax', N);
 bindGraph();
