@@ -27,7 +27,7 @@ function layoutAI() {
   R.aiex.innerHTML = `<svg class="ic"><use href="#${AI.full ? 'i-down' : 'i-expand'}"/></svg>`;
 }
 function setAIFull(on) { AI.full = on; layoutAI(); }
-const aiStage = () => (AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : !paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : CUR.an !== 'pre' ? 'redo' : 'setup');
+const aiStage = () => (AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : !paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : CUR.an !== 'pre' ? 'redo' : aiLeft() ? 'setup' : 'cap');
 
 /* ---------- facts taken from the analysis ---------- */
 /* a move named in the text: tapping it shows that position on the board. Yours are yellow, the opponent's blue. */
@@ -172,6 +172,7 @@ function aiBody(st) {
     const running = RUN && RUN.id === CUR.id;
     return `<div class="lk">${pic('chat-default', 'lkav')}<b>${running ? '解析しています' : '先に、この対局の精密解析が必要です'}</b><span>${running ? (RUN.kind === 'pre' ? '解析が終わると、ここで解説を作れます。' : 'ふつうの解析をしています。AIコーチは、精密解析した対局で使えます。') : 'AIコーチは、精密解析で出た評価値・候補手・詰みをもとに説明します。'}</span></div>`;
   }
+  if (st === 'cap') return `<div class="lk">${pic('sys-limit', 'lkim')}<b>今月のAIコーチは上限に達しました</b><span>月が変わると、また使えます。これまでに作った解説は、そのまま読めます。</span></div>`;
   if (st === 'redo') return `<div class="lk">${pic('chat-default', 'lkav')}<b>AIコーチは、精密解析した対局で使えます</b><span>この対局は「ふつうの解析」です。精密解析でやり直すと、候補が3手まで出て、解説も作れます。</span></div>`;
   if (st === 'gen') return '<p class="fl">解説を作っています…</p>' + '<div class="skl"></div>'.repeat(3) + '<div class="skl" style="width:62%"></div>' + '<div class="skl" style="margin-top:20px"></div><div class="skl" style="width:80%"></div>';
   if (st === 'setup') {
@@ -184,7 +185,7 @@ function aiBody(st) {
   const ai = CUR.ai, qs = paid() ? aiQuestions().filter((x) => !ai.chat.some((c) => c.q === x.q)) : [];
   let h = ai.html + '<p class="ain">数字と指し手は、解析結果のままです。説明の文章はAIが書いています。<span class="mk0">モック</span>この文章は、解析データから組み立てた見本です。</p>';
   ai.chat.forEach((c) => { h += `<p class="cq">${esc(c.q)}</p><div class="ca">${pic(c.a ? c.face : 'chat-thinking', 'cav')}<div>${c.a || '<section class="blk"><span class="dots"><i></i><i></i><i></i></span></section>'}</div></div>`; });
-  if (paid()) h += `<div class="sqs"><button type="button" class="sq" data-a="aiask" data-v="@pos">いまの局面について教えて</button>${qs.map((x) => `<button type="button" class="sq" data-a="aiask" data-v="${esc(x.q)}">${esc(x.q)}</button>`).join('')}</div>`;
+  if (paid() && aiLeft()) h += `<div class="sqs"><button type="button" class="sq" data-a="aiask" data-v="@pos">いまの局面について教えて</button>${qs.map((x) => `<button type="button" class="sq" data-a="aiask" data-v="${esc(x.q)}">${esc(x.q)}</button>`).join('')}</div>`;
   return h;
 }
 /* the bottom of the sheet always holds the one thing to do next */
@@ -195,11 +196,13 @@ function aiFoot(st) {
     if (!preciseLeft()) return `<p class="ailk">今週の精密解析は残り0局です。${WEEK}に、また使えます。</p>`;
     return `<p class="ailk">精密解析を1局分使います（今週あと${preciseLeft()}局）</p><button type="button" class="bt pri wide" data-a="aianalyze">${st === 'redo' ? '精密解析でやり直す' : '精密解析する'}</button>`;
   }
-  if (st === 'setup') return `<button type="button" class="bt pri wide" data-a="aigen"><svg class="ic"><use href="#i-spark"/></svg>${CUR.ai ? 'このスタイルで作り直す' : '解説をつくる'}</button>${CUR.ai ? '<button type="button" class="tx-b" data-a="aicancel">いまの解説に戻る</button>' : ''}`;
+  const few = aiLow() ? `<p class="ailk">AIコーチは、今月あと${aiLeft()}回使えます</p>` : '';
+  if (st === 'ready' && paid()) return aiLeft() ? few : '<p class="ailk">今月のAIコーチは上限に達しました。月が変わると、また使えます。</p>';
+  if (st === 'setup') return `${few}<button type="button" class="bt pri wide" data-a="aigen"><svg class="ic"><use href="#i-spark"/></svg>${CUR.ai ? 'このスタイルで作り直す' : '解説をつくる'}</button>${CUR.ai ? '<button type="button" class="tx-b" data-a="aicancel">いまの解説に戻る</button>' : ''}`;
   if (st === 'ready' && !paid()) return '<p class="ailk">新しい解説や質問は、有料プランで使えます。</p><button type="button" class="bt pri wide" data-a="nav" data-v="plan">有料プランを見る</button>';
   return '';
 }
-const AI_FACE = { lock: 'chat-default', need: 'chat-default', redo: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
+const AI_FACE = { cap: 'chat-default', lock: 'chat-default', need: 'chat-default', redo: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
 function renderAI(keepScroll) {
   if (!AI.open) return;
   const st = aiStage(), y = R.aim.scrollTop, foot = aiFoot(st);
@@ -208,7 +211,7 @@ function renderAI(keepScroll) {
   /* the finished text carries its own note that it is a sample, so the header tag gives way to the style button */
   R.aiw.querySelector('.smp').hidden = st === 'ready';
   if (st === 'ready') R.aisty.innerHTML = `<svg class="ic"><use href="#i-filter"/></svg>${CUR.ai.focus}・${CUR.ai.detail}`;
-  R.aif.hidden = st !== 'ready' || !paid();
+  R.aif.hidden = st !== 'ready' || !paid() || !aiLeft();
   R.aic.hidden = !foot;
   R.aic.innerHTML = foot;
   R.aim.innerHTML = aiBody(st);
@@ -216,8 +219,10 @@ function renderAI(keepScroll) {
   layoutAI();
 }
 function askAI(q, answer, face) {
+  if (!aiLeft()) return;
   const gm = CUR, c = { q, a: '', face: face || 'chat-explaining' };
   gm.ai.chat.push(c);
+  useAI();
   renderAI(true);
   R.aim.scrollTop = R.aim.scrollHeight;
   setTimeout(() => {
@@ -230,7 +235,7 @@ A.aiclose = closeAI;
 A.aisize = () => setAIFull(!AI.full);
 A.aifocus = (v) => { AI.focus = v; renderAI(true); };
 A.aidetail = (v) => { AI.detail = v; renderAI(true); };
-A.aistyle = () => { AI.setup = true; AI.focus = CUR.ai.focus; AI.detail = CUR.ai.detail; renderAI(); };
+A.aistyle = () => { if (!aiLeft()) { toast('今月のAIコーチは上限に達しました。月が変わると、また使えます'); return; } AI.setup = true; AI.focus = CUR.ai.focus; AI.detail = CUR.ai.detail; renderAI(); };
 A.aicancel = () => { AI.setup = false; renderAI(); };
 A.aianalyze = () => {
   const after = () => { if (AI.open) renderAI(); };
@@ -245,6 +250,7 @@ A.aigen = () => {
     AI.gen = false;
     if (CUR !== gm) return;
     gm.ai = { focus: AI.focus, detail: AI.detail, html: commentary(AI.focus, AI.detail), chat: [] };
+    useAI();
     renderAI();
   }, 1500);
 };

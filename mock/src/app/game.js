@@ -68,6 +68,17 @@ const totalLeft = () => Math.max(0, DB.usage.totalMax - DB.usage.total);
 const preciseLeft = () => Math.min(totalLeft(), Math.max(0, DB.usage.preciseMax - DB.usage.precise));
 const canRun = (kind) => (!paid() ? freeLeft() : kind === 'pre' ? preciseLeft() : totalLeft()) > 0;
 const WEEK = '月曜の午前0時';
+/* the two limits that stay out of sight: nothing is said until less than a tenth is left */
+const lowOn = (left, max) => left < max / 10;
+const aiLeft = () => Math.max(0, DB.usage.aiMax - DB.usage.ai);
+const aiLow = () => lowOn(aiLeft(), DB.usage.aiMax);
+const rtLeft = () => Math.max(0, DB.usage.rtMax - DB.usage.rt);
+const rtLow = () => lowOn(rtLeft(), DB.usage.rtMax);
+function useAI() {
+  const was = aiLow();
+  DB.usage.ai++;
+  if (!was && aiLow()) toast(`AIコーチは、今月あと${aiLeft()}回使えます`);
+}
 const onGame = (gm) => { const t = topNav(); return !!t && t.t === 'game' && t.id === gm.id; };
 /* how many candidates this record has: three after a precise analysis, else one. What was saved stays
    readable when the plan changes; the plan only limits making new analyses. */
@@ -532,8 +543,8 @@ function renderNow() {
   R.bfirst.innerHTML = `<svg class="ic"><use href="#${e ? 'i-undo' : 'i-first'}"/></svg>`;
   R.brl1.hidden = R.brl2.hidden = !e;
   if (e) {
-    const rs = rtState(), left = DB.usage.rtMax - DB.usage.rt;
-    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 ${S.rtWarm ? '<i class="tick"></i><b>計測中</b>' : '<b>休止中</b>'}・残り${left}分` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
+    const rs = rtState();
+    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 <b>オン</b>${rtLow() ? `・残り${rtLeft()}分` : ''}` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   }
 }
@@ -606,11 +617,12 @@ function commitMove(m) {
     S.rtUntil = performance.now() + wait;
     clearTimeout(rtTimer); clearTimeout(rtIdle);
     rtTimer = setTimeout(() => { S.rtWarm = true; if (S.br && topNav() && topNav().t === 'game') renderPly(); }, wait + 20);
-    /* nothing moved for a while: the analysis goes to sleep, and the minutes stop being counted */
-    rtIdle = setTimeout(() => { S.rtWarm = false; if (S.br && topNav() && topNav().t === 'game') { renderNow(); toast('しばらく操作がないので、リアルタイム解析を休止しました。次に指すと再開します'); } }, wait + 30000);
+    /* nothing moved for a while: the analysis goes to sleep (the minutes stop), and the next move wakes it */
+    rtIdle = setTimeout(() => { S.rtWarm = false; }, wait + 30000);
   }
   renderPly();
-  if (first && !S.told.br) { S.told.br = true; toast(rtState() === 'on' ? '分岐は保存されません。リアルタイム解析は、動いている間ずっと時間を数えます' : '分岐は保存されません。本譜や戦績は変わりません'); }
+  if (rtState() === 'on' && rtLow() && !S.told.rtlow) { S.told.rtlow = true; toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`); }
+  else if (first && !S.told.br) { S.told.br = true; toast('分岐は保存されません。本譜や戦績は変わりません'); }
 }
 function tryMove(pk, f, r) {
   const v = view(), g = gridOf(v.pos), to = toSq(f, r);
@@ -680,12 +692,12 @@ A.exitbr = () => { closeSheet(); exitBranch(); };
 A.kf = () => { const d = dparts(CUR.date); openSheet(S.br ? '分岐の手順' : `棋譜（${d.m}/${d.d}・${N}手）`, S.br ? branchMovesHTML() : movesHTML(), { id: 'kf' }); markCurrent(); };
 A.kind = (v) => { S.kind = v; renderCands(); };
 /* every lock explains what it is and offers the plan page, the same way */
-const LOCKS = {
-  cands: ['2位・3位の候補は、精密解析で出ます', '精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週30局まで使えます。'],
-  precise: ['精密解析は、有料プランで使えます', '候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週30局まで使えます。'],
-  rt: ['リアルタイム解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。月300分まで使えます（解析が動いている間を数えます）。'],
-};
-A.lockinfo = (k) => ask(LOCKS[k][0], LOCKS[k][1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' });
+const LOCKS = () => ({
+  cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
+  precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
+  rt: ['リアルタイム解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。'],
+});
+A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
 /* a record that already has an ordinary analysis is done again as a precise one */
 function redoPrecise(after) {
@@ -701,7 +713,7 @@ A.rttoggle = () => {
   S.rtOn = !S.rtOn; S.rtUntil = 0; S.rtWarm = false;
   renderPly();
   stopRt();
-  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指すと動き出し、休止するまで時間を数えます' : 'リアルタイム解析をオフにしました。時間は数えません');
+  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指した手から評価値が出ます' : 'リアルタイム解析をオフにしました');
 };
 A.evalhelp = () => {
   const mark = (k, t, d) => `<div class="evm">${onbMark(k)}<div><b>${t}</b><span>${d}</span></div></div>`;
@@ -770,7 +782,7 @@ function tickRun() {
     if (!on && gm) toast(`${gm.self ? oppName(gm) + ' 戦' : gm.date + ' の対局'}の解析を終えられませんでした`, { label: '開く', fn: () => { if (gameById(gm.id)) push({ t: 'game', id: gm.id }); } });
     return;
   }
-  r.done = Math.min(r.total, r.done + (r.done < 24 ? 2 : 1));
+  r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
   if (!gm || r.done >= r.total) { finishRun(); return; }
   if (on) {
     const n = R.cands.querySelector('[data-run="n"]'), b = R.cands.querySelector('[data-run="bar"]');

@@ -18,7 +18,7 @@ const ONB_STEPS = [
     body: '盤の駒を動かして、「こう指していたら？」を確かめられます。本譜（実際に指した手順）や戦績は変わりません。' },
   { img: 'onb-5', tint: '#C9F3EA', title: 'コーチに質問',
     body: '解析結果をもとに、AIコーチが対局を言葉で解説します。気になったことは、続けて質問できます。',
-    extra: () => '<span class="onpaid"><svg class="ic"><use href="#i-lock"/></svg>AIコーチは有料プランの機能です。解析（週30局まで）と分岐は、無料で使えます。</span>' },
+    extra: () => '<span class="onpaid"><svg class="ic"><use href="#i-lock"/></svg>AIコーチは有料プランの機能です。解析（週10局まで）と分岐は、無料で使えます。</span>' },
   { img: 'onb-6', tint: '#DCE6FF', title: '目標を決める',
     body: '練習中の戦法と目標を教えてください。コーチ（有料プラン）の解説に反映します。',
     extra: () => `<p class="fl" style="margin-top:0">練習中の戦法（いくつでも）</p><div class="opt" role="group" aria-label="練習中の戦法">${PRACTICE.map((s) => `<button type="button" class="ch mul" data-a="onbprac" data-v="${s}" aria-pressed="${ONB.practice.includes(s)}">${s}</button>`).join('')}</div><label class="fl" for="onb-goal">目標</label><input id="onb-goal" class="inp" autocomplete="off" maxlength="60" placeholder="例：初段になりたい" value="${esc(ONB.goal)}">`,

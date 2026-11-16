@@ -35,10 +35,10 @@ const fs = require('fs');
 
   // 2. stop an analysis: asks first, and the quota is untouched
   await jump('fresh');
-  await has('この対局を解析する'); await has('今週あと18局');
+  await has('この対局を解析する'); await has('今週あと12局');
   await act('analyze'); await wait(900); await has('解析中');
   await act('stopan'); await has('解析を中止しますか');
-  await click('#scr .dla [data-a="dlgok"]'); await has('この対局を解析する', 'back to not analysed'); await has('今週あと18局', 'quota unchanged after stop');
+  await click('#scr .dla [data-a="dlgok"]'); await has('この対局を解析する', 'back to not analysed'); await has('今週あと12局', 'quota unchanged after stop');
 
   // 3. queue: a second analysis waits its turn, then runs
   await act('analyze'); await wait(600);
@@ -47,17 +47,18 @@ const fs = require('fs');
   await act('unqueue'); await has('この対局を解析する', 'unqueued'); await act('analyze'); await has('解析待ち', 'queued again');
   await wait(9000); await has('解析中', 'queued game started after the first finished');
   await wait(9500); await hasNot('解析待ち');
-  await act('back'); await act('tab', 'set'); await has('14 / 30局', 'two precise analyses counted'); await has('28 / 60局', 'and both count toward the weekly total');
+  await act('back'); await act('tab', 'set'); await has('10 / 20局', 'two precise analyses counted'); await has('33 / 100局', 'and both count toward the weekly total');
+  await hasNot('リアルタイム解析（今月）', 'real-time minutes are not shown in the settings');
   await jump('queue'); await has('解析待ち', 'queue shortcut'); await has('いまの解析が終わると、続けて始まります');
 
   // 4. free plan: count goes down by one per analysis; saved precise results stay readable
   await ctl('.pg-ctl [data-state="lived"]'); await ctl('.pg-ctl [data-plan="free"]');
-  await has('今週の解析 あと18局', 'free count on the list');
-  await jump('fresh'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析 あと18局');
-  await act('analyze'); await wait(10500); await act('back'); await has('あと17局', 'free count after one analysis');
+  await has('今週の解析 あと7局', 'free count on the list');
+  await jump('fresh'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析 あと7局');
+  await act('analyze'); await wait(10500); await act('back'); await has('あと6局', 'free count after one analysis');
   await jump('game'); await ctl('.pg-ctl [data-plan="free"]'); await has('2位', 'saved precise candidates readable on free');
   await act('ai'); await has('AIコーチは有料プランの機能です'); await act('aiclose');
-  await jump('limit'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析は残り0局'); await has('月曜の午前0時に、また30局使えます');
+  await jump('limit'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析は残り0局'); await has('月曜の午前0時に、また10局使えます');
   await act('nav', 'plan'); await has('月額');
   await ctl('.pg-ctl [data-plan="paid"]');
 
@@ -69,7 +70,14 @@ const fs = require('fs');
   await jump('limit'); await has('今週の精密解析は残り0局'); await has('ふつうの解析（候補1手）は使えます');
   await jump('set'); await act('nav', 'about'); await has('送らないもの 対局者名'); await act('back');
   await act('nav', 'backup'); await has('iPhone と Android の間では、有料プランは引き継げません'); await act('back');
-  await act('nav', 'plan'); await has('合計は週60局まで'); await has('精密解析した対局');
+  await act('nav', 'plan'); await has('合計 週100局'); await has('AIコーチは月100回まで'); await has('精密解析した対局');
+
+  // 4c. the coach's uses and the real-time minutes are only mentioned when less than a tenth is left
+  await jump('branch'); await wait(900); await hasNot('残り', 'no remaining minutes while plenty is left');
+  await jump('low'); await has('リアルタイム解析は、今月あと24分使えます'); await has('残り24分');
+  await act('ai'); await has('AIコーチは、今月あと7回使えます'); await act('aigen'); await wait(1800); await has('今月あと6回');
+  for (let i = 0; i < 6; i++) { await click('#scr .sq'); await wait(1000); }
+  await has('今月のAIコーチは上限に達しました', 'the coach stops at the limit, and the text stays readable'); await has('この対局のまとめ'); await act('aiclose');
 
   // 5. branch: play the recommended move, look at the line, return with the back button
   await jump('branch'); await wait(900); await has('分岐 1手目'); await has('本譜（48手目）に戻る');
@@ -83,7 +91,7 @@ const fs = require('fs');
   await jump('stats'); await has('勝率に数えていません');
 
   // 7. offline: the coach asks for a connection; an analysis pauses and resumes
-  await jump('game'); await ctl('.pg-ctl [data-net="off"]'); await act('ai'); await act('aigen').catch(() => {});
+  await jump('game'); await ctl('.pg-ctl [data-net="off"]'); await act('ai'); await click('#scr .sq');
   await has('通信できません'); await click('#scr .dla [data-a="dlgno"]'); await act('aiclose');
   await ctl('.pg-ctl [data-net="on"]');
   await jump('offline'); await wait(3300); await has('中断中'); await has('通信が戻ると、続きから再開します');

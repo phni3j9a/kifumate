@@ -15,8 +15,9 @@ const FOCUS = ['総合', '序盤の駒組み', '中盤の攻防', '終盤', '悪
 const DETAIL = ['かんたん', 'ふつう', 'くわしく'];
 
 const DB = { plan: 'paid', first: false, celebrated: true, online: true, names: [], usage: {}, profile: {}, style: {}, games: [] };
-/* limits: free 30 analyses a week; paid 30 precise a week and 60 analyses a week in all (precise included); real-time 300 minutes */
-const usageInUse = () => ({ free: 12, freeMax: 30, precise: 12, preciseMax: 30, total: 26, totalMax: 60, rt: 48, rtMax: 300 });
+/* Limits. Shown in the settings: free 10 analyses a week; paid 100 a week in all, of which 20 precise.
+   Kept out of sight until less than a tenth is left: the coach (100 uses) and the real-time analysis (300 minutes). */
+const usageInUse = () => ({ free: 3, freeMax: 10, precise: 8, preciseMax: 20, total: 31, totalMax: 100, ai: 37, aiMax: 100, rt: 48, rtMax: 300 });
 let GAME1 = null, GAME3 = null;
 let GSEQ = 0;
 /* st: [family, ...specific names] (empty = unclassified); cs: castles in the order they were built */
@@ -81,7 +82,7 @@ function seedData() {
 function clearData() {
   DB.first = true; DB.celebrated = false;
   DB.names = [];
-  DB.usage = { free: 0, freeMax: 30, precise: 0, preciseMax: 30, total: 0, totalMax: 60, rt: 0, rtMax: 300 };
+  DB.usage = { free: 0, freeMax: 10, precise: 0, preciseMax: 20, total: 0, totalMax: 100, ai: 0, aiMax: 100, rt: 0, rtMax: 300 };
   DB.profile = { practice: [], goal: '' };
   DB.style = { focus: '総合', detail: 'ふつう' };
   DB.games = [];

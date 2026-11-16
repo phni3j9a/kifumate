@@ -59,7 +59,7 @@ function resetTo(tab) {
   if (RUN) { clearInterval(RUN.timer); RUN = null; }
   QUEUE.length = 0;
   DB.online = true; DB.usage = usageInUse();
-  S.kind = 'pre'; S.rtOn = true;
+  S.kind = 'pre'; S.rtOn = true; S.told = {};
   syncState();
   closeLayers();
   if (topNav() && topNav().t === 'game') leaveGame();
@@ -98,6 +98,14 @@ const JUMPS = {
     g.an = 'none';
     openRecord(g);
   },
+  /* less than a tenth of the coach's uses and of the real-time minutes is left: the only time these two limits are mentioned */
+  low: () => {
+    JUMPS.branch();
+    Object.assign(DB.usage, { ai: DB.usage.aiMax - 7, rt: DB.usage.rtMax - 24 });
+    renderNow();
+    toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`);
+    S.told.rtlow = true;
+  },
   /* one analysis runs at a time: a second one waits for its turn */
   queue: () => {
     resetTo('list');
@@ -127,7 +135,7 @@ const JUMPS = {
     g.an = 'none';
     openRecord(g);
     startAnalysis(g, paid() ? 'pre' : 'std');
-    setTimeout(() => { if (RUN && RUN.id === g.id) setOnline(false); }, 2200);
+    setTimeout(() => { if (RUN && RUN.id === g.id) setOnline(false); }, 900);
   },
 };
 document.querySelector('.jump').addEventListener('click', (e) => {
