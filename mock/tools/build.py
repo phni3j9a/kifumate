@@ -32,6 +32,7 @@ SHELL_TAIL = "\n</body>\n</html>\n"
 
 def blob(name: str) -> str:
     data = json.loads((ROOT / "data" / name).read_text(encoding="utf-8"))
+    data["meta"].pop("generator", None)  # 生成方法の覚え書き（エンジン名を含む）はページに埋め込まない
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
 

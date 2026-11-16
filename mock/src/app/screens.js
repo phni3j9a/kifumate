@@ -312,7 +312,9 @@ SCR.addEventListener('pointerout', (e) => {
   if (hv) hv.setAttribute('visibility', 'hidden');
 });
 
-/* ---------- tab: settings, and its pages ---------- */
+/* ---------- tab: settings, and its pages ----------
+   The analysis engine and its evaluation function are never named in the app: naming the evaluation
+   function in the service carries a fee, and the decision is to leave both names out. ---------- */
 const meter = (label, used, max, unit, note) => `<div class="mtr"><span>${label}</span><b>${used} / ${max}${unit}</b><div class="mt"><i style="width:${Math.min(100, (100 * used) / max)}%"></i></div>${note ? `<small>${note}</small>` : ''}</div>`;
 function settingsTab() {
   const u = DB.usage;
@@ -375,8 +377,8 @@ function planPage() {
 }
 A.subscribe = () => { DB.plan = 'paid'; syncPlan(); toast('有料プランに登録しました（モック）'); };
 function aboutPage() {
-  return { title: 'このアプリについて', html: `<div class="pgc"><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>解析エンジン</i><span>やねうら王</span><i>評価関数</i><span>水匠11 Plus</span><i>解析の場所</i><span>サーバー（端末では動かしません）</span></div>
-    <div class="cd" style="margin-top:12px"><button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>解析エンジン・評価関数・使用ライブラリ</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
+  return { title: 'このアプリについて', html: `<div class="pgc"><div class="cd kv"><i>バージョン</i><span>0.1（モック）</span><i>棋譜の解析</i><span>サーバーで行います</span><i>データの保存</i><span>この端末の中だけ</span></div>
+    <div class="cd" style="margin-top:12px"><button type="button" class="rw" data-a="toast" data-v="ライセンス表示の画面を開きます（モック）"><span class="rx"><b>ライセンス</b><span>このアプリに含まれるソフトウェア</span></span><svg class="ic"><use href="#i-next"/></svg></button></div></div>` };
 }
 /* record details: who you are in it, and the strategy and castle tags with manual correction */
 function infoPage(t) {
