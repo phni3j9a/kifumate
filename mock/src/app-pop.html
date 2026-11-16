@@ -21,7 +21,7 @@
   <symbol id="i-more" viewBox="0 0 24 24"><path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3.4"/></symbol>
   <symbol id="i-kifu" viewBox="0 0 24 24"><rect x="4.5" y="4" width="15" height="16" rx="2.5"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5.5 19.5v-7M12 19.5V5M18.5 19.5v-10"/></symbol>
-  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.3M12 18.2v2.3M3.5 12h2.3M18.2 12h2.3M6 6l1.6 1.6M16.4 16.4L18 18M18 6l-1.6 1.6M7.6 16.4L6 18"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 00-2-2h-7a2 2 0 00-2 2v7a2 2 0 002 2h2"/></symbol>
@@ -44,7 +44,7 @@
   <header class="pg-head">
     <div class="tx">
       <h1>アプリ全体のモック（ポップ案）</h1>
-      <p>棋譜の取り込みから解析、分岐、AI解説、戦績、設定まで、主な流れを通して操作できます。</p>
+      <p>はじめての起動から、棋譜の取り込み、解析、分岐、AIコーチ、戦績、設定まで、主な流れを通して操作できます。</p>
     </div>
     <div class="pg-ctl">
       <span class="lb">状態</span>
@@ -56,6 +56,11 @@
       <div class="seg" role="group" aria-label="プラン">
         <button type="button" data-plan="free" aria-pressed="false">無料</button>
         <button type="button" data-plan="paid" aria-pressed="true">有料</button>
+      </div>
+      <span class="lb">通信</span>
+      <div class="seg" role="group" aria-label="通信">
+        <button type="button" data-net="on" aria-pressed="true">あり</button>
+        <button type="button" data-net="off" aria-pressed="false">なし</button>
       </div>
     </div>
   </header>
@@ -92,13 +97,13 @@
             <button type="button" class="rb" data-a="gmenu" aria-label="この対局のメニュー"><svg class="ic"><use href="#i-more"/></svg></button>
           </header>
           <i class="sp"></i>
-          <div class="nmr"><span class="id" data-who="opp" data-b="oppid"><span class="av" data-b="oppav"></span><span class="nm" data-b="oppname"></span><i class="tn">手番</i></span><span class="brl" data-b="brl1" hidden></span></div>
+          <div class="nmr"><span class="id" data-who="opp" data-b="oppid"><span class="av" data-b="oppav"></span><span class="nm" data-b="oppname"></span><i class="tn">手番</i></span><button type="button" class="brl" data-b="brl1" data-a="rttoggle" hidden></button></div>
           <div class="mid">
             <div class="col" data-who="opp"><span class="tray" data-b="opphand"></span></div>
             <div class="bdw" data-b="board"></div>
             <div class="col" data-who="you"><span class="tray" data-b="youhand"></span></div>
           </div>
-          <div class="nmr b"><span class="brl" data-b="brl2" hidden></span><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
+          <div class="nmr b"><button type="button" class="brl bk2" data-b="brl2" data-a="exitbr" aria-label="本譜に戻る" hidden></button><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
           <i class="sp"></i>
           <div class="ct">
             <button type="button" class="rb" data-a="step" data-v="first" data-b="bfirst" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
@@ -120,8 +125,9 @@
 
       <div class="toast" data-b="toast" role="status" hidden></div>
       <div class="aiw" data-b="aiw" hidden>
-        <div class="aih2"><img class="aiav" data-b="aiav" alt="" draggable="false"><b>AIコーチ</b><span class="smp">サンプル</span><span class="aihr"><button type="button" class="sty" data-b="aisty" data-a="aistyle" aria-label="解説スタイルを変えて作り直す" hidden></button><button type="button" class="rb" data-b="aiex" data-a="aisize" aria-label="大きくする"></button><button type="button" class="rb" data-a="aiclose" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></span></div>
+        <div class="aih2"><img class="aiav" data-b="aiav" alt="" draggable="false"><b>AIコーチ</b><span class="smp">モックの文章</span><span class="aihr"><button type="button" class="sty" data-b="aisty" data-a="aistyle" aria-label="解説スタイルを変えて作り直す" hidden></button><button type="button" class="rb" data-b="aiex" data-a="aisize" aria-label="大きくする"></button><button type="button" class="rb" data-a="aiclose" aria-label="閉じる"><svg class="ic"><use href="#i-x"/></svg></button></span></div>
         <div class="aim" data-b="aim"></div>
+        <div class="aic" data-b="aic" hidden></div>
         <form class="aif" data-b="aif" data-f="ai" hidden><input id="ai-q" type="text" enterkeyhint="send" autocomplete="off" placeholder="この対局について質問する" aria-label="質問"><button type="submit" class="rb" aria-label="送る"><svg class="ic"><use href="#i-send"/></svg></button></form>
       </div>
       <div class="shw" data-b="sheet" hidden>
@@ -147,10 +153,14 @@
         <button type="button" data-jump="fresh">取り込み直後（未解析）</button>
         <button type="button" data-jump="game">解析画面</button>
         <button type="button" data-jump="branch">分岐して試す</button>
-        <button type="button" data-jump="ai">AI解説</button>
+        <button type="button" data-jump="ai">AIコーチ</button>
         <button type="button" data-jump="stats">戦績</button>
         <button type="button" data-jump="set">設定</button>
         <button type="button" data-jump="plan">有料プラン</button>
+        <button type="button" data-jump="queue">解析の順番待ち</button>
+        <button type="button" data-jump="limit">上限に達したとき</button>
+        <button type="button" data-jump="offline">解析中に通信が切れたとき</button>
+        <button type="button" data-jump="fail">解析が失敗したとき</button>
       </div>
       <h2>オンボーディングとマスコット</h2>
       <ul>
@@ -162,33 +172,56 @@
       </ul>
       <h2>通しで試せる流れ</h2>
       <ul>
-        <li>棋譜一覧の「取り込む」→「貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は1〜3分ほどかかる見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
-        <li>解析画面で駒をタップして動かすと、分岐になります。候補手の「試す」「次の手」で、読み筋を1手ずつ盤で進められます。左端のボタンで本譜に戻ります。</li>
+        <li>棋譜一覧の「取り込む」→「クリップボードから貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は1〜3分ほどかかる見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
+        <li>解析画面で駒をタップして動かすと、分岐になります。候補手の「試す」「次の手」で、読み筋を1手ずつ盤で進められます。左端のボタンか、盤の下の「本譜に戻る」で戻ります。</li>
         <li>「AIに聞く」でスタイルを選んで解説を作ります。文中の手をタップすると、盤がその局面になります。続けて質問できます。</li>
         <li>戦績で戦法や囲いの行をタップすると、その対局の一覧が開きます。</li>
-        <li>右上の「無料／有料」で、プランごとの見え方を切り替えられます。</li>
+        <li>上の「プラン」で無料と有料の見え方を、「通信」で通信が切れたときの見え方を切り替えられます。</li>
+        <li>解析の途中で通信が切れると「中断中」になり、通信が戻ると続きから再開します。通信がなくても、保存済みの棋譜と解析結果は見られます。</li>
+        <li>解析の上限に達すると、いつ戻るかと、いまできること（有料プランの案内、ふつうの解析）を示します。</li>
+        <li>ほかの画面を見ている間に解析が終わると、下に「開く」付きの知らせが出ます。</li>
+        <li>解析は一度に1局です。解析中に別の対局を解析しようとすると「解析待ち」になり、前の解析が終わると続けて始まります（一覧の 11/10 tsugumi 戦は未解析のまま開けるので、取り込んだ対局と合わせて試せます）。</li>
+        <li>解析の「中止」は確認を出します。中止した解析と、サーバー側で失敗した解析は、回数に数えません。</li>
+        <li>「…」→「対局情報」で、結果（勝ち・負け・引き分け・わからない）、自分がどちらか、戦法と囲いを直せます。引き分けと「わからない」は勝率に数えません。</li>
+        <li>初回起動の空の一覧にある「見本の対局で試してみる」で、棋譜を持っていなくても解析済みの画面を見られます。</li>
       </ul>
       <h2>決まっていること</h2>
       <ul>
         <li>解析エンジンと評価関数の名前は、アプリの中に出しません（「このアプリについて」にも載せていません）。</li>
+        <li>解説の機能は、シートの見出しを「AIコーチ」、開くボタンを「AIに聞く」と呼びます。</li>
+        <li>オンボーディングの「目標を決める」は、無料の人にも見せます。入力は任意です。</li>
+        <li>他社の対局サービスの名前は、画面にも説明文にも使いません。</li>
       </ul>
       <h2>仮に決めたこと（見ながら決めたい点）</h2>
       <ul>
-        <li>下のタブは「棋譜・戦績・設定」の3つです。解析とAI解説は、対局の画面の中に置きました。</li>
+        <li>下のタブは「棋譜・戦績・設定」の3つです。解析とAIコーチは、対局の画面の中に置きました。</li>
         <li>解析画面の右上の☆を「…」メニューに変えました。お気に入り・対局情報・解析のやり直し・KIF書き出し・削除が入ります。☆は一覧のカードにあります。</li>
         <li>戦法と囲いは「…」→「対局情報」で見られ、そこで手で直せます。自分の手番の修正も同じ画面です。</li>
         <li>解析済みの対局は、あなたの最初の悪手の局面から開きます。</li>
-        <li>無料プランの分岐は、駒は自由に動かせて評価値が出ない形にしました。候補の2位・3位は鍵付きで存在を見せています。</li>
-        <li>AI解説は、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
+        <li>無料プランの分岐は、駒を自由に動かせます。評価値が出るのは、保存済みの読み筋に沿って進めたときだけです。候補の2位・3位は鍵付きで存在を見せています。</li>
+        <li>有料プランをやめたあとも、保存済みの精密解析（候補3手）とAIコーチの文章は読めます。新しく作ることだけができなくなります。</li>
+        <li>「詰み」と書くのは、1手詰め・3手詰めを証明できた局面だけです。それ以外の大きな差は「3000以上」と書きます。</li>
+        <li>リアルタイム解析には、盤の上にオン・オフの切り替えを置きました。時間を使うのは、オンで指している間だけです。</li>
+        <li>AIコーチは、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
         <li>取り込みは1局ずつです。同じ棋譜をもう一度取り込もうとすると、保存せずに知らせます（取り込みを2回試すと見られます）。</li>
+      </ul>
+      <h2>まだ決まっていないこと（モックは仮の形）</h2>
+      <ul>
+        <li>有料プランでの「ふつうの解析」の回数、AIコーチの回数、月の区切り方。</li>
+        <li>中止や失敗した解析を回数に数えるかどうか（モックは数えません）。</li>
+        <li>リアルタイム解析の時間の数え方（モックは、解析が動いている間だけ数えます）。</li>
+        <li>iPhone と Android の間で、有料プランを引き継げるかどうか（モックは引き継げない前提です。棋譜と設定はバックアップで移せます）。</li>
+        <li>見本の対局を最初から用意するかどうか（モックは用意しています）。</li>
+        <li>対局者名をサーバーに送るかどうか（「このアプリについて」に書く内容が変わります）。</li>
+        <li>解析エンジンが出した詰みの値を、証明とみなして「詰み」と書くかどうか。</li>
       </ul>
       <h2>モックの制限</h2>
       <ul>
-        <li>中まで開ける対局は2局だけです（11/8 の kawasemi 戦と、取り込む対局）。ほかはカードだけで、カードの小さなグラフも作り物です。</li>
+        <li>中まで開ける対局は3局です（11/8 の kawasemi 戦、未解析の 11/10 tsugumi 戦、取り込む対局）。tsugumi 戦は、取り込む対局と同じ指し手を使っています。ほかはカードだけで、カードの小さなグラフも作り物です。</li>
         <li>分岐中の評価値は、候補手の読み筋に沿って進めた局面でだけ出ます。それ以外の手は「解析データなし」になります。</li>
         <li>AIの文章は、解析データから組み立てたサンプルです。質問は、表示される候補にだけ答えます。</li>
         <li>棋譜・評価値・候補手はダミーで、実際の解析エンジンの出力ではありません。価格と利用上限も仮の数字です。</li>
-        <li>通信が切れたときと、解析の上限に達したときの画面は、次の段階で足します（素材集にそのための絵があります）。</li>
+
       </ul>
     </aside>
   </main>

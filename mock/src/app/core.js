@@ -13,13 +13,23 @@ const paid = () => DB.plan === 'paid';
 const topNav = () => NAV[NAV.length - 1] || null;
 const uniq = (arr) => [...new Set(arr)];
 
-let toastTimer = 0;
-function toast(msg) {
+/* a short message; with a label it becomes a snackbar at the bottom that offers one action */
+let toastTimer = 0, toastFn = null;
+function toast(msg, o) {
+  o = o || {};
   R.toast.textContent = msg;
+  R.toast.classList.toggle('act', !!o.label);
+  toastFn = o.fn || null;
+  if (o.label) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.a = 'toastact'; b.textContent = o.label;
+    R.toast.appendChild(b);
+  }
   R.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { R.toast.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { R.toast.hidden = true; }, o.label ? 6000 : 2600);
 }
+A.toastact = () => { const f = toastFn; toastFn = null; R.toast.hidden = true; if (f) f(); };
 
 /* one bottom sheet, reused for the move list, menus, filters and pickers */
 let sheetClose = null;
@@ -50,14 +60,23 @@ A.closesheet = closeSheet;
 let dlgOk = null;
 function ask(title, text, okLabel, onOk, o) {
   o = o || {};
-  R.dlgb.innerHTML = `${o.img ? pic(o.img, 'dli') : ''}<b>${title}</b><p>${text}</p><div class="dla">${o.single ? '' : '<button type="button" class="bt" data-a="dlgno">やめる</button>'}<button type="button" class="bt ${o.danger ? '' : 'pri'}" ${o.danger ? 'style="background:var(--coral)"' : ''} data-a="dlgok">${okLabel}</button></div>`;
+  R.dlgb.innerHTML = `${o.img ? pic(o.img, 'dli') : ''}<b>${title}</b><p>${text}</p><div class="dla">${o.single ? '' : `<button type="button" class="bt" data-a="dlgno">${o.no || 'やめる'}</button>`}<button type="button" class="bt ${o.danger ? '' : 'pri'}" ${o.danger ? 'style="background:var(--coral)"' : ''} data-a="dlgok">${okLabel}</button></div>`;
   dlgOk = onOk || null;
   R.toast.hidden = true;
   R.dlg.hidden = false;
+  const ok = R.dlgb.querySelector('[data-a="dlgok"]');
+  if (ok && !matchMedia('(pointer:coarse)').matches) ok.focus();
 }
 A.dlgno = () => { R.dlg.hidden = true; dlgOk = null; };
 A.dlgok = () => { const f = dlgOk; R.dlg.hidden = true; dlgOk = null; if (f) f(); };
 
+/* Analysis, the coach and real-time analysis run on the server. Without a connection the saved records
+   and results still open; anything that needs the server explains itself and offers to try again. */
+function needNet(retry) {
+  if (DB.online) return true;
+  ask('通信できません', '解析やAIコーチはサーバーで動くため、通信が必要です。保存済みの棋譜と解析結果は、このまま見られます。', 'もう一度試す', () => { if (DB.online) retry(); else toast('まだ通信できません'); }, { img: 'sys-offline', no: '閉じる' });
+  return false;
+}
 function closeLayers() { closeSheet(); R.dlg.hidden = true; closeAI(); R.toast.hidden = true; }
 
 /* which of the three containers is showing: the tab screens, a pushed page, or the game screen */
@@ -82,7 +101,14 @@ function show(anim, restore) {
   }
 }
 function push(p) { closeLayers(); keepScroll(); NAV.push(p); show(true); }
+/* Back undoes the most recent thing first: an open sheet or the coach, then a branch on the game
+   screen, and only then the screen itself. */
 function back() {
+  const cur = topNav();
+  if (cur && cur.t === 'game' && !ONB.on) {
+    if (!R.sheet.hidden || !R.dlg.hidden || AI.open) { closeLayers(); return; }
+    if (S.br) { exitBranch(); return; }
+  }
   closeLayers();
   const t = NAV.pop();
   if (t && t.t === 'game') leaveGame();

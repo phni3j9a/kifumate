@@ -38,6 +38,8 @@ USE = {
     "sys-noresults": ("04-system/02-no-results.png", 360),
     "sys-invalid": ("04-system/03-invalid-record.png", 300),
     "sys-duplicate": ("04-system/04-duplicate.png", 300),
+    "sys-offline": ("04-system/05-offline.png", 300),
+    "sys-limit": ("04-system/06-limit.png", 320),
     "sys-backup": ("04-system/08-backup.png", 320),
     # 学習の節目
     "learn-first": ("05-learning/01-first-review.png", 400),

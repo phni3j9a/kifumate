@@ -9,28 +9,39 @@ function syncPlan() {
 /* the mock has two data states: a first launch (nothing saved, onboarding) and an app in use */
 function resetUI() {
   if (RUN) { clearInterval(RUN.timer); RUN = null; }
+  QUEUE.length = 0;
   closeLayers();
-  CUR = null; S.br = null; clearSel();
+  CUR = null; S.br = null; S.lastBr = null; S.rtOn = true; S.rtWarm = false; S.told = {}; clearSel();
   NAV.length = 0;
   Object.assign(UI, { tab: 'list', quick: 'all', q: '', search: false, flt: { ...FL0 }, scroll: {} });
   Object.assign(IMP, { tab: 'paste', text: '', file: '', pick: undefined });
 }
 function syncState() {
   document.querySelectorAll('.pg-ctl button[data-state]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.state === 'first') === DB.first)));
+  document.querySelectorAll('.pg-ctl button[data-net]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.net === 'on') === DB.online)));
+}
+function setOnline(on) {
+  DB.online = on;
+  S.rtUntil = 0;
+  syncState();
+  show();
+  if (AI.open) renderAI();
 }
 function startFirstRun(withOnboarding) {
   resetUI();
   clearData();
-  DB.plan = 'free';
-  Object.assign(ONB, { on: withOnboarding, step: 0, name: '', practice: [], goal: '', dir: 1 });
+  DB.plan = 'free'; DB.online = true;
+  Object.assign(ONB, { on: withOnboarding, replay: false, step: 0, name: '', practice: [], goal: '', dir: 1 });
   syncState();
   syncPlan();
 }
-function startLived() {
+/* keepPlan: restoring a backup brings the data back, not the purchase */
+function startLived(keepPlan) {
   resetUI();
   seedData();
-  DB.plan = 'paid';
-  ONB.on = false;
+  if (!keepPlan) DB.plan = 'paid';
+  DB.online = true;
+  ONB.on = false; ONB.replay = false;
   syncState();
   syncPlan();
 }
@@ -39,11 +50,16 @@ document.querySelector('.pg-ctl').addEventListener('click', (e) => {
   if (!b) return;
   if (b.dataset.plan) { DB.plan = b.dataset.plan; syncPlan(); }
   else if (b.dataset.state) { if (b.dataset.state === 'first') startFirstRun(true); else startLived(); }
+  else if (b.dataset.net) setOnline(b.dataset.net === 'on');
 });
 
 /* shortcuts from the notes beside the phone, so a reviewer can land on a screen or state directly */
 function resetTo(tab) {
   if (DB.first || ONB.on) startLived();
+  if (RUN) { clearInterval(RUN.timer); RUN = null; }
+  QUEUE.length = 0;
+  DB.online = true; DB.usage = usageInUse();
+  syncState();
   closeLayers();
   if (topNav() && topNav().t === 'game') leaveGame();
   NAV.length = 0;
@@ -72,6 +88,46 @@ const JUMPS = {
   stats: () => resetTo('stats'),
   set: () => resetTo('set'),
   plan: () => { resetTo('set'); push({ t: 'plan' }); },
+  /* limits used up (free: today's analyses; paid: this month's precise analyses and real-time minutes) */
+  limit: () => {
+    resetTo('list');
+    Object.assign(DB.usage, { freeToday: DB.usage.freeMax, precise: DB.usage.preciseMax, rt: DB.usage.rtMax });
+    let g = game2();
+    if (!g) g = addGame2().gm;
+    g.an = 'none';
+    openRecord(g);
+  },
+  /* one analysis runs at a time: a second one waits for its turn */
+  queue: () => {
+    resetTo('list');
+    let g = game2();
+    if (!g) g = addGame2().gm;
+    g.an = 'none'; GAME3.an = 'none';
+    const kind = paid() ? 'pre' : 'std';
+    startAnalysis(GAME3, kind);
+    openRecord(g);
+    startAnalysis(g, kind);
+  },
+  /* the server could not finish an analysis */
+  fail: () => {
+    resetTo('list');
+    let g = game2();
+    if (!g) g = addGame2().gm;
+    g.an = 'none';
+    openRecord(g);
+    startAnalysis(g, paid() ? 'pre' : 'std');
+    if (RUN) RUN.failAt = 38;
+  },
+  /* the connection drops in the middle of an analysis */
+  offline: () => {
+    resetTo('list');
+    let g = game2();
+    if (!g) g = addGame2().gm;
+    g.an = 'none';
+    openRecord(g);
+    startAnalysis(g, paid() ? 'pre' : 'std');
+    setTimeout(() => { if (RUN && RUN.id === g.id) setOnline(false); }, 2200);
+  },
 };
 document.querySelector('.jump').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-jump]');

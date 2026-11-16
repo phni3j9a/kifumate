@@ -10,11 +10,13 @@ const ST_MASTER = {
 };
 const CS_MASTER = ['美濃囲い', '高美濃', '銀冠', '舟囲い', 'エルモ囲い', '金矢倉', '雁木囲い', '左美濃', '居飛車穴熊', '振り飛車穴熊', '中住まい'];
 const CS_PARENT = { '高美濃': '美濃囲い', '銀冠': '高美濃' };
+const PRACTICE = ['四間飛車', '三間飛車', '中飛車', '向かい飛車', '相振り飛車', '矢倉', '角換わり', '相掛かり', '横歩取り', '雁木', '棒銀', '右四間飛車'];
 const FOCUS = ['総合', '序盤の駒組み', '中盤の攻防', '終盤', '悪手・改善点'];
 const DETAIL = ['かんたん', 'ふつう', 'くわしく'];
 
-const DB = { plan: 'paid', first: false, celebrated: true, names: [], usage: {}, profile: {}, style: {}, games: [] };
-let GAME1 = null;
+const DB = { plan: 'paid', first: false, celebrated: true, online: true, names: [], usage: {}, profile: {}, style: {}, games: [] };
+const usageInUse = () => ({ freeToday: 3, freeMax: 10, precise: 12, preciseMax: 60, rt: 48, rtMax: 300 });
+let GAME1 = null, GAME3 = null;
 let GSEQ = 0;
 /* st: [family, ...specific names] (empty = unclassified); cs: castles in the order they were built */
 function mkGame(date, opp, side, res, plies, end, my, mycs, op, opcs, an, fav) {
@@ -39,13 +41,15 @@ const I = '居飛車', F = '振り飛車';
 function seedData() {
   DB.first = false; DB.celebrated = true;
   DB.names = ['tsubame', 'つばめ'];
-  DB.usage = { freeToday: 3, freeMax: 10, precise: 12, preciseMax: 60, rt: 48, rtMax: 300 };
+  DB.usage = usageInUse();
   DB.profile = { practice: ['四間飛車', '矢倉'], goal: 'アマ初段になりたい。終盤で詰みを逃さないようにしたい。' };
   DB.style = { focus: '総合', detail: 'ふつう' };
   DB.games = [
     mkGame('2026-11-13', 'mozu', 'g', 'w', 112, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['居飛車穴熊'], 'pre'),
     mkGame('2026-11-12', 'sekirei', 's', 'l', 98, '投了', [I, '矢倉'], ['金矢倉'], [I, '雁木'], ['雁木囲い'], 'std'),
-    mkGame('2026-11-10', 'tsugumi', 'g', 'l', 76, '詰み', [F, '四間飛車'], ['美濃囲い'], [I, '棒銀'], ['舟囲い'], 'none'),
+    /* the one record still waiting for its analysis can be opened as well: it borrows the moves of the
+       second sample game, under another opponent and date */
+    (GAME3 = gameFromData({ ...window.KIFU2, meta: { ...window.KIFU2.meta, date: '2026-11-10', sente: 'tsugumi' } }, 'none')),
     gameFromData(window.KIFU, 'pre', true),
     mkGame('2026-11-06', 'uguisu', 's', 'w', 121, '投了', [I, '角換わり'], [], [I, '角換わり'], [], 'pre'),
     mkGame('2026-11-03', 'mejiro', 'g', 'w', 89, '投了', [F, '四間飛車'], ['美濃囲い', '高美濃', '銀冠'], [I, '対振り持久戦'], ['左美濃'], 'std'),
@@ -80,7 +84,7 @@ function clearData() {
   DB.profile = { practice: [], goal: '' };
   DB.style = { focus: '総合', detail: 'ふつう' };
   DB.games = [];
-  GAME1 = null;
+  GAME1 = null; GAME3 = null;
 }
 seedData();
 
@@ -89,6 +93,9 @@ const oppName = (g) => (g.self === 's' ? g.gote : g.sente);
 const myTags = (g) => (g.self ? g.tags[g.self] : null);
 const opTags = (g) => (g.self ? g.tags[g.self === 's' ? 'g' : 's'] : null);
 const wonBySelf = (g) => !!g.self && g.win === g.self;
+/* your result in a record: 'w' won, 'l' lost, 'd' draw, 'u' not known; null when it is not your game */
+const resOf = (g) => (!g.self ? null : g.win === 'd' ? 'd' : g.win === 'u' ? 'u' : g.win === g.self ? 'w' : 'l');
+const resText = (g) => (g.win === 'd' ? '引き分け' : g.win === 'u' ? '結果は不明' : `${g.win === 's' ? '先手' : '後手'}の勝ち`);
 /* the name shown for a side's strategy: the specific names, or the family when nothing more is known */
 const stNames = (t) => (t.st.length > 1 ? t.st.slice(1) : t.st.length ? [t.st[0]] : []);
 const csFinal = (t) => (t.cs.length ? t.cs[t.cs.length - 1] : null);

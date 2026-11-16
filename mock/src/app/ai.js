@@ -1,5 +1,6 @@
-/* ---------- AI commentary and chat (paid). The text is assembled from the analysis data: the real
-   app would have the language model write it, grounded in the same numbers. ---------- */
+/* ---------- The AI coach: commentary and questions (paid). The text here is assembled from the
+   analysis data; the real app has the language model write it, grounded in the same numbers.
+   Reading what was made stays possible on any plan; making new commentary or asking needs the plan. */
 const AI = { open: false, full: false, gen: false, setup: false, focus: '総合', detail: 'ふつう' };
 
 function openAI() {
@@ -12,38 +13,39 @@ function closeAI() {
   if (!AI.open) return;
   AI.open = false;
   R.aiw.hidden = true;
+  R.vgame.classList.remove('aifull');
 }
-/* While reading, half height leaves the whole board in view, so a move named in the text can be
-   shown on it. Before there is a commentary, the sheet is as tall as what it has to say. */
+/* Two heights, the same in every state. Half: the sheet's top edge sits just under the lower name row,
+   so the whole board stays in view and a move named in the text can be shown on it. Full: the top
+   edge sits just under the win-rate header, covering the board completely (never cutting through it). */
 function layoutAI() {
   if (!AI.open) return;
-  const ready = aiStage() === 'ready', s = SCR.getBoundingClientRect(), b = R.youid.parentElement.getBoundingClientRect();
-  R.aiw.style.height = !ready ? 'auto' : AI.full ? '92%' : Math.max(236, Math.round(s.bottom - b.bottom - 3)) + 'px';
-  R.aiex.hidden = !ready;
+  const s = SCR.getBoundingClientRect(), b = R.youid.parentElement.getBoundingClientRect(), h = R.bar.parentElement.getBoundingClientRect();
+  R.aiw.style.height = Math.round(AI.full ? s.bottom - h.bottom - 2 : Math.max(250, s.bottom - b.bottom - 3)) + 'px';
+  R.vgame.classList.toggle('aifull', AI.full);
   R.aiex.setAttribute('aria-label', AI.full ? '小さくする' : '大きくする');
   R.aiex.innerHTML = `<svg class="ic"><use href="#${AI.full ? 'i-down' : 'i-expand'}"/></svg>`;
 }
 function setAIFull(on) { AI.full = on; layoutAI(); }
-const aiStage = () => (!paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : 'setup');
+const aiStage = () => (AI.gen ? 'gen' : CUR.ai && !AI.setup ? 'ready' : !paid() ? 'lock' : CUR.an === 'none' || (RUN && RUN.id === CUR.id) ? 'need' : 'setup');
 
 /* ---------- facts taken from the analysis ---------- */
-const ref = (i) => `<button type="button" class="mref" data-a="jump" data-v="${i}">${i}手目 ${mv(P[i].move.ja)}</button>`;
+/* a move named in the text: tapping it shows that position on the board. Yours are yellow, the opponent's blue. */
+const ref = (i) => `<button type="button" class="mref${OWN && moverSide(i) !== SELF ? ' opp' : ''}" data-a="jump" data-v="${i}">${i}手目 ${mv(P[i].move.ja)}</button>`;
 const before = (i) => `<button type="button" class="mref pre" data-a="jump" data-v="${i - 1}">指す前の局面</button>`;
 const swing = (i) => `${fmtVal(P[i - 1])} → ${fmtVal(P[i])}`;
 const blk = (title, src, ps, adv) => `<section class="blk${adv ? ' adv' : ''}"><h4>${title}<i>${src}</i></h4>${ps.map((p) => `<p>${p}</p>`).join('')}</section>`;
-const ENG = '解析結果より', ADV = '学習プロフィールより';
+const ENG = '解析結果にもとづく説明', ADV = '学習プロフィールにもとづく助言';
 function aiFacts() {
   const mine = (p) => moverSide(p.ply) === SELF, all = P.slice(1);
   const errs = all.filter((p) => p.mark === '悪手' || p.mark === '疑問手');
   const byLoss = (a, b) => b.loss - a.loss;
-  let mateFrom = N;
-  while (mateFrom > 1 && P[mateFrom - 1].mate != null && (P[mateFrom - 1].mate > 0) === (M.winner === 'sente')) mateFrom--;
   return {
     won: winnerSide() === SELF, mine,
     my: errs.filter(mine).sort(byLoss), their: errs.filter((p) => !mine(p)).sort(byLoss),
     good: all.filter((p) => p.mark === '好手' && mine(p)),
     missed: all.filter((p) => p.missedTsume && mine(p)),
-    tsume: P.filter((p) => p.tsume), mateFrom,
+    tsume: P.filter((p) => p.tsume),
   };
 }
 const whose = (f, p) => (f.mine(p) ? YOU() : OPP());
@@ -55,23 +57,23 @@ function openingLine() {
   return Math.max(-lo, hi) < 450 ? `序盤（${b}手目まで）は評価値が ${sgn(lo)} 〜 ${sgn(hi)} の範囲で、ほぼ互角でした。` : `序盤（${b}手目まで）の終わりの評価値は ${fmtVal(P[b])} でした。`;
 }
 function secSummary(f) {
-  const ps = [`${N}手で${f.won ? YOU() : OPP()}の勝ち（${esc(M.endReason)}）でした。${openingLine()}`];
+  const ps = [`${N}手で${resultText()}（${esc(M.endReason)}）でした。${openingLine()}`];
   const big = [...f.my.slice(0, 2), ...f.their.slice(0, 2)].sort((a, b) => a.ply - b.ply);
   if (big.length) ps.push('形勢が大きく動いた手：' + big.map((p) => `${ref(p.ply)}（${whose(f, p)}の${p.mark}、${swing(p.ply)}）`).join('　'));
   return blk('この対局のまとめ', ENG, ps);
 }
 function secGood(f) {
   if (!f.good.length) return '';
-  return blk('良かった手', ENG, [f.good.map((p) => ref(p.ply)).join(' ') + ' は好手でした。解析の最善手と同じ手を指せています。']);
+  return blk('良かった手', ENG, [f.good.map((p) => ref(p.ply)).join(' ') + ' は好手でした。解析のおすすめと同じ手を指せています。']);
 }
 function secFix(f, k, withPv, title) {
   const list = f.my.slice(0, k).sort((a, b) => a.ply - b.ply);
   if (!list.length) return blk(title || '直したい手', ENG, ['悪手・疑問手と判定された手はありませんでした。']);
   return blk(title || '直したい手', ENG, list.map((p) => {
     const best = (P[p.ply - 1].cands || [])[0];
-    let t = `${ref(p.ply)}（${p.mark}）　評価値 ${swing(p.ply)}。`;
+    let t = `${ref(p.ply)}（${p.mark}）評価値 ${swing(p.ply)}。`;
     if (best && best.usi !== p.move.usi) {
-      t += `解析の最善手は ${mv(best.ja)} でした。`;
+      t += `解析のおすすめは ${mv(best.ja)} でした。`;
       if (withPv && best.pv.length > 1) t += `以下 ${best.pv.slice(1, 4).map(mv).join(' ')} と進む読み筋です。`;
     }
     return t + ' ' + before(p.ply);
@@ -80,12 +82,15 @@ function secFix(f, k, withPv, title) {
 function secEnd(f) {
   const ps = f.missed.map((p) => {
     const ts = P[p.ply - 1].tsume;
-    return `${p.ply - 1}手目の局面に${ts.len}手詰めがありました（${ts.line.map((x) => mv(x.ja)).join(' ')}）。実戦の ${ref(p.ply)} では詰みを逃しています。 ${before(p.ply)}`;
+    return `${p.ply - 1}手目の局面に${ts.len}手詰めがありました（${ts.line.map((x) => mv(x.ja)).join(' ')}）。本譜の ${ref(p.ply)} では詰みを逃しています。 ${before(p.ply)}`;
   });
-  if (f.won) { if (P[N - 1].mate != null) ps.push(`最後は ${ref(N)} まで、詰みを決めて勝ちました。`); }
-  else if (f.mateFrom < N) ps.push(`${ref(f.mateFrom)} のあとは${OPP()}に詰み筋があり、そのまま寄せ切られました。`);
+  /* only mates that were proven are called mates; anything else is described as a lead */
+  const theirs = P.find((p) => p.tsume && turnSide(p.ply) !== SELF);
+  if (f.won) { if (M.endReason === '詰み') ps.push(`最後は ${ref(N)} まで指して、詰ませて勝ちました。`); }
+  else if (theirs) ps.push(`<button type="button" class="mref pre" data-a="jump" data-v="${theirs.ply}">${theirs.ply}手目の局面</button> で${OPP()}に${theirs.tsume.len}手詰めが生じ、そのまま詰まされました。`);
+  else if (winnerSide()) ps.push(`終盤は${OPP()}が大きくリードしたまま、押し切られました。`);
   if (!ps.length) ps.push('終盤に、詰みの見逃しは見つかりませんでした。');
-  ps.push('<small>詰みは、解析で証明できた1手詰め・3手詰めだけを示しています。</small>');
+  ps.push('<small>「詰み」と書くのは、1手詰め・3手詰めを証明できた局面だけです。</small>');
   return blk('終盤', ENG, ps);
 }
 function secOpening(f) {
@@ -102,7 +107,7 @@ function secMiddle(f, k) {
   const ps = [`中盤（${ph.a}〜${ph.b}手目）は、評価値が ${fmtVal(P[ph.a - 1])} から ${fmtVal(P[ph.b])} に動きました。`];
   list.forEach((p) => {
     const best = (P[p.ply - 1].cands || [])[0];
-    ps.push(`${ref(p.ply)}（${whose(f, p)}の${p.mark}、${swing(p.ply)}）${best && best.usi !== p.move.usi ? `　解析の最善手は ${mv(best.ja)}。` : ''}`);
+    ps.push(`${ref(p.ply)}（${whose(f, p)}の${p.mark}、${swing(p.ply)}）${best && best.usi !== p.move.usi ? ` 解析のおすすめは ${mv(best.ja)}。` : ''}`);
   });
   return blk('中盤の攻防', ENG, ps);
 }
@@ -134,14 +139,14 @@ function aiQuestions() {
   if (f.my[0]) {
     const p = f.my[0], best = (P[p.ply - 1].cands || [])[0];
     qs.push({ q: `${p.ply}手目はどう指せばよかった？`, face: 'chat-idea', a: () => blk('答え', ENG, [
-      `${before(p.ply)} での解析の最善手は ${mv(best.ja)}（評価値 ${fmtVal(best)}）です。読み筋は ${best.pv.map(mv).join(' ')}。`,
-      `実戦の ${ref(p.ply)} は評価値 ${fmtVal(P[p.ply])} になりました。指す前の局面を開いて「試す」を押すと、この読み筋を盤の上で進められます。`]) });
+      `${before(p.ply)} での解析のおすすめは ${mv(best.ja)}（評価値 ${fmtVal(best)}）です。読み筋は ${best.pv.map(mv).join(' ')}。`,
+      `本譜の ${ref(p.ply)} は評価値 ${fmtVal(P[p.ply])} になりました。指す前の局面を開いて「試す」を押すと、この読み筋を盤の上で進められます。`]) });
   }
   if (f.tsume.length) {
     qs.push({ q: '詰みがあった局面を教えて', a: () => blk('答え', ENG, [...f.tsume.map((p) => {
       const nx = P[p.ply + 1], who = turnSide(p.ply) === SELF ? YOU() : OPP();
-      return `<button type="button" class="mref pre" data-a="jump" data-v="${p.ply}">${p.ply}手目の局面</button> ${who}に${p.tsume.len}手詰め（${p.tsume.line.map((x) => mv(x.ja)).join(' ')}）。${nx && nx.missedTsume ? '実戦では逃しました。' : '実戦でもこの手を指しています。'}`;
-    }), '<small>解析で証明できた1手詰め・3手詰めだけを挙げています。</small>']) });
+      return `<button type="button" class="mref pre" data-a="jump" data-v="${p.ply}">${p.ply}手目の局面</button> ${who}に${p.tsume.len}手詰め（${p.tsume.line.map((x) => mv(x.ja)).join(' ')}）。${nx && nx.missedTsume ? '本譜では逃しました。' : '本譜でもこの手を指しています。'}`;
+    }), '<small>証明できた1手詰め・3手詰めだけを挙げています。</small>']) });
   }
   qs.push({ q: '次に何を練習するといい？', face: 'chat-cheer', a: () => blk('答え', ADV, [
     `この対局で評価値を大きく下げた手は${f.my.length}回${f.missed.length ? `、詰みの見逃しは${f.missed.length}回` : ''}でした。`,
@@ -149,35 +154,59 @@ function aiQuestions() {
   return qs;
 }
 
+/* a question about the position on the board right now, answered from the saved analysis of that move */
+function posAnswer(i) {
+  const p = P[i], ps = [], j = judge(p);
+  const lead = !j.lv ? 'ほぼ互角' : (j.side === SELF ? YOU() : OPP()) + 'が' + JN[j.lv];
+  ps.push(`${i ? ref(i) + ' の局面' : '開始局面'}の評価値は ${fmtVal(p)}（${lead}）です。`);
+  if (i && p.mark) ps.push(`この手は${moverSide(i) === SELF ? YOU() : OPP()}の${p.mark}で、指す前の評価値は ${fmtVal(P[i - 1])} でした。`);
+  if (p.tsume) ps.push(`この局面には、${turnSide(i) === SELF ? YOU() : OPP()}に${p.tsume.len}手詰めがあります（${p.tsume.line.map((x) => mv(x.ja)).join(' ')}）。`);
+  else if (i < N && p.cands && p.cands[0]) ps.push(`ここでの${turnSide(i) === SELF ? YOU() + 'のおすすめ' : OPP() + 'の最善'}は ${mv(p.cands[0].ja)}。読み筋は ${p.cands[0].pv.map(mv).join(' ')}。`);
+  return blk('答え', ENG, ps);
+}
+
 /* ---------- rendering ---------- */
+const fl = (t) => `<p class="fl">${t}</p>`;
 function aiBody(st) {
-  if (st === 'lock') return `<div class="lk">${pic('onb-5', 'lkim')}<b>AIコーチは有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で解説します。続けてチャットで質問できます。</span><button type="button" class="bt you sm" data-a="nav" data-v="plan">有料プランを見る</button></div>`;
+  if (st === 'lock') return `<div class="lk">${pic('onb-5', 'lkim')}<b>AIコーチは有料プランの機能です</b><span>解析結果をもとに、対局の流れと改善点を文章で説明します。続けて質問もできます。</span></div>`;
   if (st === 'need') {
     const running = RUN && RUN.id === CUR.id;
-    return `<div class="lk"><svg class="ic"><use href="#i-spark"/></svg><b>${running ? '解析が終わると、解説を作れます' : '解説には、解析結果が必要です'}</b><span>AIは、解析で出た評価値・候補手・詰みをもとに解説します。</span>${running ? '' : '<button type="button" class="bt pri sm" data-a="aianalyze">この対局を解析する</button>'}</div>`;
+    return `<div class="lk">${pic('chat-default', 'lkav')}<b>${running ? '解析しています' : '先に、この対局の解析が必要です'}</b><span>${running ? '解析が終わると、ここで解説を作れます。' : 'AIコーチは、解析で出た評価値・候補手・詰みをもとに説明します。'}</span></div>`;
   }
-  if (st === 'gen') return '<p class="ail">解説を作っています…</p>' + '<div class="skl"></div>'.repeat(3) + '<div class="skl" style="width:62%"></div>' + '<div class="skl" style="margin-top:20px"></div><div class="skl" style="width:80%"></div>';
+  if (st === 'gen') return '<p class="fl">解説を作っています…</p>' + '<div class="skl"></div>'.repeat(3) + '<div class="skl" style="width:62%"></div>' + '<div class="skl" style="margin-top:20px"></div><div class="skl" style="width:80%"></div>';
   if (st === 'setup') {
     const pr = DB.profile;
-    return `<p class="ail">どこを中心に解説しますか</p><div class="chw">${FOCUS.map((x) => `<button type="button" class="ch" data-a="aifocus" data-v="${x}" aria-pressed="${AI.focus === x}">${x}</button>`).join('')}</div>
-      <p class="ail">詳しさ</p><div class="sg" role="group">${DETAIL.map((x) => `<button type="button" data-a="aidetail" data-v="${x}" aria-pressed="${AI.detail === x}">${x}</button>`).join('')}</div>
+    return `${fl('どこを中心に説明しますか')}<div class="chw">${FOCUS.map((x) => `<button type="button" class="ch" data-a="aifocus" data-v="${x}" aria-pressed="${AI.focus === x}">${x}</button>`).join('')}</div>
+      ${fl('詳しさ')}<div class="sg" role="group">${DETAIL.map((x) => `<button type="button" data-a="aidetail" data-v="${x}" aria-pressed="${AI.detail === x}">${x}</button>`).join('')}</div>
       <div class="prf"><div><b>学習プロフィール</b>練習中：${pr.practice.join('・') || 'なし'}${pr.goal ? `<br>目標：${esc(pr.goal)}` : ''}</div><button type="button" class="tx-b" data-a="nav" data-v="profile">変更</button></div>
-      <div class="acts" style="margin-top:0"><button type="button" class="bt pri wide" data-a="aigen"><svg class="ic"><use href="#i-spark"/></svg>解説をつくる</button>${CUR.ai ? '<button type="button" class="tx-b" data-a="aicancel">いまの解説に戻る</button>' : ''}</div>`;
+      ${CUR.ai ? '<p class="hint" style="margin:0 2px">作り直すと、いまの解説と質問の履歴は新しいものに置きかわります。</p>' : ''}`;
   }
-  const ai = CUR.ai, qs = aiQuestions().filter((x) => !ai.chat.some((c) => c.q === x.q));
-  let h = ai.html + '<p class="ain">評価値・候補手・詰みは解析結果の値です。文章はAIが作ります（このモックの文章は、解析データから組み立てたサンプルです）。</p>';
+  const ai = CUR.ai, qs = paid() ? aiQuestions().filter((x) => !ai.chat.some((c) => c.q === x.q)) : [];
+  let h = ai.html + '<p class="ain">数字と指し手は、解析結果のままです。説明の文章はAIが書いています。<span class="mk0">モック</span>この文章は、解析データから組み立てた見本です。</p>';
   ai.chat.forEach((c) => { h += `<p class="cq">${esc(c.q)}</p><div class="ca">${pic(c.a ? c.face : 'chat-thinking', 'cav')}<div>${c.a || '<section class="blk"><span class="dots"><i></i><i></i><i></i></span></section>'}</div></div>`; });
-  if (qs.length) h += `<div class="sqs">${qs.map((x) => `<button type="button" class="sq" data-a="aiask" data-v="${esc(x.q)}">${esc(x.q)}</button>`).join('')}</div>`;
+  if (paid()) h += `<div class="sqs"><button type="button" class="sq" data-a="aiask" data-v="@pos">いまの局面について教えて</button>${qs.map((x) => `<button type="button" class="sq" data-a="aiask" data-v="${esc(x.q)}">${esc(x.q)}</button>`).join('')}</div>`;
   return h;
+}
+/* the bottom of the sheet always holds the one thing to do next */
+function aiFoot(st) {
+  if (st === 'lock') return '<button type="button" class="bt pri wide" data-a="nav" data-v="plan">有料プランを見る</button>';
+  if (st === 'need') return RUN && RUN.id === CUR.id ? '' : '<button type="button" class="bt pri wide" data-a="aianalyze">この対局を解析する</button>';
+  if (st === 'setup') return `<button type="button" class="bt pri wide" data-a="aigen"><svg class="ic"><use href="#i-spark"/></svg>${CUR.ai ? 'このスタイルで作り直す' : '解説をつくる'}</button>${CUR.ai ? '<button type="button" class="tx-b" data-a="aicancel">いまの解説に戻る</button>' : ''}`;
+  if (st === 'ready' && !paid()) return '<p class="ailk">新しい解説や質問は、有料プランで使えます。</p><button type="button" class="bt pri wide" data-a="nav" data-v="plan">有料プランを見る</button>';
+  return '';
 }
 const AI_FACE = { lock: 'chat-default', need: 'chat-default', setup: 'chat-listening', gen: 'chat-thinking', ready: 'chat-explaining' };
 function renderAI(keepScroll) {
   if (!AI.open) return;
-  const st = aiStage(), y = R.aim.scrollTop;
+  const st = aiStage(), y = R.aim.scrollTop, foot = aiFoot(st);
   R.aiav.src = IMG[AI_FACE[st]] || '';
-  R.aisty.hidden = st !== 'ready';
-  if (st === 'ready') R.aisty.innerHTML = `${CUR.ai.focus}・${CUR.ai.detail}<svg class="ic"><use href="#i-refresh"/></svg>`;
-  R.aif.hidden = st !== 'ready';
+  R.aisty.hidden = st !== 'ready' || !paid();
+  /* the finished text carries its own note that it is a sample, so the header tag gives way to the style button */
+  R.aiw.querySelector('.smp').hidden = st === 'ready';
+  if (st === 'ready') R.aisty.innerHTML = `<svg class="ic"><use href="#i-filter"/></svg>${CUR.ai.focus}・${CUR.ai.detail}`;
+  R.aif.hidden = st !== 'ready' || !paid();
+  R.aic.hidden = !foot;
+  R.aic.innerHTML = foot;
   R.aim.innerHTML = aiBody(st);
   R.aim.scrollTop = keepScroll ? y : 0;
   layoutAI();
@@ -199,8 +228,9 @@ A.aifocus = (v) => { AI.focus = v; renderAI(true); };
 A.aidetail = (v) => { AI.detail = v; renderAI(true); };
 A.aistyle = () => { AI.setup = true; AI.focus = CUR.ai.focus; AI.detail = CUR.ai.detail; renderAI(); };
 A.aicancel = () => { AI.setup = false; renderAI(); };
-A.aianalyze = () => { closeAI(); startAnalysis(CUR, paid() ? S.kind : 'std'); };
+A.aianalyze = () => { startAnalysis(CUR, paid() ? S.kind : 'std'); if (AI.open) renderAI(); };
 A.aigen = () => {
+  if (!needNet(() => A.aigen())) return;
   const gm = CUR;
   AI.gen = true; AI.setup = false;
   renderAI();
@@ -211,22 +241,30 @@ A.aigen = () => {
     renderAI();
   }, 1500);
 };
-A.aiask = (q) => { const x = aiQuestions().find((o) => o.q === q); if (x) askAI(x.q, x.a, x.face); };
+A.aiask = (q) => {
+  if (!needNet(() => A.aiask(q))) return;
+  if (q === '@pos') { const i = S.ply; askAI(S.br ? `${i}手目から分かれた局面について教えて` : i ? `${i}手目の局面について教えて` : '開始局面について教えて', () => (S.br ? blk('答え', ENG, ['分岐の局面は、リアルタイム解析の結果をもとに答えます。<span class="mk0">モック</span>ここでは、本譜の局面にだけ答えます。']) : posAnswer(i)), 'chat-explaining'); return; }
+  const x = aiQuestions().find((o) => o.q === q);
+  if (x) askAI(x.q, x.a, x.face);
+};
 SCR.addEventListener('submit', (e) => {
   e.preventDefault();
   const f = e.target.dataset.f;
   if (f === 'ai') {
     const inp = document.getElementById('ai-q'), q = inp.value.trim();
     if (!q || !CUR || !CUR.ai) return;
+    if (!DB.online) { toast('通信できません。つながってから、もう一度送ってください'); return; }
     inp.value = '';
     const x = aiQuestions().find((o) => o.q === q);
-    askAI(q, x ? x.a : () => blk('答え', 'モック', ['モックでは、下に出ている候補の質問にだけ答えます。実際のアプリでは、この対局の解析結果をもとにAIが答えます。']), x ? x.face : 'chat-listening');
+    askAI(q, x ? x.a : () => blk('答え', 'モック', ['<span class="mk0">モック</span>下に出ている候補の質問にだけ答えます。実際のアプリでは、この対局の解析結果をもとにAIコーチが答えます。解析にない手順を挙げるときは、「解析で確かめていない手順です」と断ります。']), x ? x.face : 'chat-listening');
   } else if (f === 'name') {
     const inp = document.getElementById('name-in'), n = inp.value.trim();
     if (!n) return;
     if (DB.names.includes(n)) { toast('その名前は登録済みです'); return; }
     DB.names.push(n);
     show();
-    toast(`「${n}」を登録しました`);
+    const hit = DB.games.filter((g) => !g.self && !g.sample && (g.sente === n || g.gote === n));
+    if (hit.length) ask(`保存済みの棋譜に「${esc(n)}」がいます`, `${hit.length}局で、対局者の名前が「${esc(n)}」です。自分の対局として戦績に数えますか？`, '数える', () => { hit.forEach((g) => { g.self = g.sente === n ? 's' : 'g'; g._v = null; }); show(); toast(`${hit.length}局を自分の対局にしました`); }, { no: 'そのまま' });
+    else toast(`「${n}」を登録しました`);
   }
 });
