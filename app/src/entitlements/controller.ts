@@ -48,7 +48,7 @@ export class EntitlementController {
       .then(
         (value) => this.publish(value),
         (error) => {
-          this.publish(free, true);
+          this.publish(this.snapshot.entitlement, true);
           throw error;
         },
       )

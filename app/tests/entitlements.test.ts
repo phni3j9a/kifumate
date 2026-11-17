@@ -59,7 +59,7 @@ test("開発はstaging・リリースは環境変数にかかわらず本番・�
   );
   assert.match(deviceStorageKey(PRODUCTION_URL), /^[\w.-]+$/);
 });
-test("権利を取得・取消・期限・通信断で無料へ戻し、developmentは明示許可時だけ", async () => {
+test("権利の取得・取消・期限と通信断、developmentは明示許可時だけ", async () => {
   let now = 100;
   let value: Entitlement = { paid: true, source: "invite", expiresAt: 200 };
   let fail = false;
@@ -90,8 +90,11 @@ test("権利を取得・取消・期限・通信断で無料へ戻し、developm
   assert.ok(dev.snapshot.entitlement.paid);
   fail = true;
   await assert.rejects(dev.refresh());
-  assert.equal(dev.snapshot.entitlement.paid, false);
+  assert.equal(dev.snapshot.entitlement.paid, true);
   assert.ok(dev.snapshot.offline);
+  const cold = new EntitlementController(source);
+  await assert.rejects(cold.refresh());
+  assert.equal(cold.snapshot.entitlement.paid, false);
 });
 test("同時照会を集約し、招待登録のあとGETで権利を確認", async () => {
   const calls: string[] = [];
@@ -152,4 +155,48 @@ test("招待エラーとRetry-Afterの秒数・日時を案内しコード原文
   assert.equal(retryAfterSeconds("60"), 60);
   assert.equal(retryAfterSeconds("Thu, 01 Jan 1970 00:15:00 GMT", 0), 900);
   assert.equal(retryAfterSeconds("broken"), undefined);
+});
+
+test("招待配布はストアの文言を出さず、配布種別で切り替える", async () => {
+  const { planCopy } = await import("../src/entitlements/distribution");
+  assert.doesNotMatch(JSON.stringify(planCopy("invite")), /月額|購入|解約/);
+  assert.equal(planCopy("invite").restore, null);
+  assert.equal(planCopy("store").restore, "購入を復元");
+});
+
+test("ネイティブの実ストアは接続先ごとのトークンとKeychain属性を保つ", async () => {
+  const { loadWithMocks } = await import("./helpers/load-with-mocks");
+  const values = new Map<string, string>();
+  const options: unknown[] = [];
+  const secure = {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: "端末限定",
+    getItemAsync: async (key: string) => values.get(key) ?? null,
+    setItemAsync: async (key: string, token: string, option: unknown) => {
+      values.set(key, token);
+      options.push(option);
+    },
+  };
+  const store = (base: string) =>
+    loadWithMocks<{
+      tokenStore: {
+        get(): Promise<string | null>;
+        set(token: string): Promise<void>;
+      };
+    }>("src/analysis/token.ts", {
+      "expo-secure-store": secure,
+      "./environment": { API_URL: base },
+      "./config": { deviceStorageKey },
+    }).tokenStore;
+  const staging = store(STAGING_URL),
+    production = store(PRODUCTION_URL);
+  await staging.set("a".repeat(64));
+  assert.equal(await production.get(), null);
+  await production.set("b".repeat(64));
+  assert.equal(await staging.get(), "a".repeat(64));
+  assert.equal(await store(PRODUCTION_URL).get(), "b".repeat(64));
+  assert.equal(values.size, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(options)), [
+    { keychainAccessible: "端末限定" },
+    { keychainAccessible: "端末限定" },
+  ]);
 });

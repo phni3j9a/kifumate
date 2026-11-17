@@ -90,8 +90,8 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   );
   await expect(
     page.getByRole("textbox", { name: "AIコーチへの質問" }),
-  ).toBeVisible();
-  // 最後に確認した権利はキャッシュされるが、新規POSTには必ずサーバー権利検証がある。
+  ).toHaveCount(0);
+  // 再起動で権利を固定しない。通信が戻るまで新規生成は使わず、履歴は読める。
   expect(coach.requests).toHaveLength(2);
 });
 test("無料の鍵・精密への案内・失敗/再試行・中止・月上限と更新日時", async ({

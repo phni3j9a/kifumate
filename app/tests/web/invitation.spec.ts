@@ -27,6 +27,7 @@ test("設定から招待入力・正規化・有料化・再起動・取消で�
     .click();
   await expect(page.getByText("無料プラン", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "戻る", exact: true }).click();
+  await page.getByRole("tab", { name: /設定/ }).click();
   await page
     .getByRole("button", { name: "有料プランを見る", exact: true })
     .click();
@@ -55,7 +56,7 @@ test("入力エラー・端末上限・再試行日時・通信なし・期限�
   await code.fill("abcd-efgh-jkmn-pqrs");
   for (const [error, status, text] of [
     ["invite_invalid", 400, "コードが違うか"],
-    ["invite_full", 409, "端末数の上限"],
+    ["invite_full", 409, "このコードで使える端末数の上限"],
     ["invite_rate_limited", 429, "以降に"],
   ] as const) {
     fake.inviteError = error;

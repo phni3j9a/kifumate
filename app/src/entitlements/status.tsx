@@ -34,7 +34,7 @@ export function EntitlementStatus() {
       )}
       <Button
         size="sm"
-        style={{ marginTop: 10 }}
+        style={{ marginTop: 10, alignSelf: "flex-start" }}
         onPress={() => void controller.refresh().catch(() => {})}
       >
         今の権利を確認

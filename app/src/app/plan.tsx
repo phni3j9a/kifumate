@@ -1,7 +1,7 @@
 import { Text, View } from "react-native";
 import { router } from "expo-router";
 import { DISTRIBUTION } from "../analysis/environment";
-import { colors, font, line, radius } from "../components/theme";
+import { colors, font, line, radius, shadow } from "../components/theme";
 import {
   Button,
   Card,
@@ -10,8 +10,12 @@ import {
   PageHeader,
   PageScroll,
   Screen,
+  TextButton,
 } from "../components/ui";
+import { Icon } from "../components/icons";
+import { toast } from "../components/overlay";
 import { EntitlementStatus } from "../entitlements/status";
+import { planCopy } from "../entitlements/distribution";
 const rows = [
   ["棋譜の保存・再生\n戦績の集計", "✓", "✓"],
   [
@@ -24,39 +28,41 @@ const rows = [
   ["AIコーチ", "—", "解説と質問"],
 ];
 export default function Plan() {
+  const copy = planCopy(DISTRIBUTION);
   return (
     <Screen bottom>
       <PageHeader title="有料プラン" />
       <PageScroll>
-        <Card style={{ padding: 14 }}>
+        <Card style={{ padding: 14, marginBottom: 12 }}>
           <EntitlementStatus />
         </Card>
-        <View
+        <Card
           style={{
             flexDirection: "row",
-            gap: 14,
+            gap: 12,
             alignItems: "center",
-            marginVertical: 14,
+            paddingVertical: 12,
+            paddingLeft: 10,
+            paddingRight: 14,
           }}
         >
-          <MascotImage name="onb-5" height={80} />
+          <MascotImage name="onb-5" height={104} />
           <View style={{ flex: 1 }}>
-            <Text style={font(900, 18)}>
-              {DISTRIBUTION === "invite"
-                ? "招待コードで使えます"
-                : "有料プラン"}
-            </Text>
-            <Hint>
+            <Text style={font(900, 18, 1.2)}>{copy.heading}</Text>
+            <Text style={[font(500, 11.5, 1.6, colors.ink2), { marginTop: 6 }]}>
               精密解析、分岐中の解析、AIコーチの解説と質問が使えます。
-            </Hint>
+            </Text>
           </View>
-        </View>
+        </Card>
         <View
           style={{
             borderWidth: line.ol,
             borderColor: colors.ink,
             borderRadius: radius.card,
             overflow: "hidden",
+            marginTop: 12,
+            boxShadow: shadow.card,
+            backgroundColor: colors.white,
           }}
         >
           {[["できること", "無料", "有料"], ...rows].map((row, i) => (
@@ -64,26 +70,74 @@ export default function Plan() {
               key={row[0]}
               style={{
                 flexDirection: "row",
-                borderTopWidth: i ? line.thin : 0,
-                borderColor: colors.ink,
-                backgroundColor: i === 0 ? colors.sand : colors.white,
+                borderTopWidth: i > 1 ? 1 : 0,
+                borderBottomWidth: i === 0 ? line.ol : 0,
+                borderColor: i === 0 ? colors.ink : colors.hair,
               }}
             >
               {row.map((text, j) => (
-                <Text
+                <View
                   key={j}
-                  style={[
-                    font(j === 0 ? 700 : 900, 11, 1.6),
-                    {
-                      flex: j === 0 ? 1.35 : 1,
-                      paddingVertical: 12,
-                      paddingHorizontal: 6,
-                      textAlign: j === 0 ? "left" : "center",
-                    },
-                  ]}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 9,
+                    paddingHorizontal: 7,
+                    justifyContent: "center",
+                    alignItems: j === 0 ? "flex-start" : "center",
+                    borderLeftWidth: j ? 1 : 0,
+                    borderColor: colors.hair,
+                    backgroundColor:
+                      i === 0
+                        ? j === 2
+                          ? colors.mint
+                          : colors.sand
+                        : colors.white,
+                  }}
                 >
-                  {text}
-                </Text>
+                  {text === "✓" ? (
+                    <View
+                      accessibilityLabel="使えます"
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: radius.pill,
+                        borderWidth: line.thin,
+                        borderColor: colors.ink,
+                        backgroundColor: colors.mint,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Icon name="check" size={11} strokeWidth={3.2} />
+                    </View>
+                  ) : i === 2 && j > 0 ? (
+                    <Text style={[font(500, 11, 1.5), { textAlign: "center" }]}>
+                      <Text style={font(900, 12, 1.5)}>
+                        {text.split("\n").slice(0, 2).join("\n")}
+                      </Text>
+                      {"\n"}
+                      {text.split("\n").slice(2).join("\n")}
+                    </Text>
+                  ) : (
+                    <Text
+                      style={[
+                        font(
+                          i === 0 || text === "—" || (i === 5 && j === 2)
+                            ? 900
+                            : j === 0
+                              ? 700
+                              : 500,
+                          i === 0 ? 11.5 : 11,
+                          i === 0 ? 1.2 : 1.5,
+                          text === "—" ? colors.ink2 : colors.ink,
+                        ),
+                        { textAlign: j === 0 ? "left" : "center" },
+                      ]}
+                    >
+                      {text}
+                    </Text>
+                  )}
+                </View>
               ))}
             </View>
           ))}
@@ -91,12 +145,23 @@ export default function Plan() {
         <Hint>
           分岐中の解析は月300分（解析が動いている間を数えます）、AIコーチは月100回まで使えます。残りが少なくなったら、お知らせします。
         </Hint>
-        <Button wide kind="pri" onPress={() => router.push("/invitation")}>
-          招待コードを入力
+        <Button
+          wide
+          kind="pri"
+          onPress={() =>
+            DISTRIBUTION === "invite"
+              ? router.push("/invitation")
+              : toast("ストアでの購入は準備中です")
+          }
+        >
+          {copy.action}
         </Button>
-        <Hint>
-          招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。
-        </Hint>
+        {copy.restore && (
+          <TextButton onPress={() => toast("ストアでの購入の復元は準備中です")}>
+            {copy.restore}
+          </TextButton>
+        )}
+        <Hint>{copy.note}</Hint>
       </PageScroll>
     </Screen>
   );

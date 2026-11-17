@@ -1,3 +1,4 @@
+import { useEntitlements } from "../entitlements/provider";
 import { router } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -7,6 +8,7 @@ import { Button } from "./ui";
 import { Sheet } from "./overlay";
 export function AnalysisQuota() {
   const { quota: q, offline, problem, controller } = useAnalysis();
+  const { entitlement, checked, offline: accessOffline } = useEntitlements();
   const [details, setDetails] = useState(false);
   const meter = (label: string, left: number, max: number) => (
     <View
@@ -35,10 +37,25 @@ export function AnalysisQuota() {
       <View style={s.card}>
         <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
           <Text style={font(900, 16)}>
-            {q ? (q.paid ? "有料プラン" : "無料プラン") : "解析の残り回数"}
+            {!checked
+              ? "権利を確認しています…"
+              : accessOffline
+                ? "今の権利を確認できません"
+                : q
+                  ? q.paid
+                    ? "有料プラン"
+                    : "無料プラン"
+                  : "解析の残り回数"}
           </Text>
           {q?.paid && <Text style={s.using}>利用中</Text>}
         </View>
+        {entitlement.paid && (
+          <Text style={[font(500, 11, 1.5, colors.ink2), { marginTop: 6 }]}>
+            {entitlement.expiresAt === null
+              ? "期限なし"
+              : `期限：${new Date(entitlement.expiresAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}（日本時間）`}
+          </Text>
+        )}
         {q ? (
           <>
             {q.paid && meter("精密解析（今週）", q.preciseRemaining, 20)}

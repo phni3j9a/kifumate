@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { Platform, Text, View } from "react-native";
 import { useAnalysis } from "../analysis/provider";
 import {
   Button,
@@ -73,6 +73,9 @@ export default function Invitation() {
             setCode(formatInvitation(value));
             setMessage("");
           }}
+          keyboardType={
+            Platform.OS === "ios" ? "ascii-capable" : "visible-password"
+          }
           autoCapitalize="characters"
           autoCorrect={false}
           spellCheck={false}

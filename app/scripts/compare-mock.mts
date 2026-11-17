@@ -227,6 +227,66 @@ async function run(width: number, height: number) {
   await act("tab", "set");
   await tab("設定");
   await shot("settings");
+  // 招待版はモック既存のカード・入力・比較表を組み合わせる。モックの製品外ファイルは変更しない。
+  const invitationMock = async (paid = false, message = "") => {
+    await m.evaluate(
+      ({ paid, message }) =>
+        (window as any).__compare(
+          `push({t:'names'}); R.vpage.querySelector('.ph h2').textContent='招待コード'; R.vpage.querySelector('.pgc').innerHTML=${JSON.stringify(`<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900">${paid ? "有料プランを利用中" : "無料プラン"}</b>${paid ? '<p class="hint">期限なし</p>' : ""}<button class="bt sm" style="margin-top:10px">今の権利を確認</button></div><h3 class="st">コードを入力</h3><p class="hint" style="margin-top:0">招待コードで、精密解析・分岐中の解析・AIコーチが使えます。この端末で有効になります。</p><input class="inp" placeholder="ABCD-EFGH-JKMN-PQRS" aria-label="招待コード"><p class="hint">大文字・小文字や全角・半角は、どちらでも入力できます。区切りは自動で入ります。</p><button class="bt pri wide">コードを使う</button>${message ? `<p style="font-size:13px;font-weight:700;line-height:1.6">${message}</p>` : ""}<p class="hint">機種変更やアプリの削除で、別の端末に権利を引き継ぐことはできません。コードには期限や使える端末数の上限があります。</p>`)};`,
+        ),
+      { paid, message },
+    );
+  };
+  await invitationMock();
+  await a.getByRole("button", { name: /招待コードを入力/ }).click();
+  await shot("invitation-empty");
+  await a
+    .getByRole("textbox", { name: "招待コード", exact: true })
+    .fill("abcdefghjkmnpqrs");
+  await m.locator('[aria-label="招待コード"]').fill("ABCD-EFGH-JKMN-PQRS");
+  await shot("invitation-input");
+  fake.inviteError = "invite_invalid";
+  await tap("コードを使う");
+  const invalid =
+    "コードが違うか、期限が切れているか、取り消されています。コードを確かめ、発行した人にご相談ください。";
+  await act("back");
+  await invitationMock(false, invalid);
+  await m.locator('[aria-label="招待コード"]').fill("ABCD-EFGH-JKMN-PQRS");
+  await shot("invitation-invalid");
+  fake.inviteError = "";
+  await tap("コードを使う");
+  await a.getByText("有料プランを利用中", { exact: true }).waitFor();
+  await act("back");
+  await invitationMock(
+    true,
+    "招待コードを確認しました。有料機能が使えるようになりました。",
+  );
+  await shot("invitation-paid");
+  await act("back");
+  await tap("戻る");
+  await act("nav", "plan");
+  await a
+    .getByRole("button", { name: /プランの内容を見る|有料プランを見る/ })
+    .click();
+  await m.evaluate(() =>
+    (window as any).__compare(
+      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove(); R.vpage.querySelector('.pgc').insertAdjacentHTML('afterbegin','<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900">有料プランを利用中</b><p class="hint">期限なし</p><button class="bt sm" style="margin-top:10px">今の権利を確認</button></div>');`,
+    ),
+  );
+  await shot("plan-invite-paid");
+  fake.paid = false;
+  await a.getByRole("button", { name: "今の権利を確認", exact: true }).click();
+  await m.evaluate(() =>
+    (window as any).__compare(
+      `const card=R.vpage.querySelector('.pgc>.cd'); card.querySelector('b').textContent='無料プラン'; card.querySelector('.hint').remove();`,
+    ),
+  );
+  await shot("plan-invite-free");
+  await act("back");
+  await tap("戻る");
+  fake.remaining = 10;
+  await a.reload();
+
   await m.evaluate(() =>
     (window as any).__compare(
       "DB.profile={practice:[],goal:''}; DB.style={focus:'総合',detail:'ふつう'}; show()",
