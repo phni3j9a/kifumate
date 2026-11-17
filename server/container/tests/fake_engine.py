@@ -8,6 +8,10 @@ for command in sys.stdin:
         print('usiok', flush=True)
     elif command == 'isready':
         print('readyok', flush=True)
+    elif command.startswith('go ') and '--slow' in sys.argv:
+        print('info depth 1 score cp 1 pv 7g7f', flush=True)
+    elif command == 'stop':
+        print('bestmove 7g7f', flush=True)
     elif command.startswith('go '):
         print('info string INTERNAL_NAME_NOT_FOR_API')
         if '--win' in sys.argv:

@@ -155,3 +155,78 @@ def test_declaration_win_is_not_a_move_or_proven_mate(sfen, winner):
         assert result['mate'] is None
     finally:
         engine.close()
+
+
+def test_realtime_stop_drains_bestmove_and_reuses_process():
+    import time
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py'), '--slow'])
+    cancel = threading.Event()
+    failures = []
+    def search():
+        try:
+            engine.analyze(payload(), cancel)
+        except Exception as error:
+            failures.append(error)
+    thread = threading.Thread(target=search)
+    try:
+        thread.start()
+        # readyok と探索の開始を待つ。遅い偽エンジンは stop まで bestmove を返さない。
+        deadline = time.monotonic() + 2
+        while engine.mode is None and time.monotonic() < deadline:
+            time.sleep(0.005)
+        time.sleep(0.02)
+        began = time.monotonic()
+        cancel.set()
+        thread.join(timeout=1)
+        assert not thread.is_alive() and time.monotonic() - began < 0.5
+        assert len(failures) == 1 and isinstance(failures[0], bridge.Superseded)
+        assert engine.process.poll() is None
+        engine.send('isready')
+        assert engine.until('readyok', 1) == ['readyok']
+    finally:
+        engine.close()
+        thread.join(timeout=1)
+
+
+def test_realtime_http_replaces_search_before_lock(monkeypatch):
+    import time
+    # 新しい要求はエンジンの直列ロックを待つ前に旧要求を止める。
+    entered, cancelled = threading.Event(), threading.Event()
+    class FakeEngine:
+        def analyze(self, data, cancel):
+            if data['ply'] == 0:
+                entered.set()
+                assert cancel.wait(2)
+                cancelled.set()
+                raise bridge.Superseded()
+            return {'ply': data['ply'], 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None}
+        def close(self):
+            pass
+    monkeypatch.setattr(bridge, 'engine', FakeEngine())
+    monkeypatch.setattr(bridge, 'realtime_latest', None)
+    monkeypatch.setattr(bridge, 'realtime_cancel', None)
+    server = bridge.ThreadingHTTPServer(('127.0.0.1', 0), bridge.Handler)
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    url = f'http://127.0.0.1:{server.server_port}/realtime'
+    session = 'a' * 36
+    def send(sequence, moves):
+        data = payload(moves=moves, ply=len(moves), sessionId=session, sequence=sequence)
+        try:
+            with urlopen(Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
+                return response.status, json.load(response)
+        except HTTPError as error:
+            return error.code, json.load(error)
+    old = []
+    first = threading.Thread(target=lambda: old.append(send(0, [])))
+    try:
+        first.start(); assert entered.wait(1)
+        before = time.monotonic()
+        assert send(2, ['7g7f'])[0] == 200
+        assert time.monotonic() - before < 0.5 and cancelled.is_set()
+        first.join(timeout=1)
+        assert old == [(409, {'error': 'superseded'})]
+        assert send(1, ['7g7f'])[0] == 409
+        assert send(2, ['7g7f'])[0] == 409
+    finally:
+        server.shutdown(); server.server_close(); serving.join(); first.join(timeout=1)

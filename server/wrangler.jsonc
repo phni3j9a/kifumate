@@ -5,29 +5,34 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": {"ENVIRONMENT": "local", "ALLOW_DEV_PAID": "false"},
+  "vars": {"ENVIRONMENT": "local", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000"},
   "durable_objects": {"bindings": [
     {"name": "DEVICES", "class_name": "Device"},
     {"name": "STD", "class_name": "StandardContainer"},
-    {"name": "PRECISE", "class_name": "PreciseContainer"}
+    {"name": "PRECISE", "class_name": "PreciseContainer"},
+    {"name": "REALTIME", "class_name": "RealtimeContainer"}
   ]},
-  "migrations": [{"tag": "v1", "new_sqlite_classes": ["Device", "StandardContainer", "PreciseContainer"]}],
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["Device", "StandardContainer", "PreciseContainer"]},
+    {"tag": "v2", "new_sqlite_classes": ["RealtimeContainer"]}],
   "containers": [
     {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
-    {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2}
+    {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
+    {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2}
   ],
   "env": {
     "staging": {
       "name": "kifumate-analysis-staging",
-      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true"},
+      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true", "REALTIME_IDLE_MS": "30000"},
       "durable_objects": {"bindings": [
         {"name": "DEVICES", "class_name": "Device"},
         {"name": "STD", "class_name": "StandardContainer"},
-        {"name": "PRECISE", "class_name": "PreciseContainer"}
+        {"name": "PRECISE", "class_name": "PreciseContainer"},
+        {"name": "REALTIME", "class_name": "RealtimeContainer"}
       ]},
       "containers": [
         {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
-        {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2}
+        {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
+        {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2}
       ]
     }
   }
