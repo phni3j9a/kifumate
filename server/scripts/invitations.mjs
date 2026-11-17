@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // コード・管理鍵を標準出力、引数、例外本文に出さない。
-import { randomBytes, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { generateInviteCode, normalizeInviteCode } from '../src/invite-code.mjs';
 import { readFile, writeFile, stat, mkdir } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
-export function codeHash(code) { return createHash('sha256').update(code).digest('hex'); }
+export function codeHash(code) {
+  const normalized = normalizeInviteCode(code);
+  if (!normalized) throw new Error('招待コードの形式が不正です');
+  return createHash('sha256').update(normalized).digest('hex');
+}
 export async function privateRead(path) {
   const info = await stat(path);
   if (!info.isFile() || (info.mode & 0o077)) throw new Error('秘密ファイルは所有者だけが読める権限（0600）にしてください');
@@ -28,7 +33,7 @@ export async function main(args = process.argv.slice(2)) {
     const expiresAt = values['expires-at'] ? Date.parse(values['expires-at']) : null;
     if (!values.out || !Number.isSafeInteger(maxDevices) || maxDevices < 1 || maxDevices > 100 || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()))) throw new Error('--out と --max-devices 1〜100、将来の --expires-at（任意）が必要です');
     if (!resolve(values.out).startsWith(resolve('.local') + sep)) throw new Error('コードの保存先はgit管理外の .local/ 配下にしてください');
-    const code = randomBytes(32).toString('hex');
+    const code = generateInviteCode();
     hash = codeHash(code);
     await mkdir(dirname(values.out), {recursive: true, mode: 0o700});
     // 通信断でも取り消せるよう、送信前にハッシュを保存する。既存ファイルは上書きしない。

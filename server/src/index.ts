@@ -1,3 +1,4 @@
+import { normalizeInviteCode } from './invite-code.mjs';
 import { Invitations, limit, type Entitlement } from './invitations';
 export { Invitations } from './invitations';
 import { Coach, coachConfiguration, signAnalysis, type CoachEnv } from './coach';
@@ -182,8 +183,10 @@ export class Device extends DurableObject<Env> {
         const registry = this.env.INVITATIONS.getByName('registry');
         if (!await registry.attempt(hash, request.headers.get('X-Invite-IP') ?? 'unknown')) throw new ApiError(429, 'invite_rate_limited');
         const input = await readJson(request, 1024) as Record<string, unknown>;
-        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || typeof input.code !== 'string' || !/^[a-f0-9]{64}$/.test(input.code)) throw new ApiError(400, 'invalid_input');
-        const result = await registry.redeem(hash, await sha256(input.code));
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || typeof input.code !== 'string') throw new ApiError(400, 'invalid_input');
+        const code = normalizeInviteCode(input.code);
+        if (!code) throw new ApiError(400, 'invalid_input');
+        const result = await registry.redeem(hash, await sha256(code));
         if ('error' in result) throw new ApiError(result.error === 'invite_full' ? 409 : 400, result.error);
         this.entitlement = result;
         return json(result);

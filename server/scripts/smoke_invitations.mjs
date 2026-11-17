@@ -22,7 +22,9 @@ try {
   assert.equal(first.status, 201); assert.equal(second.status, 201);
   token = first.body.token;
   assert.equal((await request('/v1/entitlements', token)).body.paid, false);
-  const redeemed = await request('/v1/invitations/redeem', token, 'POST', {code});
+  const normalizedInput = code.toLowerCase().replaceAll('0', 'o').replaceAll('1', 'l')
+    .replace(/[!-~]/g, char => String.fromCharCode(char.charCodeAt(0) + 0xfee0));
+  const redeemed = await request('/v1/invitations/redeem', token, 'POST', {code: `　${normalizedInput}　`});
   assert.equal(redeemed.status, 200); assert.equal(redeemed.body.source, 'invite');
   assert.equal((await request('/v1/quota', token)).body.paid, true);
   const full = await request('/v1/invitations/redeem', second.body.token, 'POST', {code});
@@ -34,7 +36,7 @@ try {
 }
 assert.equal((await request('/v1/entitlements', token)).body.paid, false);
 assert.equal((await request('/v1/quota', token)).body.paid, false);
-console.log('staging: 招待成功・端末上限・取消反映を確認');
+console.log('staging: 招待入力の正規化・端末上限・取消反映を確認');
 
 // 公式bindingは近似値。閾値ぴったりではなく、有界の連続呼び出しで拒否を確かめる。
 let rejected = false;

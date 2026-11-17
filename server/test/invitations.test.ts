@@ -3,6 +3,7 @@ import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import worker, { Device, type Env } from '../src/index';
 import { Invitations, limit } from '../src/invitations';
+import { generateInviteCode, normalizeInviteCode } from '../src/invite-code.mjs';
 import { sha256 } from '../src/model';
 
 const bindings = env as unknown as Env;
@@ -13,11 +14,30 @@ async function device() {
   return (await response.json() as {token: string}).token;
 }
 async function issue(store: DurableObjectStub<Invitations>, maxDevices = 1, expiresAt: number | null = null) {
-  const code = await sha256(crypto.randomUUID());
-  const hash = await sha256(code);
+  const code = generateInviteCode();
+  const hash = await sha256(normalizeInviteCode(code)!);
   expect(await store.create(hash, maxDevices, expiresAt)).toEqual({ok: true});
   return {code, hash};
 }
+
+describe('Crockford Base32の入力正規化', () => {
+  it('80ビットの16文字を4文字ずつ区切り、原文を正規化してハッシュ化できる', () => {
+    const codes = Array.from({length: 100}, generateInviteCode);
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const code of codes) {
+      expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+      expect(normalizeInviteCode(code)).toBe(code.replaceAll('-', ''));
+    }
+  });
+  it.each([
+    'OIL0-1234-ABCD-EFGH', 'oil0 1234 abcd efgh', 'ｏｉｌ０　－１２３４‐ａｂｃｄ \nｅｆｇｈ', '01101234ABCDEFGH',
+  ])('大小文字・全角・空白・ハイフン・読み替えを同じ値へ正規化する: %s', code => {
+    expect(normalizeInviteCode(code)).toBe('01101234ABCDEFGH');
+  });
+  it.each(['a'.repeat(64), 'ABCD-EFGH-JKMN-PQRU', 'ABCD_EFGH_JKMN_PQRS', 'ABCD-EFGH-JKMN-PQR', '招待ABCD-EFGH-JKMN-PQRS', ''])('旧形式・長さ違い・不正文字は拒否する: %s', code => {
+    expect(normalizeInviteCode(code)).toBeNull();
+  });
+});
 
 describe('招待コードの永続権利', () => {
   it('ハッシュだけを保存し、重複入力は枠を増やさず、上限を並列でも超えない', async () => {
@@ -27,6 +47,7 @@ describe('招待コードの永続権利', () => {
     expect(await store.redeem('device-b', hash)).toEqual({error: 'invite_full'});
     const rows = await runInDurableObject(store, (_, state) => state.storage.sql.exec('SELECT * FROM invites').toArray());
     expect(JSON.stringify(rows)).not.toContain(code);
+    expect(JSON.stringify(rows)).not.toContain(normalizeInviteCode(code));
     expect(rows[0].hash).toBe(hash);
     const next = await issue(store);
     const results = await Promise.all(['a', 'b', 'c'].map(id => store.redeem(id, next.hash)));
@@ -71,6 +92,22 @@ describe('招待コードの永続権利', () => {
     expect((await (await request('/v1/quota')).json() as any).paid).toBe(false);
     expect((await request('/v1/jobs', 'POST', {initial: 'startpos', moves: [], mode: 'precise'})).status).toBe(403);
     expect((await request('/v1/invitations/redeem', 'POST', {code})).status).toBe(400);
+  });
+  it('APIでも全角・小文字・読み替えの入力を同じハッシュとして扱い、原文を保存しない', async () => {
+    const token = await device(), store = bindings.INVITATIONS.getByName('registry');
+    const canonical = '01101234ABCDEFGH', hash = await sha256(canonical);
+    expect(await store.create(hash, 1, null)).toEqual({ok: true});
+    const redeem = (code: unknown) => SELF.fetch('https://api/v1/invitations/redeem', {
+      method: 'POST', headers: headers(token), body: JSON.stringify({code}),
+    });
+    try {
+      expect((await redeem('ｏｉｌ０　－１２３４‐ａｂｃｄ \nｅｆｇｈ')).status).toBe(200);
+      expect((await redeem('0110-1234-ABCD-EFGH')).status).toBe(200);
+      expect((await redeem('a'.repeat(64))).status).toBe(400);
+      expect((await redeem(1234)).status).toBe(400);
+      const rows = await runInDurableObject(store, (_, state) => state.storage.sql.exec('SELECT * FROM invites WHERE hash=?', hash).toArray());
+      expect(JSON.stringify(rows)).not.toContain(canonical);
+    } finally { await store.revoke(hash); }
   });
   it('本文受信中に取り消された精密解析を受理しない', async () => {
     const token = await device(), hash = await sha256(token), store = bindings.INVITATIONS.getByName('registry');
