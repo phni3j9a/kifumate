@@ -8,7 +8,7 @@ export interface RealtimeBackend {
 }
 interface Session extends Record<string, SqlStorageValue> {
   owner: string; id: string; sequence: number; status: string; result: string | null;
-  error: string | null; charged: number | null; activity: number; payload: string;
+  error: string | null; charged: number | null; activity: number;
 }
 
 /** 分岐用の各枠を一端末へ排他的に貸与。探索完了後の待機も停止完了まで集計する。 */
@@ -18,7 +18,7 @@ export class RealtimeSessions {
   constructor(private sql: SqlStorage, private backend: RealtimeBackend, private idleMs: number, private now = Date.now) {
     sql.exec(`CREATE TABLE IF NOT EXISTS rt_usage (owner TEXT, month INTEGER, ms INTEGER NOT NULL, PRIMARY KEY(owner,month));
       CREATE TABLE IF NOT EXISTS rt_sessions (owner TEXT PRIMARY KEY, id TEXT NOT NULL, sequence INTEGER NOT NULL,
-        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL, payload TEXT NOT NULL);`);
+        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL);`);
   }
   private session(owner: string): Session | undefined {
     return this.sql.exec<Session>('SELECT * FROM rt_sessions WHERE owner=?', owner).toArray()[0];
@@ -96,7 +96,9 @@ export class RealtimeSessions {
   async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void): Promise<Response> {
     try {
       await this.expire();
-      this.sql.exec('DELETE FROM rt_sessions WHERE charged IS NULL AND activity<?', this.now() - RETENTION_MS);
+      this.sql.exec("UPDATE rt_sessions SET result=NULL WHERE charged IS NULL AND activity<?", this.now() - RETENTION_MS);
+      this.sql.exec("DELETE FROM rt_sessions WHERE charged IS NULL AND activity<? AND (status!='limit' OR activity<?)",
+        this.now() - RETENTION_MS, this.now() - 40 * 86400_000);
       this.sql.exec('DELETE FROM rt_usage WHERE month<?', monthStart(monthStart(this.now()) - 1));
       const url = new URL(request.url);
       const match = /^\/v1\/realtime\/([0-9a-f-]{36})$/.exec(url.pathname);
@@ -129,10 +131,10 @@ export class RealtimeSessions {
       const id = creating ? crypto.randomUUID() : current!.id;
       const seq = creating ? 0 : sequence as number, now = this.now();
       this.abort?.abort(); this.abort = new AbortController();
-      this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?,?)
+      this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?)
         ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
-        result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity,payload=excluded.payload`,
-        owner, id, seq, now, now, JSON.stringify(input));
+        result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
+        owner, id, seq, now, now);
       const signal = this.abort.signal;
       await this.schedule();
       waitUntil(this.run(owner, id, seq, input, signal));
