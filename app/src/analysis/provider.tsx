@@ -15,21 +15,38 @@ import { AnalysisController } from "./controller";
 import { analysisStorage } from "./storage";
 import { active } from "./types";
 import { tokenStore } from "./token";
+import { RealtimeController } from "./realtime-controller";
+const RealtimeContext = createContext<RealtimeController | null>(null);
 const Context = createContext<AnalysisController | null>(null);
 export function AnalysisProvider({ children }: PropsWithChildren) {
   const db = useSQLiteContext(),
     path = usePathname();
-  const controller = useMemo(
+  const client = useMemo(
     () =>
-      new AnalysisController(
-        new AnalysisClient(
-          (process.env.EXPO_PUBLIC_ANALYSIS_URL || "").replace(/\/$/, ""),
-          tokenStore,
-        ),
-        analysisStorage(db),
+      new AnalysisClient(
+        (process.env.EXPO_PUBLIC_ANALYSIS_URL || "").replace(/\/$/, ""),
+        tokenStore,
       ),
-    [db],
+    [],
   );
+  const controller = useMemo(
+    () => new AnalysisController(client, analysisStorage(db)),
+    [client, db],
+  );
+  const realtime = useMemo(() => new RealtimeController(client), [client]);
+  useEffect(() => {
+    realtime.setForeground(
+      AppState.currentState !== "background" &&
+        AppState.currentState !== "inactive",
+    );
+    const sub = AppState.addEventListener("change", (state) =>
+      realtime.setForeground(state === "active"),
+    );
+    return () => {
+      sub.remove();
+      realtime.setVisible(false);
+    };
+  }, [realtime]);
   useEffect(() => {
     controller.onNotify((id, failed) => {
       if (path === `/game/${id}`) {
@@ -83,7 +100,22 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
       sub.remove();
     };
   }, [controller]);
-  return <Context.Provider value={controller}>{children}</Context.Provider>;
+  return (
+    <Context.Provider value={controller}>
+      <RealtimeContext.Provider value={realtime}>
+        {children}
+      </RealtimeContext.Provider>
+    </Context.Provider>
+  );
+}
+export function useRealtime() {
+  const controller = useContext(RealtimeContext)!;
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    () => controller.snapshot,
+    () => controller.snapshot,
+  );
+  return { ...state, controller };
 }
 export function useAnalysis() {
   const controller = useContext(Context)!;

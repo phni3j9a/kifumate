@@ -14,6 +14,8 @@ import { Icon } from "./icons";
 import { ask, toast } from "./overlay";
 import { colors, font, line, radius, shadow } from "./theme";
 import { Button } from "./ui";
+import type { RealtimeState } from "../analysis/realtime-types";
+import { realtimeInfo } from "./realtime-controls";
 export function ChancePie({
   score,
   self,
@@ -73,6 +75,9 @@ export function AnalysisPanel({
   u,
   start,
   ending,
+  realtime,
+  retryRealtime,
+  toggleRealtime,
 }: {
   analysis?: Analysis;
   branch: boolean;
@@ -85,6 +90,9 @@ export function AnalysisPanel({
   u: number;
   start: (mode: Mode) => void;
   ending?: string;
+  realtime?: RealtimeState;
+  retryRealtime?: () => void;
+  toggleRealtime?: () => void;
 }) {
   const { quota, offline, controller } = useAnalysis();
   const [mode, setMode] = useState<Mode>("precise");
@@ -93,7 +101,26 @@ export function AnalysisPanel({
     saved = analysis?.saved;
   const confirmation = needsRetryConfirmation(t);
   const waiting = !!t && job?.status === "queued";
-  const running = !!t && !waiting && !confirmation;
+  const running = !branch && !!t && !waiting && !confirmation;
+  const realtimeBusy =
+    branch &&
+    (realtime?.status === "preparing" || realtime?.status === "analyzing");
+  const monthlyLimit =
+    branch &&
+    realtime?.paid !== false &&
+    realtime?.enabled &&
+    realtime.status === "limit";
+  const limitTitle = "今月の分岐中の解析は残り0分";
+  const limitSub = "月が変わると、また300分使えます";
+  const showReset = monthlyLimit
+    ? () =>
+        ask({
+          title: limitTitle,
+          text: `${limitSub}。次の更新：${realtime.quota ? new Date(realtime.quota.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "月初の午前0時（日本時間）"}`,
+          ok: "閉じる",
+          single: true,
+        })
+    : undefined;
   const kind = quota?.paid ? mode : "std";
   const row = branch ? branchRow : rows[selected] || rows[0];
   const tab = (
@@ -164,7 +191,51 @@ export function AnalysisPanel({
     action: React.ReactNode = null;
   if (branch) {
     title = row?.text || "自由に指して試せます";
-    sub = row ? "保存した読み筋" : "分岐は保存されません。本譜は変わりません";
+    sub = row ? "保存した読み筋" : "この先の評価値は、分岐中の解析で出ます";
+    if (realtime?.status === "preparing" || realtime?.status === "analyzing") {
+      title = realtime.status === "preparing" ? "準備中" : "解析中";
+      sub =
+        realtime.status === "preparing"
+          ? "解析の準備をしています"
+          : "この局面の評価値と最善手を調べています";
+    } else if (row) {
+      sub = row.move ? "" : "この先は、分岐中の解析で調べられます";
+    } else if (realtime?.paid !== false) {
+      if (!realtime?.enabled) {
+        title = "分岐中の解析はオフ";
+        sub = "駒は自由に動かせます。時間は使いません";
+        action = (
+          <Button size="sm" kind="pri" onPress={() => toggleRealtime?.()}>
+            オンにする
+          </Button>
+        );
+      } else if (realtime.status === "offline") {
+        title = "通信できません";
+        sub = "つながると、評価値と最善手が出ます";
+        action = (
+          <Button size="sm" onPress={() => retryRealtime?.()}>
+            もう一度試す
+          </Button>
+        );
+      } else if (realtime.status === "limit") {
+        title = limitTitle;
+        sub = limitSub;
+      } else if (realtime.status === "failed") {
+        title =
+          realtime.error === "realtime_busy"
+            ? "いまは解析が混み合っています"
+            : "解析できませんでした";
+        sub = "時間をおいて、もう一度お試しください";
+        action = (
+          <Button size="sm" onPress={() => retryRealtime?.()}>
+            もう一度試す
+          </Button>
+        );
+      } else {
+        title = realtime.status === "paused" ? "休止中" : "分岐中の解析はオン";
+        sub = "次に指すと、評価値と最善手が出ます";
+      }
+    }
   } else if (confirmation) {
     title = "前回の依頼の結果が分かりません";
     sub = "もう一度解析するには確認が必要です";
@@ -265,7 +336,11 @@ export function AnalysisPanel({
     <View style={{ marginHorizontal: 12 }}>
       <View style={[s.tabs, { minHeight: 29 + u * 0.25 }]}>
         {branch ? (
-          tab(row ? "おすすめ" : "分岐")
+          <>
+            {tab(row?.move ? row.label : "分岐")}
+            {realtime?.paid === false &&
+              tab("分岐中の解析", realtimeInfo, false, true)}
+          </>
         ) : t ? (
           <>
             {tab(t.mode === "precise" ? "精密解析" : "解析")}
@@ -356,7 +431,9 @@ export function AnalysisPanel({
               style={[
                 font(
                   900,
-                  row && (!t || branch) ? 21 + u * 0.25 : 15.5 + u * 0.15,
+                  row && (!t || branch) && row.move
+                    ? 21 + u * 0.25
+                    : 15.5 + u * 0.15,
                   1.25,
                 ),
                 { flexShrink: 1 },
@@ -364,6 +441,25 @@ export function AnalysisPanel({
             >
               {title}
             </Text>
+            {realtimeBusy && (
+              <View
+                accessible={false}
+                style={{ flexDirection: "row", gap: 3, marginLeft: 1 }}
+              >
+                {[1, 0.6, 0.3].map((opacity, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: 3,
+                      backgroundColor: colors.ink2,
+                      opacity,
+                    }}
+                  />
+                ))}
+              </View>
+            )}
             {running && (
               <Text
                 style={font(700, offline ? 9 : 10, 1.3, colors.ink2)}
@@ -399,22 +495,29 @@ export function AnalysisPanel({
                     row.game ? "本譜を1手進める" : "この手を盤で試す"
                   }
                   onPress={() => onTry(row)}
-                  style={s.try}
+                  style={[s.try, branch && { backgroundColor: colors.you }]}
                 >
                   <Icon name="play" size={10} />
                   <Text style={font(900, 9.5)}>
-                    {row.game ? "次の手" : "試す"}
+                    {branch || row.game ? "次の手" : "試す"}
                   </Text>
                 </Pressable>
               )}
             </View>
           ) : running ? null : (
-            <Text
-              numberOfLines={running && offline ? 2 : 1}
-              style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}
+            <Pressable
+              disabled={!showReset}
+              accessibilityRole={showReset ? "button" : undefined}
+              accessibilityLabel={showReset ? "更新日" : undefined}
+              onPress={showReset}
             >
-              {sub}
-            </Text>
+              <Text
+                numberOfLines={running && offline ? 2 : 1}
+                style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}
+              >
+                {sub}
+              </Text>
+            </Pressable>
           )}
           {running && (
             <View style={[s.progress, { backgroundColor: colors.white }]}>
@@ -434,6 +537,27 @@ export function AnalysisPanel({
           action
         )}
       </View>
+      {monthlyLimit && row && (
+        <View
+          style={[
+            s.card,
+            { marginTop: 8, minHeight: 54 + u * 1.4, paddingVertical: 6 },
+          ]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="更新日"
+            accessibilityLiveRegion="polite"
+            onPress={showReset}
+            style={{ flex: 1 }}
+          >
+            <Text style={font(900, 15.5 + u * 0.15, 1.25)}>{limitTitle}</Text>
+            <Text style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}>
+              {limitSub}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

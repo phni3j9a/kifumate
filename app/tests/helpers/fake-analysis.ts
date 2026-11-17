@@ -1,4 +1,8 @@
 import type { Page } from "@playwright/test";
+import type {
+  RealtimeInput,
+  RealtimeReply,
+} from "../../src/analysis/realtime-types";
 import { Color, Move, Position, Square } from "tsshogi";
 import { legalMoves } from "../../src/core/kif";
 import type {
@@ -22,6 +26,22 @@ export async function fakeAnalysis(page: Page) {
     cancel: 0,
     createStatus: 202,
     loseCreateResponse: false,
+    rt: {
+      status: "ready" as RealtimeReply["status"],
+      sessionId: null as string | null,
+      sequence: 0,
+      input: null as RealtimeInput | null,
+      result: undefined as AnalysisResult | null | undefined,
+      requests: [] as {
+        method: string;
+        input: RealtimeInput;
+        sequence: number;
+      }[],
+      stops: 0,
+      remainingMs: 18000000,
+      low: false,
+      idleMs: 30000,
+    },
   };
   page.on("pageerror", (e) => state.errors.push(e.message));
   page.on("console", (m) => {
@@ -73,6 +93,57 @@ export async function fakeAnalysis(page: Page) {
     }
     if (url.pathname === "/v1/quota") {
       await send(quota());
+      return;
+    }
+    if (url.pathname.startsWith("/v1/realtime")) {
+      const rt = state.rt;
+      if (req.method() === "POST" || req.method() === "PUT") {
+        if (!state.paid) {
+          await send({ error: "paid_required" }, 403);
+          return;
+        }
+        const input = req.postDataJSON();
+        rt.sequence = input.sequence ?? 0;
+        rt.input = { initial: input.initial, moves: input.moves };
+        rt.requests.push({
+          method: req.method(),
+          input,
+          sequence: rt.sequence,
+        });
+        rt.sessionId ||= "00000000-0000-4000-8000-000000000023";
+      }
+      if (req.method() === "DELETE") {
+        rt.stops++;
+        rt.sessionId = null;
+      }
+      const generated = rt.input
+        ? makeResults({ ...rt.input, mode: "std" }).at(-1)!
+        : null;
+      await send(
+        {
+          paid: state.paid,
+          sessionId: rt.sessionId,
+          sequence: rt.sequence,
+          status: rt.sessionId ? rt.status : "off",
+          result:
+            rt.sessionId && ["ready", "paused", "limit"].includes(rt.status)
+              ? rt.result === undefined
+                ? generated
+                : rt.result
+              : null,
+          error: null,
+          idleMs: rt.idleMs,
+          quota: {
+            monthStart: 1793458800000,
+            resetsAt: 1796050800000,
+            limitMs: 18000000,
+            usedMs: 18000000 - rt.remainingMs,
+            remainingMs: rt.remainingMs,
+            low: rt.low,
+          },
+        } satisfies RealtimeReply,
+        ["POST", "PUT"].includes(req.method()) ? 202 : 200,
+      );
       return;
     }
     if (req.method() === "POST") {
