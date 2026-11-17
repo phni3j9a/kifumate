@@ -4,7 +4,12 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { Color } from "tsshogi";
 import { useAnalysis } from "../analysis/provider";
 import { cp, percent, type CandidateRow } from "../analysis/display";
-import type { Analysis, Mode, Score } from "../analysis/types";
+import {
+  needsRetryConfirmation,
+  type Analysis,
+  type Mode,
+  type Score,
+} from "../analysis/types";
 import { Icon } from "./icons";
 import { ask, toast } from "./overlay";
 import { colors, font, line, radius, shadow } from "./theme";
@@ -86,8 +91,9 @@ export function AnalysisPanel({
   const t = analysis?.attempt,
     job = t?.job,
     saved = analysis?.saved;
+  const confirmation = needsRetryConfirmation(t);
   const waiting = !!t && job?.status === "queued";
-  const running = !!t && !waiting;
+  const running = !!t && !waiting && !confirmation;
   const kind = quota?.paid ? mode : "std";
   const row = branch ? branchRow : rows[selected] || rows[0];
   const tab = (
@@ -159,6 +165,14 @@ export function AnalysisPanel({
   if (branch) {
     title = row?.text || "自由に指して試せます";
     sub = row ? "保存した読み筋" : "分岐は保存されません。本譜は変わりません";
+  } else if (confirmation) {
+    title = "前回の依頼の結果が分かりません";
+    sub = "もう一度解析するには確認が必要です";
+    action = (
+      <Button size="sm" onPress={() => start(t!.mode)}>
+        依頼を確認
+      </Button>
+    );
   } else if (waiting) {
     title = "解析待ち";
     sub = "いまの解析が終わると、続けて始まります";

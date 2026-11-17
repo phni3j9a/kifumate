@@ -26,6 +26,7 @@ import {
 } from "../core/kif";
 import { setSelfSide, setWinner } from "../storage/repository";
 
+import { needsRetryConfirmation } from "../analysis/types";
 import { useAnalysis } from "../analysis/provider";
 export default function Info() {
   const { records, offline } = useAnalysis();
@@ -81,11 +82,13 @@ export default function Info() {
             [
               "解析",
               records[id]?.attempt
-                ? offline
-                  ? "中断中"
-                  : records[id]?.attempt?.job?.status === "queued"
-                    ? "解析待ち"
-                    : "解析中"
+                ? needsRetryConfirmation(records[id]?.attempt)
+                  ? "依頼の確認が必要です"
+                  : offline
+                    ? "中断中"
+                    : records[id]?.attempt?.job?.status === "queued"
+                      ? "解析待ち"
+                      : "解析中"
                 : records[id]?.saved?.mode === "precise"
                   ? "精密解析ずみ"
                   : records[id]?.saved

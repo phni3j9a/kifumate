@@ -54,6 +54,8 @@ export interface Reply extends Job {
   quota: Quota;
 }
 export interface Attempt extends Input {
+  /** null は未送信。旧データの undefined は送信時刻が分からないので再依頼を確認する。 */
+  firstSentAt?: number | null;
   job: Job | null;
   results: AnalysisResult[];
   cancel: boolean;
@@ -69,6 +71,17 @@ export interface Analysis {
   saved: Saved | null;
   error: string | null;
 }
+// 完了直後に保持期限が始まる場合を想定し、初回送信から7日で自動再送を止める。
+export const needsRetryConfirmation = (
+  attempt?: Attempt | null,
+  now = Date.now(),
+) =>
+  !!attempt &&
+  !attempt.job &&
+  attempt.firstSentAt !== null &&
+  (attempt.firstSentAt === undefined ||
+    now - attempt.firstSentAt >= 7 * 86400000);
 export const active = (a?: Analysis) =>
   !!a?.attempt &&
+  !needsRetryConfirmation(a.attempt) &&
   (!a.attempt.job || ["queued", "running"].includes(a.attempt.job.status));

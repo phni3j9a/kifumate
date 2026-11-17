@@ -257,3 +257,90 @@ test("3版目移行: 既存棋譜を維持、保存再読み込み・CASCADE・�
   assert.equal(old.prepare("SELECT kif FROM games").get()?.kif, "大切な棋譜");
   old.close();
 });
+
+test("7日を過ぎた応答不明POSTは再起動後も自動再送せず、送信時刻を保存する", async (t) => {
+  const sentAt = 1794754800000;
+  t.mock.timers.enable({ apis: ["Date"], now: sentAt });
+  let calls = 0;
+  const api = {
+    create: async () => {
+      calls++;
+      throw new TypeError("応答を喪失");
+    },
+  };
+  const { controller, storage, sql } = await setup(api);
+  try {
+    await controller.start("a", input);
+    t.mock.timers.tick(7 * 86400000);
+    const reopened = new AnalysisController(
+      { quota: async () => quota, ...api } as unknown as AnalysisClient,
+      storage,
+    );
+    await reopened.init();
+    await reopened.sync();
+    await reopened.sync();
+    assert.equal(calls, 1, "期限を過ぎた不明POSTを自動再送してはいけない");
+    assert.equal((await storage.load())[0]?.attempt?.firstSentAt, sentAt);
+    await assert.rejects(reopened.start("a", input), /確認/);
+    assert.equal(calls, 1);
+    await reopened.start("a", input, true);
+    assert.equal(calls, 2);
+    assert.equal(
+      (await storage.load())[0]?.attempt?.firstSentAt,
+      sentAt + 7 * 86400000,
+    );
+  } finally {
+    sql.close();
+  }
+});
+
+test("不正な解析接続先でもクライアント生成は失敗せず、依頼だけをHTTPS検証で拒否する", async () => {
+  let calls = 0;
+  let api: AnalysisClient | undefined;
+  assert.doesNotThrow(() => {
+    api = new AnalysisClient(
+      "http://untrusted.example",
+      { get: async () => null, set: async () => {} },
+      async () => {
+        calls++;
+        throw new Error("呼び出さない");
+      },
+    );
+  });
+  await assert.rejects(api!.create(input), /HTTPS/);
+  assert.equal(calls, 0);
+});
+
+test("旧版の送信時刻不明の依頼も自動再送せず、中止でも新しいPOSTを送らない", async () => {
+  let calls = 0;
+  const { controller, storage, sql } = await setup({
+    create: async () => {
+      calls++;
+      return reply();
+    },
+  });
+  try {
+    await storage.save({
+      gameId: "a",
+      saved: {
+        ...input,
+        jobId: "saved",
+        coachProof: { keep: true },
+        results: [result(0), result(1)],
+      },
+      error: null,
+      attempt: { ...input, job: null, results: [], cancel: false },
+    });
+    await controller.init();
+    await controller.sync();
+    assert.equal(calls, 0);
+    await controller.cancel("a");
+    assert.equal(calls, 0);
+    assert.equal(controller.snapshot.records.a?.attempt, null);
+    assert.deepEqual(controller.snapshot.records.a?.saved?.coachProof, {
+      keep: true,
+    });
+  } finally {
+    sql.close();
+  }
+});

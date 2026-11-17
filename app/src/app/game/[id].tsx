@@ -43,7 +43,7 @@ import {
   startPly,
   signed,
 } from "../../analysis/display";
-import type { Mode } from "../../analysis/types";
+import { needsRetryConfirmation, type Mode } from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
 
 /** まだ形勢が分からないときのバー（.bar.na）：白と砂色の斜めじま */
@@ -132,7 +132,7 @@ function GameView({ id }: { id: string }) {
   const told = useRef(false);
   const opened = useRef(false);
   const [initialized, setInitialized] = useState(false);
-  const { records, quota, offline, controller, ready } = useAnalysis();
+  const { records, offline, controller, ready } = useAnalysis();
   const analysis = records[id];
   const [candidateState, setCandidateState] = useState({ key: "", index: 0 });
   const candidateKey = `${ply}:${branch?.at}`;
@@ -211,6 +211,7 @@ function GameView({ id }: { id: string }) {
       : Color.BLACK
     : self;
   const top = bottom === Color.BLACK ? Color.WHITE : Color.BLACK;
+  // 反転は盤だけ。形勢情報の軸は自分の側（観戦では先手）に固定する。
   const nameOf = (color: Color) =>
     color === Color.BLACK ? game.black : game.white;
   const sideOf = (color: Color) => (color === Color.BLACK ? "先手" : "後手");
@@ -399,11 +400,13 @@ function GameView({ id }: { id: string }) {
         ? null
         : percent((self === Color.BLACK ? 1 : -1) * value);
   const stateLabel = analysis?.attempt
-    ? offline
-      ? "中断中"
-      : analysis.attempt.job?.status === "queued"
-        ? "解析待ち"
-        : "解析中"
+    ? needsRetryConfirmation(analysis.attempt)
+      ? "要確認"
+      : offline
+        ? "中断中"
+        : analysis.attempt.job?.status === "queued"
+          ? "解析待ち"
+          : "解析中"
     : analysis?.saved
       ? "解析済み"
       : "未解析";
@@ -414,8 +417,22 @@ function GameView({ id }: { id: string }) {
       : Math.abs(value) < 150
         ? "ほぼ互角"
         : `${value > 0 === (self === Color.BLACK) ? (own ? "あなた" : "先手") : own ? "相手" : "後手"}が${Math.abs(value) < 450 ? "やや有利" : Math.abs(value) < 1000 ? "有利" : Math.abs(value) < 2000 ? "優勢" : "勝勢"}`;
-  function start(mode: Mode) {
+  function start(mode: Mode, confirmed = false) {
     const run = () => {
+      const { offline, quota } = controller.snapshot;
+      if (
+        needsRetryConfirmation(controller.snapshot.records[id]?.attempt) &&
+        !confirmed
+      ) {
+        ask({
+          title: "前回の依頼の結果が分かりません",
+          text: "保存期間が過ぎている可能性があります。もう一度解析すると、今週の回数を新たに使うことがあります。",
+          ok: "もう一度解析する",
+          no: "やめる",
+          onOk: () => start(mode, true),
+        });
+        return;
+      }
       if (offline) {
         ask({
           title: "通信できません",
@@ -424,7 +441,7 @@ function GameView({ id }: { id: string }) {
           ok: "もう一度試す",
           onOk: () => {
             void controller.sync().then(() => {
-              if (!controller.snapshot.offline) start(mode);
+              if (!controller.snapshot.offline) start(mode, confirmed);
               else toast("通信できません。つながってからお試しください");
             });
           },
@@ -446,14 +463,17 @@ function GameView({ id }: { id: string }) {
           text: `月曜の午前0時（日本時間）に、また使えます。次の更新：${new Date(quota.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}。${quota.totalRemaining > 0 ? "ふつうの解析は使えます。" : "保存済みの結果は見られます。"}`,
           ok: quota.totalRemaining > 0 ? "ふつうで解析する" : "閉じる",
           single: quota.totalRemaining === 0,
-          onOk: quota.totalRemaining > 0 ? () => start("std") : undefined,
+          onOk:
+            quota.totalRemaining > 0
+              ? () => start("std", confirmed)
+              : undefined,
         });
         return;
       }
       setBranch(null);
       clear();
       void controller
-        .start(id, analysisInput(record!, mode))
+        .start(id, analysisInput(record!, mode), confirmed)
         .catch((e) =>
           toast(e instanceof Error ? e.message : "解析を依頼できませんでした"),
         );
@@ -521,7 +541,7 @@ function GameView({ id }: { id: string }) {
           <View style={{ flex: 1, gap: 3 }}>
             <View style={s.wl}>
               <Text style={font(700, 10.5)}>
-                {own ? "あなた" : sideOf(bottom)}
+                {own ? "あなた" : sideOf(self)}
                 {chance !== null && !over ? ` ${chance}%` : ""}
               </Text>
               <View style={s.jg}>
@@ -531,7 +551,9 @@ function GameView({ id }: { id: string }) {
               </View>
               <Text style={font(700, 10.5)}>
                 {chance !== null && !over ? `${100 - chance}% ` : ""}
-                {own ? "相手" : sideOf(top)}
+                {own
+                  ? "相手"
+                  : sideOf(self === Color.BLACK ? Color.WHITE : Color.BLACK)}
               </Text>
             </View>
             {chance === null ? (
@@ -539,7 +561,7 @@ function GameView({ id }: { id: string }) {
             ) : (
               <View
                 accessibilityRole="image"
-                accessibilityLabel={`あなたの勝率 ${chance}%`}
+                accessibilityLabel={`${own ? "あなた" : sideOf(self)}の勝率 ${chance}%`}
                 style={[s.bar, { backgroundColor: colors.opp }]}
               >
                 <View
@@ -719,11 +741,13 @@ function GameView({ id }: { id: string }) {
                     ? ""
                     : value === null
                       ? analysis?.attempt
-                        ? analysis.attempt.job?.status === "queued"
-                          ? "順番が来たら解析します"
-                          : offline
-                            ? "通信が戻ると、続きから再開します"
-                            : "アプリを閉じても解析は続きます"
+                        ? needsRetryConfirmation(analysis.attempt)
+                          ? "前回の依頼を確認してください"
+                          : analysis.attempt.job?.status === "queued"
+                            ? "順番が来たら解析します"
+                            : offline
+                              ? "通信が戻ると、続きから再開します"
+                              : "アプリを閉じても解析は続きます"
                         : "まだ解析していません"
                       : point?.mark === "好手"
                         ? "好手！"

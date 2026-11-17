@@ -27,6 +27,7 @@ import {
 } from "../../components/ui";
 import { dateParts, dateShort } from "../../core/format";
 import { useAnalysis } from "../../analysis/provider";
+import { needsRetryConfirmation } from "../../analysis/types";
 import { cp } from "../../analysis/display";
 import Svg, { Path } from "react-native-svg";
 import { listGames, toggleFavorite, type Game } from "../../storage/repository";
@@ -436,11 +437,13 @@ export default function Games() {
                         ]}
                       >
                         <Text style={font(900, 10.5)}>
-                          {offline
-                            ? "中断中"
-                            : records[g.id]!.attempt!.job?.status === "queued"
-                              ? "解析待ち"
-                              : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
+                          {needsRetryConfirmation(records[g.id]?.attempt)
+                            ? "要確認"
+                            : offline
+                              ? "中断中"
+                              : records[g.id]!.attempt!.job?.status === "queued"
+                                ? "解析待ち"
+                                : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
                         </Text>
                       </View>
                     ) : records[g.id]?.saved ? (

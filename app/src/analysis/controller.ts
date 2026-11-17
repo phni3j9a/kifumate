@@ -1,7 +1,13 @@
-import { AnalysisClient, ApiError, errorText } from "./client";
+import {
+  AnalysisClient,
+  AnalysisConfigurationError,
+  ApiError,
+  errorText,
+} from "./client";
 import type { AnalysisStorage } from "./storage";
 import {
   active,
+  needsRetryConfirmation,
   type Analysis,
   type Input,
   type Quota,
@@ -118,8 +124,15 @@ export class AnalysisController {
     if (reply.status === "completed" || reply.status === "failed")
       this.notify(a.gameId, reply.status === "failed");
   }
-  start(id: string, input: Input) {
+  start(id: string, input: Input, confirmed = false) {
     return this.serial(async () => {
+      if (
+        needsRetryConfirmation(this.snapshot.records[id]?.attempt) &&
+        !confirmed
+      )
+        throw new Error(
+          "前回の依頼の結果が分かりません。もう一度解析するには確認が必要です",
+        );
       if (active(this.snapshot.records[id])) return;
       if (input.moves.length > 512)
         throw new Error("解析できる棋譜は512手までです");
@@ -127,7 +140,13 @@ export class AnalysisController {
         gameId: id,
         saved: this.snapshot.records[id]?.saved ?? null,
         error: null,
-        attempt: { ...input, job: null, results: [], cancel: false },
+        attempt: {
+          ...input,
+          firstSentAt: null,
+          job: null,
+          results: [],
+          cancel: false,
+        },
       });
     }).then(() => this.sync());
   }
@@ -135,7 +154,12 @@ export class AnalysisController {
     return this.serial(async () => {
       const a = this.snapshot.records[id];
       if (a?.attempt)
-        await this.save({ ...a, attempt: { ...a.attempt, cancel: true } });
+        await this.save({
+          ...a,
+          attempt: needsRetryConfirmation(a.attempt)
+            ? null
+            : { ...a.attempt, cancel: true },
+        });
     }).then(() => this.sync());
   }
   private syncing: Promise<void> | undefined;
@@ -151,10 +175,15 @@ export class AnalysisController {
             existing.has(id),
           ),
         );
-        for (const a of Object.values(this.snapshot.records)) {
-          if (!a.attempt) continue;
+        for (let a of Object.values(this.snapshot.records)) {
+          if (!a.attempt || needsRetryConfirmation(a.attempt)) continue;
           try {
-            const t = a.attempt;
+            let t = a.attempt;
+            if (!t.job && t.firstSentAt === null) {
+              t = { ...t, firstSentAt: Date.now() };
+              a = { ...a, attempt: t };
+              await this.save(a);
+            }
             const reply = !t.job
               ? await this.api.create(t)
               : t.cancel
@@ -168,8 +197,11 @@ export class AnalysisController {
                 await this.api.cancel(next.attempt.job.id),
               );
           } catch (e) {
-            if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
-              if (e.quota) await this.quota(e.quota);
+            if (
+              e instanceof AnalysisConfigurationError ||
+              (e instanceof ApiError && e.status >= 400 && e.status < 500)
+            ) {
+              if (e instanceof ApiError && e.quota) await this.quota(e.quota);
               await this.save({ ...a, attempt: null, error: errorText(e) });
             } else throw e;
           }
@@ -177,7 +209,9 @@ export class AnalysisController {
         await this.quota(await this.api.quota());
         this.snapshot.offline = false;
       } catch (e) {
-        this.snapshot.offline = !(e instanceof ApiError);
+        this.snapshot.offline = !(
+          e instanceof ApiError || e instanceof AnalysisConfigurationError
+        );
         this.snapshot.problem = errorText(e);
       }
       this.emit();

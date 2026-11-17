@@ -478,7 +478,24 @@ async function run(width: number, height: number) {
   await a.goto(APP + "/settings");
   await pause(700);
   await a.goto(gameUrl);
+  // 期限切れの応答不明は新しい解析を始めず、モックの共通ask部品と確認画面を比べる。
+  fake.loseCreateResponse = true;
   await tap("解析する");
+  await a.getByText("中断中", { exact: true }).first().waitFor();
+  await a.clock.setSystemTime(new Date(Date.now() + 7 * 86400000));
+  await a.reload();
+  await tap("依頼を確認");
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "ask('前回の依頼の結果が分かりません','保存期間が過ぎている可能性があります。もう一度解析すると、今週の回数を新たに使うことがあります。','もう一度解析する',null,{no:'やめる'})",
+    ),
+  );
+  await shot("analysis-expired-request");
+  await act("dlgno");
+  await tap("やめる");
+  fake.loseCreateResponse = false;
+  await tap("依頼を確認");
+  await tap("もう一度解析する");
   fake.complete = true;
   await pause(5500);
   await m.evaluate(() => {

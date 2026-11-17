@@ -12,6 +12,7 @@ export class ApiError extends Error {
     super(code);
   }
 }
+export class AnalysisConfigurationError extends Error {}
 /** 端末登録は同時に一度だけ。401でも証明とひも付くトークンを勝手に作り直さない。 */
 export class AnalysisClient {
   private token: Promise<string> | undefined;
@@ -19,21 +20,20 @@ export class AnalysisClient {
     private base: string,
     private store: TokenStore,
     private http: typeof fetch = (url, init) => fetch(url, init),
-  ) {
-    if (
-      base &&
-      !/^https:\/\//.test(base) &&
-      !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)
-    )
-      throw new Error("解析の接続先はHTTPSにしてください");
-  }
+  ) {}
   private async request(
     path: string,
     method = "GET",
     body?: Input,
     auth = true,
   ): Promise<any> {
-    if (!this.base) throw new Error("解析サーバーの接続先が未設定です");
+    if (!this.base)
+      throw new AnalysisConfigurationError("解析サーバーの接続先が未設定です");
+    if (
+      !/^https:\/\//.test(this.base) &&
+      !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(this.base)
+    )
+      throw new AnalysisConfigurationError("解析の接続先はHTTPSにしてください");
     const token = auth ? await this.getToken() : null;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
@@ -90,6 +90,7 @@ export class AnalysisClient {
     this.request(`/v1/jobs/${encodeURIComponent(id)}`, "DELETE");
 }
 export function errorText(error: unknown) {
+  if (error instanceof AnalysisConfigurationError) return error.message;
   if (!(error instanceof ApiError))
     return "通信できません。つながると解析できます";
   return (

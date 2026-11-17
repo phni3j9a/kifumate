@@ -13,6 +13,7 @@ import { toast } from "../components/overlay";
 import { AnalysisClient } from "./client";
 import { AnalysisController } from "./controller";
 import { analysisStorage } from "./storage";
+import { active } from "./types";
 import { tokenStore } from "./token";
 const Context = createContext<AnalysisController | null>(null);
 export function AnalysisProvider({ children }: PropsWithChildren) {
@@ -52,7 +53,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
       if (
         AppState.currentState !== "background" &&
         AppState.currentState !== "inactive" &&
-        (Object.values(controller.snapshot.records).some((a) => a.attempt) ||
+        (Object.values(controller.snapshot.records).some(active) ||
           Date.now() - lastSync > 30000)
       ) {
         await controller.sync();

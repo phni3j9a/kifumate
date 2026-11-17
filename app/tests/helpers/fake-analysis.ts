@@ -21,6 +21,7 @@ export async function fakeAnalysis(page: Page) {
     requests: [] as Input[],
     cancel: 0,
     createStatus: 202,
+    loseCreateResponse: false,
   };
   page.on("pageerror", (e) => state.errors.push(e.message));
   page.on("console", (m) => {
@@ -124,6 +125,10 @@ export async function fakeAnalysis(page: Page) {
             expiresAt: Date.now() + 365 * 86400000,
           }
         : null;
+    if (req.method() === "POST" && state.loseCreateResponse) {
+      await route.abort("internetdisconnected");
+      return;
+    }
     await send(job, req.method() === "POST" ? 202 : 200);
   });
   return state;
