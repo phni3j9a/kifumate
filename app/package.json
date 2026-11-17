@@ -20,6 +20,7 @@
     "@expo/vector-icons": "^15.0.2",
     "encoding-japanese": "^2.5.0",
     "expo": "^58.0.25",
+    "expo-build-properties": "~58.0.12",
     "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.16",
     "expo-crypto": "~58.0.8",

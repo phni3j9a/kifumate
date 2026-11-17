@@ -90,6 +90,19 @@ test("開発プロファイルだけ別IDにし、既定と配布版のID・名�
       assert.equal(config.android?.package, id);
       assert.equal(config.ios?.bundleIdentifier, id);
       assert.equal(config.name, development ? "kifumate（開発）" : "kifumate");
+      const buildProperties = config.plugins?.find(
+        (plugin) =>
+          Array.isArray(plugin) && plugin[0] === "expo-build-properties",
+      );
+      assert.deepEqual(
+        buildProperties,
+        development
+          ? undefined
+          : [
+              "expo-build-properties",
+              { android: { buildArchs: ["arm64-v8a"] } },
+            ],
+      );
     }
   } finally {
     if (previous === undefined) delete process.env.APP_VARIANT;

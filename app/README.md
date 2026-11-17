@@ -55,6 +55,8 @@ EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka
 | `apk` | 招待制の署名付きリリースAPK（`buildType: apk`） | 本番・`com.quarterlambda.kifumate`・開発判定は無効 |
 | `production` | 将来のストア用AAB（設定のみ） | 本番・同じリリースID。購入・ストア公開は別作業 |
 
+配布用の `apk` と将来のストア用 `production` は **arm64-v8a専用**です。公式の `expo-build-properties` の `android.buildArchs: ["arm64-v8a"]` を `app.config.ts` のリリース側にだけ設定し、Prebuildで `reactNativeArchitectures` を生成します。**32bit ARM端末（64bit CPUでもOSが32bitの端末を含む）とx86／x86_64端末にはインストールできません**。開発プロファイルは従来の4ABIのままで、エミュレータ向けのABIも残しています。
+
 `app.config.ts` はEASプロファイルの `APP_VARIANT=development` のときだけ開発用IDへ変更します。既定と配布版はリリースIDです。Expo Go・開発版と配布版の棋譜／トークンは別アプリのデータで、自動移行されません。開発版を作るだけでは招待権利は付きません。APKは `__DEV__ === false` のリリースで、環境変数を変えても本番URL固定・開発用権利は拒否します。
 
 ### クラウドでビルド・保存
@@ -114,17 +116,25 @@ EAS上の鍵とバックアップを両方失うと、配布済みアプリを�
 
 棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動・未使用の生体認証の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
 
-公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)。
+公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)・[ABI指定（BuildProperties）](https://docs.expo.dev/versions/latest/sdk/build-properties/#pluginconfigtypeandroid)。
 
 ### #33 の配布確認（2026-11-17）
 
-- **配布の正本**：`~/kifumate-releases/kifumate-0.1.0-5-release.apk`（約108MB、表示版0.1.0／`versionCode=5`、arm64-v8a・armeabi-v7a・x86・x86_64）。このディレクトリに他の版のAPKは置いていません。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
+- 初回の配布確認に使った版5は **旧版**として `~/kifumate-releases/kifumate-0.1.0-5-old-universal.apk` へ改名しました（112.84MB／107.61MiB、表示版0.1.0／`versionCode=5`、4ABI）。現在の配布の正本は下記の版6です。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
 - 今回は**クラウド無料枠の待ち時間のためEASローカルビルドで代用**しました。クラウド1件（番号2）は約39分未開始で取消済み。ローカルは3回：番号3はJava21がJREのみだったため約4分51秒で失敗、JDK17へ直した番号4は18分44秒、配布用番号5は15分18秒で成功。番号の欠番はそのまま残し、EAS管理の同じ署名鍵と連番を使っています。クラウドのコンパイル完了は未確認です。
 - Pixel 3 `8AFX0S69E`／Android 11：版4の起動・KIF取り込み（通常入力欄へ検証用UiAutomatorで日本語を入力）・保存・再起動・再生・合法分岐・本番ふつう解析1局を確認。期限1時間／1端末の招待を入力し、精密解析1局（どちらも1手・2局面）、分岐中の解析1セッション、AIコーチ解説1回（総合・かんたん、追加質問なし）が成功しました。
 - 招待を取消し、コード原文と取消メタデータを削除。無料への復帰と、保存した精密候補・解説の閲覧を確認。15:57 UTCに本番の全3 Container・全slotがinactive、`active=0 / assigned=0`を確認。secret・serverソースは変更せず、`wrangler tail`も使用していません。
 - `adb install -r` で**同じ鍵の版4→5へ上書き更新**。初回インストール日時が変わらず、架空の棋譜1局・お気に入り・自分の側・精密3候補・同じ解説が残り、回数も2/10局のまま（同じ端末トークン）であることを確認。版5の署名はバックアップの証明書とも一致し、APK内の本番URL・非debuggable・通常の権限がINTERNETのみ（ほかはAndroidXのアプリ内署名権限）であることを確認しました。
 - `npm run check`（単体158件・禁止名称・型・lint）、Web E2E66件、Androidのリリースバンドル出力と配布物の禁止名称検査が通過。比較は解析モックが撮影前に完了する競合を直し、**84場面×2幅**が通過しました。実機の起動画面・アイコン・Aboutも画像で確認しています。
 - 画像／動画は `.local/screenshots/android/issue33-*`、比較は `.local/compare/{360x800,393x852}/`（gitignore対象）。iPhone・開発ビルド・AAB／ストア公開・購入連携は実施していません。`expo-doctor`には既存のExpo／FileSystem／Router／SQLiteの新しいパッチ版推奨が残ります。SDK更新や `npm audit fix --force` は行っていません。
+
+### arm64専用の版6（2026-11-17）
+
+- **配布の正本**：`~/kifumate-releases/kifumate-0.1.0-6-arm64-release.apk`。表示版は0.1.0、EAS管理の `versionCode=6`。ローカルビルド1回・8分17秒で成功しました。旧版5を配布物と取り違えないでください。
+- 大きさは版5の **112.84MB（107.61MiB）→41.79MB（39.85MiB）、62.97%減**。APK内のネイティブライブラリがarm64-v8aだけであることを確認しました。32bit ARM・x86／x86_64端末は対象外です。
+- `expo config --type introspect` でリリースの `reactNativeArchitectures=arm64-v8a` と、開発プロファイルの従来の4ABIを確認。`npm run check`（単体159件・禁止名称・型・lint）が通過しました。
+- Pixel 3 `8AFX0S69E`／Android 11で版5→6を上書き更新。初回インストール日時・既存1棋譜・お気に入り・自分の側・精密3候補・保存した解説・端末トークンを保持し、起動と再生を確認しました。署名は版5と同じで、本番URL・非debuggable・最小権限も維持しています。
+- 旧結果を上書きしない確認用の1手棋譜で、**本番のふつう解析を1局（2局面）だけ**実行して成功。確認用棋譜は削除し、元のデータを保持しました。端末の使用量は2→3/10局。精密・分岐中の解析・AI生成・招待発行は追加していません。22:49 UTCに本番3 Containerの全slot inactive、`active=0 / assigned=0`を確認しました。
 
 ## いま使えること
 
@@ -207,7 +217,7 @@ npm run compare -- 393x852 game    # 大きさと、名前に game を含む場�
 
 Web はブラウザのサイトデータ削除・プライベートブラウズ、ネイティブはアプリデータ削除／アンインストールで棋譜が失われます。一括バックアップが入るまでは大切な棋譜をKIFで保管してください。
 
-`npm audit` では Expo の開発・ビルド用 `@expo/fingerprint` 経由の `minimatch` に moderate（ReDoS）が残ります。SDKを旧版へ戻す自動修正は適用していません。アプリが棋譜処理に使う依存ではありませんが、公開前に上流の修正を追ってください。
+`npm audit` は現時点で既存依存の44件（high 42／moderate 2）を報告しています。arm64対応前のlockfileでも同数で、追加した `expo-build-properties` による増加ではありません。影響範囲と修正可否の精査は別途必要です。SDKを旧版へ戻す修正や `npm audit fix --force` は適用していません。
 
 ### 確認した環境（2026-11-17）
 
