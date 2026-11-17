@@ -36,6 +36,74 @@ adb shell am start -a android.intent.action.VIEW -d exp://127.0.0.1:8081 host.ex
 
 Web の本番用バンドル：`npx expo export --platform web`。配信時は SPA のルートフォールバック、WASM の MIME `application/wasm`、`Cross-Origin-Embedder-Policy: credentialless` と `Cross-Origin-Opener-Policy: same-origin` を設定してください。expo-sqlite の Web 対応は実験的です。
 
+## Androidの配布APKビルド
+
+EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）です。ビルドとAndroid署名鍵をEASで管理します。表示名はモックと同じ **kifumate**、表示用の版は **0.1.0**。`android/`・`ios/`は生成物でコミットしません。
+
+| `eas.json` のプロファイル | 用途 | 接続先・ID |
+| --- | --- | --- |
+| `development` | `expo-dev-client` の開発APK | staging・`com.quarterlambda.kifumate.development`・kifumate（開発） |
+| `apk` | 招待制の署名付きリリースAPK（`buildType: apk`） | 本番・`com.quarterlambda.kifumate`・開発判定は無効 |
+| `production` | 将来のストア用AAB（設定のみ） | 本番・同じリリースID。購入・ストア公開は別作業 |
+
+`app.config.ts` はEASプロファイルの `APP_VARIANT=development` のときだけ開発用IDへ変更します。既定と配布版はリリースIDです。Expo Go・開発版と配布版の棋譜／トークンは別アプリのデータで、自動移行されません。開発版を作るだけでは招待権利は付きません。APKは `__DEV__ === false` のリリースで、環境変数を変えても本番URL固定・開発用権利は拒否します。
+
+### クラウドでビルド・保存
+
+```sh
+cd app
+npm ci
+npx eas-cli@latest login  # asitaka.k。既にログイン済みなら不要
+npx eas-cli@latest whoami
+npm run check
+npm run test:web
+npx eas-cli@latest build --platform android --profile apk
+# 完了後、EASのビルド画面からAPKをダウンロードし、例えば次へ保管する
+mkdir -p ~/kifumate-releases
+# ~/kifumate-releases/kifumate-0.1.0-<versionCode>.apk
+```
+
+ビルドURLは本人用の管理画面です。EASの内部配布URL／APKのダウンロードURLを公開しないでください。`.easignore` は開発環境変数・ネイティブ生成物・ローカル検証データ・署名情報をアップロードから除きます。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。無料枠を節約するため、ローカル検証を通してから依頼し、AABや開発版を確認のためだけに追加ビルドしません。
+
+クラウドが混雑している場合や上書き更新確認の2回目は、Android SDK・NDK・JDKがあるLinux/macOSで同じEAS設定を使えます。ローカルでもログイン・EASの鍵と版番号への接続が必要です。
+
+```sh
+# このマシンは JDK 21、~/Android/Sdk（SDK Platform 37.0・Build Tools 37.0.0）を使用
+ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
+  npx eas-cli@latest build --platform android --profile apk --local \
+  --output "$HOME/kifumate-releases/kifumate-0.1.0-update.apk"
+```
+
+### 版と上書き更新
+
+- **表示用の版**：`app.json` の `expo.version`（現在 `0.1.0`）を変更し、`package.json`／lockfileの版もそろえます。自動では上がりません。
+- **更新の番号**：`cli.appVersionSource: remote` と各プロファイルの `autoIncrement: true` でEASがAndroid `versionCode`を採番します。`app.json`に手で番号を書かず、ビルド失敗で欠番ができても戻しません。確認は `npx eas-cli@latest build:version:get --platform android --profile apk`。
+- 同じアプリID・**同じ署名鍵**で、より大きな `versionCode`のAPKを配ります。先にアンインストールせず、端末で新しいAPKを開き「更新」を選びます。棋譜・解析・解説・設定が残ることを確認します。USB確認は `adb -s 8AFX0S69E install -r <新しいAPK>`。古い番号への戻しやデータ消去はしません。
+- リポジトリにはAPK・AABを置かず、**公開リポジトリやGitHub Releasesにもアップロードしません**。信頼できる私的な共有経路で対象者だけへファイルと表示版・更新番号を伝えます。自動更新通知はありません。
+
+### 署名鍵とバックアップ
+
+EASの既定のAndroid keystoreを継続使用します。バックアップ1部は **`~/.config/kifumate/android-keystore/`** の `credentials.json` と `credentials/android/keystore.jks`。ディレクトリ0700、ファイル0600です。パスワードは `credentials.json` に含まれるので、**中身を表示・ログ保存・チャット送信・コミットしないでください**。利用者本人が両方をパスワードマネージャー等の安全な保管先へ移してください。通常のAPK配布に鍵は渡しません。
+
+再ダウンロードは `npx eas-cli@latest credentials --platform android` → `apk` → `credentials.json: Upload/Download...` → `Download credentials from EAS to credentials.json`。**CLIは実行ディレクトリに書くため、リポジトリ内でダウンロードしないこと**。リポジトリ外の0700の一時ディレクトリへ `app.json`・`eas.json`・`package.json`・`app.config.ts`をコピーし、依存解決用に `node_modules` への一時シンボリックリンクを用意して実行します。`EAS_NO_VCS=1`を指定し、`umask 077`で作成、終了後は設定のコピー・リンクを取り除いて0700/0600を再確認します。機密情報を表示する質問には「いいえ」を選びます。
+
+EAS上の鍵とバックアップを両方失うと、配布済みアプリを同じIDのまま更新できません。新しい鍵へ勝手に作り直さないでください。再インストールにはアンインストールが必要となり、バックアップ未実装の棋譜・解析・解説は失われます。鍵／EASアカウントの漏えいにも注意してください。
+
+### 知人へのインストール案内
+
+1. 本人から受け取ったAPKであることと版を確認し、Android端末へ保存して開きます（iPhoneには入りません）。
+2. ブラウザ／ファイルアプリに「この提供元からのアプリを許可」を求められたときだけ、設定の「不明なアプリのインストール」でそのアプリを一時的に許可します。端末によって表示名は違います。Play Protectの警告を無条件で無視せず、送信者とファイルを確認してください。
+3. インストール後、許可を元へ戻してkifumateを開きます。無料の取り込み・再生・ふつうの解析を使えます。有料機能は発行者から私的に受け取った招待コードを設定から入力します。コードも公開しません。
+4. 次の版も同じ方法で開き「更新」を選びます。**アンインストールやアプリデータ削除はしないでください**。大切な棋譜は事前にKIFでも保管します。
+
+### 見た目・権限
+
+通常アイコンは `assets/mascot-kit/00-app/app-icon.png` の1024px素材、起動画面とAndroidアダプティブアイコンの透過前景は `01-onboarding/01-welcome.png` から作成しています。前景はAndroidの安全域内に収め、背景色はモックの黄色、起動画面は共通のクリーム色。フォント読み込みまで起動画面を保ちます。
+
+棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
+
+公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)。
+
 ## いま使えること
 
 - 棋譜・戦績・設定の3タブと、取り込み・対局・対局情報・対局者名・このアプリについて・ライセンス。KIFの書き出し・絞り込み・結果の修正・「…」メニューはシート、削除は確認ダイアログ。

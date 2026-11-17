@@ -1,4 +1,5 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
+import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
 import { Stack, type ErrorBoundaryProps } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
@@ -13,6 +14,7 @@ import { Button, Problem, Screen } from "../components/ui";
 import { AnalysisProvider } from "../analysis/provider";
 import { ClassificationsProvider } from "../components/classifications-provider";
 import { migrate } from "../storage/schema";
+void SplashScreen.preventAutoHideAsync();
 export const unstable_settings = { anchor: "(tabs)" };
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
   return (
@@ -32,6 +34,9 @@ export default function Layout() {
     ZenMaruGothic_700Bold,
     ZenMaruGothic_900Black,
   });
+  useEffect(() => {
+    if (loaded || failed) void SplashScreen.hideAsync();
+  }, [loaded, failed]);
   if (!loaded && !failed) return null;
   return (
     <SafeAreaProvider>
