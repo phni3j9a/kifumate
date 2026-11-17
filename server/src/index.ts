@@ -1,9 +1,10 @@
+import { Coach, coachConfiguration, signAnalysis, type CoachEnv } from './coach';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions } from './realtime';
 import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
-export interface Env {
+export interface Env extends CoachEnv {
   DEVICES: DurableObjectNamespace<Device>;
   STD: DurableObjectNamespace<StandardContainer>;
   PRECISE: DurableObjectNamespace<PreciseContainer>;
@@ -74,8 +75,12 @@ interface Job {
 }
 export class Device extends DurableObject<Env> {
   private busy = false;
+  private coach: Coach;
+  private coachConfig: CoachEnv;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.coachConfig = coachConfiguration(env);
+    this.coach = new Coach(ctx.storage, this.coachConfig, ctx.id.toString(), () => this.paid());
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL,
@@ -83,7 +88,8 @@ export class Device extends DurableObject<Env> {
         week INTEGER NOT NULL, created INTEGER NOT NULL, terminal INTEGER,
         attempts INTEGER NOT NULL DEFAULT 0, error TEXT);
       CREATE TABLE IF NOT EXISTS results (job TEXT NOT NULL, ply INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(job,ply));
-      CREATE TABLE IF NOT EXISTS usage (week INTEGER PRIMARY KEY, total INTEGER NOT NULL, precise INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS usage (week INTEGER PRIMARY KEY, total INTEGER NOT NULL, precise INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS coach_proofs (job TEXT PRIMARY KEY, data TEXT NOT NULL);`);
   }
   private rows<T extends Record<string, SqlStorageValue>>(sql: string, ...params: SqlStorageValue[]): T[] {
     return this.ctx.storage.sql.exec<T>(sql, ...params).toArray();
@@ -112,11 +118,13 @@ export class Device extends DurableObject<Env> {
     return {id: job.id, mode: job.mode, status: job.status, next: job.cursor,
       total: input.moves.length + 1, createdAt: job.created, finishedAt: job.terminal,
       expiresAt: job.terminal === null ? null : job.terminal + RETENTION_MS, error: job.error,
+      coachProof: job.status === 'completed' && job.mode === 'precise' ? JSON.parse(this.rows<{data: string}>('SELECT data FROM coach_proofs WHERE job=?', job.id)[0]?.data ?? 'null') : null,
       results: this.rows<{data: string}>('SELECT data FROM results WHERE job=? AND ply>=? ORDER BY ply', job.id, from).map(x => JSON.parse(x.data))};
   }
   private prune(now: number) {
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('DELETE FROM results WHERE job IN (SELECT id FROM jobs WHERE terminal IS NOT NULL AND terminal<=?)', now - RETENTION_MS);
+      this.ctx.storage.sql.exec('DELETE FROM coach_proofs WHERE job IN (SELECT id FROM jobs WHERE terminal IS NOT NULL AND terminal<=?)', now - RETENTION_MS);
       this.ctx.storage.sql.exec('DELETE FROM jobs WHERE terminal IS NOT NULL AND terminal<=?', now - RETENTION_MS);
       this.ctx.storage.sql.exec('DELETE FROM usage WHERE week<?', weekStart(now) - 7 * 86400_000);
     });
@@ -125,6 +133,9 @@ export class Device extends DurableObject<Env> {
     try {
       this.prune(Date.now());
       const url = new URL(request.url);
+      // secret変更後も既存DOのenvは古いことがある。入口の最新設定で全キーを上書きする。
+      const config = request.headers.get('X-Coach-Config');
+      Object.assign(this.coachConfig, coachConfiguration(config ? JSON.parse(config) : this.env));
       if (url.pathname === '/register' && request.method === 'POST') {
         const hash = url.searchParams.get('hash');
         if (!hash || !/^[a-f0-9]{64}$/.test(hash)) throw new ApiError(400, 'invalid_device');
@@ -136,6 +147,7 @@ export class Device extends DurableObject<Env> {
       }
       if (!this.rows('SELECT key FROM meta WHERE key=?', 'registered').length) throw new ApiError(401, 'unauthorized');
       this.ctx.storage.sql.exec("INSERT INTO meta VALUES ('paid',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", request.headers.get('X-Dev-Paid') === '1' ? '1' : '0');
+      if (url.pathname === '/v1/coach' || /^\/v1\/coach\/[a-f0-9-]{36}$/.test(url.pathname)) return await this.coach.fetch(request);
       if (url.pathname === '/v1/realtime' || /^\/v1\/realtime\/[0-9a-f-]{36}$/.test(url.pathname)) {
         const headers = new Headers(request.headers);
         headers.set('X-Realtime-Owner', this.ctx.id.toString());
@@ -212,12 +224,18 @@ export class Device extends DurableObject<Env> {
         if (!response.ok) throw new Error('container_http_' + response.status);
         const result = await response.json() as {ply?: number};
         if (result.ply !== job.cursor) throw new Error('invalid_result');
+        const completedAt = Date.now();
+        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.coachConfig.COACH_SIGNING_KEY
+          ? await signAnalysis(this.coachConfig.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
+            [...this.rows<{data: string}>('SELECT data FROM results WHERE job=? ORDER BY ply', job.id).map(x => JSON.parse(x.data)), result], completedAt)
+          : null;
         this.ctx.storage.transactionSync(() => {
           const current = this.getJob(job.id);
           if (current.status !== 'running' || current.cursor !== job.cursor) return;
           this.ctx.storage.sql.exec('INSERT OR IGNORE INTO results VALUES (?,?,?)', job.id, job.cursor, JSON.stringify(result));
           const completed = job.cursor === input.moves.length;
-          this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,status=?,terminal=? WHERE id=?', completed ? 'completed' : 'running', completed ? Date.now() : null, job.id);
+          this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,status=?,terminal=? WHERE id=?', completed ? 'completed' : 'running', completed ? completedAt : null, job.id);
+          if (completed && proof) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO coach_proofs VALUES (?,?)', job.id, JSON.stringify(proof));
           if (completed) this.ctx.storage.sql.exec('INSERT INTO usage VALUES (?,1,?) ON CONFLICT(week) DO UPDATE SET total=total+1,precise=precise+excluded.precise', job.week, job.mode === 'precise' ? 1 : 0);
         });
       } catch (error) {
@@ -256,7 +274,7 @@ export default {
         if (!registered.ok) throw new ApiError(503, 'registration_unavailable');
         return json({token}, 201);
       }
-      if (!['/v1/jobs', '/v1/quota', '/v1/realtime'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
+      if (!['/v1/jobs', '/v1/quota', '/v1/realtime', '/v1/coach'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime|coach)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
       const auth = /^Bearer ([0-9a-f]{64})$/.exec(request.headers.get('Authorization') ?? '');
       if (!auth) throw new ApiError(401, 'unauthorized');
       const hash = await sha256(auth[1]);
@@ -265,6 +283,7 @@ export default {
       const paid = ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true'
         && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
       headers.set('X-Dev-Paid', paid ? '1' : '0');
+      headers.set('X-Coach-Config', JSON.stringify(coachConfiguration(env)));
       return await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
     } catch (error) {
       return json({error: error instanceof ApiError ? error.code : 'internal_error'}, error instanceof ApiError ? error.status : 500);

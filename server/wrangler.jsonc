@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": {"ENVIRONMENT": "local", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000"},
+  "vars": {"ENVIRONMENT": "local", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "2000", "COACH_TIMEOUT_MS": "45000"},
   "durable_objects": {"bindings": [
     {"name": "DEVICES", "class_name": "Device"},
     {"name": "STD", "class_name": "StandardContainer"},
@@ -22,7 +22,7 @@
   "env": {
     "staging": {
       "name": "kifumate-analysis-staging",
-      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true", "REALTIME_IDLE_MS": "30000"},
+      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "2000", "COACH_TIMEOUT_MS": "45000"},
       "durable_objects": {"bindings": [
         {"name": "DEVICES", "class_name": "Device"},
         {"name": "STD", "class_name": "StandardContainer"},

@@ -36,7 +36,7 @@ export async function sha256(text: string): Promise<string> {
 export function json(data: unknown, status = 200): Response {
   return Response.json(data, {status, headers: {'Cache-Control': 'no-store'}});
 }
-export async function readJson(request: Request): Promise<unknown> {
+export async function readJson(request: Request, maxBytes = 16_384): Promise<unknown> {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw new ApiError(415, 'json_required');
   // Content-Length は信用せず、ストリームの実バイト数でも止める。
   const reader = request.body?.getReader();
@@ -46,7 +46,7 @@ export async function readJson(request: Request): Promise<unknown> {
     const {done, value} = await reader.read();
     if (done) break;
     bytes += value.byteLength;
-    if (bytes > 16_384) { await reader.cancel(); throw new ApiError(413, 'input_too_large'); }
+    if (bytes > maxBytes) { await reader.cancel(); throw new ApiError(413, 'input_too_large'); }
     chunks.push(value);
   }
   const body = new Uint8Array(bytes); let offset = 0;
