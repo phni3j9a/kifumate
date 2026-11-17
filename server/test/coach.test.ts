@@ -118,6 +118,22 @@ describe('権利・回数・中止', () => {
     const blocked = await SELF.fetch('https://api/v1/coach', {method: 'POST', headers: {Authorization: `Bearer ${token}`, 'X-Dev-Paid': '1'}});
     expect(blocked.status).toBe(403);
   });
+  it('Workerが設定ヘッダーを上書きし、既存DOでも提供元secret削除を反映する', async () => {
+    const reg = await SELF.fetch('https://api/v1/devices', {method: 'POST'}); const {token} = await reg.json() as any;
+    await SELF.fetch('https://api/v1/coach', {headers: {Authorization: `Bearer ${token}`, 'X-Coach-Config': JSON.stringify({ENVIRONMENT: 'attacker', COACH_API_KEY: 'injected'})}});
+    await runInDurableObject(devices.getByName(await sha256(token)), async (instance: any) => {
+      expect(instance.coachConfig.ENVIRONMENT).toBe('staging'); expect(instance.coachConfig.COACH_API_KEY).toBeUndefined();
+      instance.env.COACH_SIGNING_KEY = 'test-key'; instance.env.COACH_PROVIDER = 'fake';
+      const p = await payload(instance.ctx.id.toString());
+      const initial = req(p); initial.headers.set('X-Dev-Paid', '1');
+      expect((await instance.fetch(initial)).status).toBe(200);
+      // envの古いfakeはそのままでも、最新の入口設定で未設定へ戻す。
+      const next = req({...p, requestId: crypto.randomUUID()}); next.headers.set('X-Dev-Paid', '1');
+      next.headers.set('X-Coach-Config', JSON.stringify({ENVIRONMENT: 'staging', COACH_SIGNING_KEY: 'test-key'}));
+      expect((await instance.fetch(next)).status).toBe(503);
+      expect(instance.coachConfig.COACH_PROVIDER).toBeUndefined(); expect(instance.coach.quota().used).toBe(1);
+    });
+  });
   it('成功した解説と質問だけ各一回、重複と失敗と中止は数えない', async () => {
     const stub = await fixture();
     await runInDurableObject(stub, async (_instance, state) => {

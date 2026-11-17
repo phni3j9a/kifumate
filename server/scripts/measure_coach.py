@@ -11,13 +11,17 @@ from urllib.request import Request, urlopen
 
 
 def call(url, token, method="GET", data=None):
-    request = Request(url, method=method, headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    request = Request(url, method=method, headers={"Authorization": "Bearer " + token, "Content-Type": "application/json", "User-Agent": "kifumate-measurement/1.0"},
                       data=None if data is None else json.dumps(data).encode())
     try:
         with urlopen(request, timeout=90) as response:
             return response.status, json.load(response)
     except HTTPError as error:
-        return error.code, json.load(error)
+        raw = error.read()
+        try:
+            return error.code, json.loads(raw)
+        except ValueError:
+            raise RuntimeError(f"HTTP {error.code}: JSONではない応答です。接続先の拒否やUser-Agentを確認してください") from None
 
 
 def main():

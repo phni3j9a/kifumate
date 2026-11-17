@@ -17,8 +17,10 @@ URL=https://kifumate-analysis-staging.yuki-nakano-1020.workers.dev
 HASH=$(python3 scripts/measure.py --url "$URL" --register --token-file .local/coach-device.json)
 printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
 printf 'fake\n' | npx wrangler secret put COACH_PROVIDER --env staging
+sleep 30  # エッジへのsecret反映を待つ（短い間隔で試行しない）
 python3 scripts/measure_coach.py --url "$URL" --expect fake
 npx wrangler secret delete COACH_PROVIDER --env staging
+sleep 30  # 削除直後は旧バージョンの偽応答が返る場合がある
 python3 scripts/measure_coach.py --url "$URL" --expect unavailable
 npx wrangler secret delete DEV_PAID_HASHES --env staging
 npx wrangler secret list --env staging
@@ -61,4 +63,16 @@ python3 scripts/compare_coach.py --provider deepseek \
 
 ## 今回の検証結果
 
-staging実測は検証後に追記します。実モデルの品質・速度・費用は未比較です。
+2026-11-17、既存stagingへデプロイして以下を確認しました。
+
+- 最終コードのWorker Version：`dca66c55-689a-4369-b707-604ced413854`（後続のsecret更新でバージョンは変わります）。コンテナイメージは既存のまま、変更なし。
+- サンプル先頭6手・全7局面を実エンジンで精密解析し、署名を端末ファイルへ保存。署名付きデータの再送で偽の解説・追加質問を取得。コーチPOSTは初回 **0.110秒**、再検証 **0.124秒**（ネットワーク込み）。これは実モデルの速度ではありません。
+- 改ざんを400 `invalid_proof`、同じIDと中止済みIDを409で拒否。偽の解説と質問はそれぞれ一回加算し、失敗・中止は加算せず予約0。
+- 提供元secret削除後は503 `provider_unavailable`、**0.097秒**、使用数据え置き。キーなし状態の動作確認完了。
+- secret削除直後には旧設定の偽応答が返ったため、最新設定をWorkerから内部ヘッダーで渡す対策とテストを追加。エッジのsecret更新反映自体にも待ち時間があり、直後の検証は二度とも期待と異なる200になりました。測定端末は最終的に成功6回（偽解説・質問4回と旧設定応答2回）。反映後の503では増加していません。実LLMの料金は一切発生していません。
+- 最初のスモークはurllib既定User-AgentがCloudflareで403/1010となったため、既存計測と同じ専用User-Agentへ修正し再実行しました。
+- Vitest **43件成功**（うちAIコーチ15件）、TypeScript型検査成功。比較スクリプトの自己検査とPythonスクリプトの構文検査成功。Python中継・pytestは変更していません。
+- 測定専用 `COACH_PROVIDER` と `DEV_PAID_HASHES` は削除済み。永続 `COACH_SIGNING_KEY` だけを維持。LLMキー・モデル・URLは未設定で、偽提供元は現在無効です。
+- **06:59:17 UTC（15:59:17 JST）**の確認で全三つのContainer applicationが `active=0 / assigned=0`、使用slotはすべて `inactive`。ローカルにkifumateの実行中Dockerなし。新規のContainer application・外部診断口は作っていません。
+
+実モデルの品質・速度・費用、未知固有名の検出精度、応答の検査通過率は未比較です。

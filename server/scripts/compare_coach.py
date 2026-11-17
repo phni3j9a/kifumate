@@ -70,7 +70,7 @@ def main():
     records = []
     for _ in range(args.runs):
         start = time.monotonic()
-        request = Request(endpoint, method="POST", data=request_body, headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"})
+        request = Request(endpoint, method="POST", data=request_body, headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json", "User-Agent": "kifumate-measurement/1.0"})
         with urlopen(request, timeout=45) as response:
             raw = response.read(131073)
             assert len(raw) <= 131072, "応答上限を超えました"

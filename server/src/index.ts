@@ -1,4 +1,4 @@
-import { Coach, signAnalysis, type CoachEnv } from './coach';
+import { Coach, coachConfiguration, signAnalysis, type CoachEnv } from './coach';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions } from './realtime';
 import { Container } from '@cloudflare/containers';
@@ -76,9 +76,11 @@ interface Job {
 export class Device extends DurableObject<Env> {
   private busy = false;
   private coach: Coach;
+  private coachConfig: CoachEnv;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.coach = new Coach(ctx.storage, env, ctx.id.toString(), () => this.paid());
+    this.coachConfig = coachConfiguration(env);
+    this.coach = new Coach(ctx.storage, this.coachConfig, ctx.id.toString(), () => this.paid());
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL,
@@ -131,6 +133,9 @@ export class Device extends DurableObject<Env> {
     try {
       this.prune(Date.now());
       const url = new URL(request.url);
+      // secret変更後も既存DOのenvは古いことがある。入口の最新設定で全キーを上書きする。
+      const config = request.headers.get('X-Coach-Config');
+      Object.assign(this.coachConfig, coachConfiguration(config ? JSON.parse(config) : this.env));
       if (url.pathname === '/register' && request.method === 'POST') {
         const hash = url.searchParams.get('hash');
         if (!hash || !/^[a-f0-9]{64}$/.test(hash)) throw new ApiError(400, 'invalid_device');
@@ -220,8 +225,8 @@ export class Device extends DurableObject<Env> {
         const result = await response.json() as {ply?: number};
         if (result.ply !== job.cursor) throw new Error('invalid_result');
         const completedAt = Date.now();
-        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.env.COACH_SIGNING_KEY
-          ? await signAnalysis(this.env.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
+        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.coachConfig.COACH_SIGNING_KEY
+          ? await signAnalysis(this.coachConfig.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
             [...this.rows<{data: string}>('SELECT data FROM results WHERE job=? ORDER BY ply', job.id).map(x => JSON.parse(x.data)), result], completedAt)
           : null;
         this.ctx.storage.transactionSync(() => {
@@ -278,6 +283,7 @@ export default {
       const paid = ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true'
         && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
       headers.set('X-Dev-Paid', paid ? '1' : '0');
+      headers.set('X-Coach-Config', JSON.stringify(coachConfiguration(env)));
       return await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
     } catch (error) {
       return json({error: error instanceof ApiError ? error.code : 'internal_error'}, error instanceof ApiError ? error.status : 500);
