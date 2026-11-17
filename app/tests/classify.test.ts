@@ -312,7 +312,8 @@ test("双方の関係による相振り飛車・対抗形・相居飛車を記�
   assert.equal(classifyRecord(both).relationships.at(-1)!.name, "相振り飛車");
   const opposed = build(leftMino, mino.map(rotate));
   assert.equal(classifyRecord(opposed).relationships.at(-1)!.name, "対抗形");
-  assert(names(opposed).includes("対振り持久戦"));
+  assert(!names(opposed).includes("対振り持久戦"));
+  assert(castleNames(opposed).includes("左美濃"));
   assert.equal(
     classifyRecord(record(doubleWing)).relationships.at(-1)!.name,
     "相居飛車",
@@ -331,6 +332,14 @@ test("対四間飛車急戦と持久戦は自陣の形と相手の形の両方�
     names(build(mino, quick.map(rotate)), "white").includes("対四間飛車急戦"),
   );
   assert(!names(build(leftMino)).includes("対振り持久戦"));
+  assert(
+    !names(build(mino, leftMino.map(rotate)), "white").includes("対振り持久戦"),
+  );
+  assert(
+    names(build(mino, staticAnaguma.map(rotate)), "white").includes(
+      "対振り持久戦",
+    ),
+  );
   assert(
     names(build(staticAnaguma, rangingAnaguma.map(rotate))).includes(
       "対振り持久戦",

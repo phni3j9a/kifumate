@@ -356,7 +356,11 @@ export function classifyMoves(
         }
         if (own.family === "居飛車" && opponent.family === "振り飛車") {
           if (
-            matches(p!, other(side), strategyRules[0]!) &&
+            strategyRules.some(
+              (rule) =>
+                rule.id === "fourth-file-rook" &&
+                matches(p!, other(side), rule),
+            ) &&
             matches(p!, side, fourthFileAttack)
           ) {
             add(side, fourthFileAttack, [
@@ -365,13 +369,11 @@ export function classifyMoves(
               ...shapeConditions(p!, side, fourthFileAttack),
             ]);
           }
-          const slowCastle = ["left-mino", "static-anaguma"].find((id) =>
-            currentCastles[key(side)].has(id),
-          );
-          if (slowCastle)
+          // 左美濃は急戦でも使うため、囲いだけで持久戦と推測しない。
+          if (currentCastles[key(side)].has("static-anaguma"))
             context(side, "anti-ranging-slow-game", [
               ...relationConditions,
-              `${slowCastle}の完成形`,
+              "居飛車穴熊の完成形",
             ]);
         }
       }
