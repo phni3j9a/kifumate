@@ -37,9 +37,11 @@ import {
 } from "../core/kif";
 import { findDuplicate, importGame, listAliases } from "../storage/repository";
 
+// input は読み取った本文。今の入力と同じときだけ、この結果で保存できる。
 type Preview =
-  | { error: string }
+  | { input: string; error: string }
   | {
+      input: string;
       record: ShogiRecord;
       auto: Side;
       ambiguous: boolean;
@@ -103,6 +105,7 @@ export default function Import() {
             names.map((n) => n.name),
           );
         next = {
+          input,
           record,
           auto: match.side,
           ambiguous: match.ambiguous,
@@ -111,6 +114,7 @@ export default function Import() {
         };
       } catch (e) {
         next = {
+          input,
           error: e instanceof Error ? e.message : "読み取れませんでした。",
         };
       }
@@ -120,7 +124,7 @@ export default function Import() {
   function fail(e: unknown, fallback: string) {
     job.current++;
     setPick(undefined);
-    setView({ error: e instanceof Error ? e.message : fallback });
+    setView({ input: "", error: e instanceof Error ? e.message : fallback });
   }
   async function paste() {
     try {
@@ -167,10 +171,12 @@ export default function Import() {
     }
   }
   const ok = view && "record" in view ? view : null;
+  // 入力を変えた瞬間から、読み取りと照合が終わるまでは前の結果で保存しない
+  const fresh = view?.input === (tab === "paste" ? text : (file?.text ?? ""));
   const side = pick !== undefined ? pick : (ok?.auto ?? null);
   const decided = pick !== undefined || !!ok?.auto;
   async function save() {
-    if (!ok || !decided || busy) return;
+    if (!ok || !fresh || !decided || busy) return;
     setBusy(true);
     try {
       const saved = await importGame(
@@ -381,6 +387,7 @@ export default function Import() {
                 <Button
                   kind="pri"
                   wide
+                  disabled={!fresh}
                   onPress={() =>
                     router.replace({
                       pathname: "/game/[id]",
@@ -394,7 +401,7 @@ export default function Import() {
                 <Button
                   kind="pri"
                   wide
-                  disabled={!decided || busy}
+                  disabled={!fresh || !decided || busy}
                   onPress={() => void save()}
                 >
                   保存する

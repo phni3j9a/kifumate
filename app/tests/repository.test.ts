@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { test } from "node:test";
-import type { SQLiteDatabase } from "expo-sqlite";
 import { Record as ShogiRecord } from "tsshogi";
 import * as kif from "../src/core/kif";
-import { migrate } from "../src/storage/schema";
 import type * as Repository from "../src/storage/repository";
+import { database } from "./helpers/database";
 import { loadWithMocks } from "./helpers/load-with-mocks";
 
 const repository = loadWithMocks<typeof Repository>(
@@ -16,35 +14,6 @@ const repository = loadWithMocks<typeof Repository>(
     "../core/kif": kif,
   },
 );
-async function database() {
-  const sql = new DatabaseSync(":memory:");
-  const adapter = {
-    async execAsync(query: string) {
-      sql.exec(query);
-    },
-    async getFirstAsync<T>(query: string, ...params: SQLInputValue[]) {
-      return (sql.prepare(query).get(...params) as T) ?? null;
-    },
-    async getAllAsync<T>(query: string, ...params: SQLInputValue[]) {
-      return sql.prepare(query).all(...params) as T[];
-    },
-    async runAsync(query: string, ...params: SQLInputValue[]) {
-      return sql.prepare(query).run(...params);
-    },
-    async withTransactionAsync(task: () => Promise<void>) {
-      sql.exec("BEGIN");
-      try {
-        await task();
-        sql.exec("COMMIT");
-      } catch (e) {
-        sql.exec("ROLLBACK");
-        throw e;
-      }
-    },
-  };
-  await migrate(adapter);
-  return { sql, db: adapter as unknown as SQLiteDatabase };
-}
 test("上限内の入力がCRLF正規化で拡大しても保存・再照合できる", async () => {
   const { sql, db } = await database();
   try {

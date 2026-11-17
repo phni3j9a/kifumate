@@ -72,3 +72,39 @@ test("失敗した移行はバージョンと作成テーブルをロールバ�
   );
   sql.close();
 });
+test("2版目の移行で、手で直した結果を勝った側として引き継ぐ", async () => {
+  const { sql, adapter } = database();
+  sql.exec(migrations[0]!);
+  sql.exec("PRAGMA user_version = 1");
+  const insert = sql.prepare(
+    `INSERT INTO games (id, identity, kif, black, white, played_at, plies, self_side, result, side_manual, result_manual, created_at, updated_at)
+    VALUES (?, ?, '', '', '', '', 0, ?, ?, 1, ?, '', '')`,
+  );
+  for (const [id, side, result, manual] of [
+    ["a", "black", "win", 1],
+    ["b", "white", "win", 1],
+    ["c", "black", "loss", 1],
+    ["d", "white", "draw", 1],
+    ["e", "black", "unknown", 1],
+    ["f", "black", "loss", 0], // 棋譜どおり
+    ["g", null, "unknown", 1], // 先後が分からないので引き継げない
+  ] as const)
+    insert.run(id, id, side, result, manual);
+  await migrate(adapter);
+  assert.deepEqual(
+    sql
+      .prepare("SELECT id, winner, result FROM games ORDER BY id")
+      .all()
+      .map((r) => [r.id, r.winner, r.result]),
+    [
+      ["a", "black", "win"],
+      ["b", "white", "win"],
+      ["c", "white", "loss"],
+      ["d", "draw", "draw"],
+      ["e", "unknown", "unknown"],
+      ["f", null, "loss"],
+      ["g", null, "unknown"],
+    ],
+  );
+  sql.close();
+});

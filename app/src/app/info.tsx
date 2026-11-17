@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Sheet, toast } from "../components/overlay";
@@ -22,19 +22,17 @@ import {
   gameOutcome,
   outcomeText,
   readStoredKif,
-  resultFor,
-  type Result,
   type Side,
 } from "../core/kif";
-import { updateInfo } from "../storage/repository";
+import { setSelfSide, setWinner } from "../storage/repository";
 
-const other = (side: "black" | "white") =>
-  side === "black" ? "white" : "black";
 export default function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db, reload } = useGame(id);
   const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
   const [sheet, setSheet] = useState(false);
+  // 保存は押した順に1つずつ。前の保存と再読み込みが終わってから次を始める
+  const queue = useRef(Promise.resolve());
   if (!game || !record)
     return (
       <Screen>
@@ -44,41 +42,25 @@ export default function Info() {
     );
   const outcome = gameOutcome(record);
   const self = game.self_side;
-  // 保存している結果は「自分から見た勝ち負け」。画面ではモックと同じく、どちらが勝ったかで見せる。
-  const winner: Side | "draw" = !self
+  // 画面ではモックと同じく、どちらが勝ったかで見せる。手で直していなければ棋譜の結果
+  const winner: Side | "draw" = !game.winner
     ? outcome
-    : game.result === "draw"
-      ? "draw"
-      : game.result === "win"
-        ? self
-        : game.result === "loss"
-          ? other(self)
-          : null;
+    : game.winner === "unknown"
+      ? null
+      : game.winner;
   const fromRecord = winner === outcome;
   const resultText = fromRecord
     ? outcomeText(record).replace("手で", "手・")
     : `${game.plies}手・${winner === "draw" ? "引き分け" : winner ? `${winner === "black" ? "先手" : "後手"}の勝ち` : "結果は不明"}`;
-  async function save(side: Side, result: Result) {
-    try {
-      await updateInfo(db, id, side, result);
-      await reload();
-    } catch {
-      toast("保存できませんでした。もう一度お試しください");
-    }
-  }
-  function setSide(next: Side) {
-    // 手で直した結果は「どちらが勝ったか」を保つ。それ以外は棋譜の結果から決め直す。
-    const kept =
-      game!.result_manual && self && next
-        ? game!.result === "win" || game!.result === "loss"
-          ? next === self
-            ? game!.result
-            : game!.result === "win"
-              ? "loss"
-              : "win"
-          : game!.result
-        : resultFor(next, outcome);
-    void save(next, kept);
+  function save(change: () => Promise<void>) {
+    queue.current = queue.current.then(async () => {
+      try {
+        await change();
+        await reload();
+      } catch {
+        toast("保存できませんでした。もう一度お試しください");
+      }
+    });
   }
   const choices: [Side | "draw", string][] = [
     ["black", `☗ ${game.black} の勝ち`],
@@ -100,7 +82,7 @@ export default function Info() {
               <Text style={font(900, 10.5, 1.8, colors.ink2)}>{label}</Text>
               <View style={s.kvValue}>
                 <Text style={font(700, 12.5, 1.5)}>{value}</Text>
-                {label === "結果" && self && !fromRecord && (
+                {label === "結果" && !fromRecord && (
                   <View style={s.edm}>
                     <Text style={font(700, 9.5, 1, colors.ink2)}>手で修正</Text>
                   </View>
@@ -129,7 +111,9 @@ export default function Info() {
             ["none", "自分ではない"],
           ]}
           value={self ?? "none"}
-          onChange={(v) => setSide(v === "none" ? null : v)}
+          onChange={(v) =>
+            save(() => setSelfSide(db, id, v === "none" ? null : v))
+          }
         />
         <Hint>
           登録した対局者名から自動で見分けています。ちがうときはここで直せます。「自分ではない」にすると、戦績には数えません。
@@ -149,18 +133,7 @@ export default function Info() {
               block
               label={label}
               selected={winner === value}
-              onPress={() =>
-                void save(
-                  self,
-                  value === "draw"
-                    ? "draw"
-                    : !value
-                      ? "unknown"
-                      : value === self
-                        ? "win"
-                        : "loss",
-                )
-              }
+              onPress={() => save(() => setWinner(db, id, value ?? "unknown"))}
             />
           ))}
         </View>

@@ -184,49 +184,62 @@ export function Board({
     const pieces = position.hand(color).counts.filter((p) => p.count > 0);
     return (
       <View style={[s.col, color === bottom && { justifyContent: "flex-end" }]}>
-        <View
-          accessibilityLabel={
-            color === bottom ? "自分側の駒台" : "相手側の駒台"
-          }
-          style={[s.tray, !pieces.length && s.trayNone]}
-        >
-          {pieces.length ? (
-            pieces.map((p) => (
+        <View>
+          <View
+            accessibilityLabel={
+              color === bottom ? "自分側の駒台" : "相手側の駒台"
+            }
+            style={[s.tray, !pieces.length && s.trayNone]}
+          >
+            {pieces.length ? (
+              pieces.map((p) => (
+                <View
+                  key={p.type}
+                  style={[
+                    s.hk,
+                    selected === p.type &&
+                      position.color === color && {
+                        backgroundColor: colors.you,
+                      },
+                  ]}
+                >
+                  <Face
+                    type={p.type}
+                    color={color}
+                    mine={color === bottom}
+                    width={19}
+                    height={20.5}
+                  />
+                  {p.count > 1 && (
+                    <View style={s.hkCount}>
+                      <Text
+                        style={[
+                          font(900, 8, 11 / 8, colors.white),
+                          { textAlign: "center" },
+                        ]}
+                      >
+                        {p.count}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))
+            ) : (
+              <Text style={s.none}>{"な\nし"}</Text>
+            )}
+          </View>
+          {/* 押せる範囲は駒台の上に重ねる。幅は列いっぱいの30、高さは駒＋駒の間で26。隣の駒とは重ならない */}
+          <View style={s.hits}>
+            {pieces.map((p) => (
               <Pressable
                 key={p.type}
                 accessibilityRole="button"
                 accessibilityLabel={`${color === Color.BLACK ? "先手" : "後手"}の持ち駒 ${standardPieceName(p.type)} ${p.count}枚`}
                 onPress={() => onHand(color, p.type)}
-                style={[
-                  s.hk,
-                  selected === p.type &&
-                    position.color === color && { backgroundColor: colors.you },
-                ]}
-              >
-                <Face
-                  type={p.type}
-                  color={color}
-                  mine={color === bottom}
-                  width={19}
-                  height={20.5}
-                />
-                {p.count > 1 && (
-                  <View style={s.hkCount}>
-                    <Text
-                      style={[
-                        font(900, 8, 11 / 8, colors.white),
-                        { textAlign: "center" },
-                      ]}
-                    >
-                      {p.count}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-            ))
-          ) : (
-            <Text style={s.none}>{"な\nし"}</Text>
-          )}
+                style={{ height: 26 }}
+              />
+            ))}
+          </View>
         </View>
       </View>
     );
@@ -520,13 +533,22 @@ const s = StyleSheet.create({
     gap: 3,
     paddingHorizontal: 3,
   },
-  col: { width: 24, alignItems: "center", paddingTop: 2, paddingBottom: 8 },
+  // 見た目は幅24の列（.col）。押せる範囲のために左右の余白（3）まで含めた幅30にし、負の余白で戻す
+  col: {
+    width: 30,
+    marginHorizontal: -3,
+    alignItems: "stretch",
+    paddingTop: 2,
+    paddingBottom: 8,
+  },
   tray: {
+    alignSelf: "center",
     width: 24,
     alignItems: "center",
     gap: 3,
     paddingVertical: 3,
     borderWidth: line.thin,
+    borderStyle: "solid", // Android は trayNone の破線を外しても実線に戻らない
     borderColor: colors.ink,
     borderRadius: 9,
     backgroundColor: colors.white,
@@ -540,6 +562,15 @@ const s = StyleSheet.create({
   none: {
     ...font(700, 8.5, 10.7 / 8.5, colors.ink2),
     textAlign: "center",
+    paddingVertical: 3,
+  },
+  // 駒台の枠（1.5）＋内側（3）から、駒の間の半分（1.5）を引いた位置から並べる
+  hits: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     paddingVertical: 3,
   },
   hk: {

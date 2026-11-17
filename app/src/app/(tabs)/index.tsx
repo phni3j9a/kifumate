@@ -333,8 +333,10 @@ export default function Games() {
                     style={[
                       s.rs,
                       { backgroundColor: stamp ? stamp[2] : "transparent" },
-                      (!stamp || g.result === "unknown") && {
-                        borderStyle: "dashed",
+                      // Android は破線の指定を外しても実線に戻らないので、どちらも書く
+                      {
+                        borderStyle:
+                          !stamp || g.result === "unknown" ? "dashed" : "solid",
                       },
                     ]}
                   >

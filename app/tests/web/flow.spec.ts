@@ -165,6 +165,41 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
   await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
   expect(errors).toEqual([]);
 });
+test("取り込み：本文を書き換えた直後は、前の読み取り結果で保存しない", async ({
+  page,
+}) => {
+  // 登録名から自動で先後が決まる（手で選ばなくても保存できる）状態にする
+  await page.goto("/names");
+  await page.getByRole("textbox", { name: "追加する対局者名" }).fill("つばめ");
+  await button(page, "追加").click();
+  await expect(page.getByText("「つばめ」を登録しました")).toBeVisible();
+  await page.goto("/import");
+  const box = page.getByRole("textbox", { name: "KIF形式の棋譜" });
+  await box.fill(kif);
+  await expect(page.getByText("重複はありません")).toBeVisible();
+  const save = button(page, "保存する");
+  await expect(save).toBeEnabled();
+  // 読み直しの待ち（250ms）のあいだに押す
+  await box.fill("これは棋譜ではありません");
+  await save.click({ force: true, timeout: 200 }).catch(() => {});
+  await expect(page.getByText("棋譜として読み取れませんでした")).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
+});
+test("対局画面：持ち駒は見た目より広い範囲で押せる", async ({ page }) => {
+  await page.goto("/import");
+  await page.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
+  await page.getByRole("radio", { name: /☗/ }).click();
+  await button(page, "保存する").click();
+  for (let i = 0; i < 4; i++) await button(page, "1手進む").click(); // 角を交換した局面
+  const hand = button(page, "先手の持ち駒 角 1枚");
+  const box = (await hand.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(30); // 駒の見た目は22×23
+  expect(box.height).toBeGreaterThanOrEqual(26);
+  await hand.click({ position: { x: 1, y: 1 } }); // 範囲の隅
+  await page.getByTestId("square-5-5").click();
+  await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
+});
 function assertIdentity(text: string) {
   expect(identity(readKif(text))).toBe(identity(readKif(kif)));
 }
