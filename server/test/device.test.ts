@@ -84,6 +84,30 @@ describe('永続ジョブと回数', () => {
     expect((await request(stub, '/v1/jobs', 'POST', base)).data.id).toBe(a.data.id);
     expect((await request(stub, '/v1/jobs', 'POST', {...base, moves: []})).status).toBe(202);
   });
+  it('実行中の中止後に届いた結果を捨てて、次の待ちを処理する', async () => {
+    const stub = await setup();
+    const a = await request(stub, '/v1/jobs', 'POST', base);
+    const b = await request(stub, '/v1/jobs', 'POST', {...base, moves: []});
+    await runInDurableObject(stub, async (instance: any) => {
+      let started!: () => void; let release!: () => void;
+      const called = new Promise<void>(resolve => {started = resolve;});
+      const gate = new Promise<void>(resolve => {release = resolve;});
+      instance.env.STD = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
+        started(); await gate;
+        return Response.json({ply: JSON.parse(init.body as string).ply, score: {kind: 'cp', value: 0}, candidates: [], mate: null});
+      }})};
+      const running = instance.alarm();
+      await called;
+      const cancelled = await instance.fetch(new Request(`https://device/v1/jobs/${a.data.id}`, {method: 'DELETE'}));
+      expect((await cancelled.json()).status).toBe('cancelled');
+      release(); await running;
+    });
+    const cancelled = await request(stub, `/v1/jobs/${a.data.id}`);
+    expect(cancelled.data.next).toBe(0); expect(cancelled.data.results).toEqual([]);
+    expect(cancelled.data.quota.totalRemaining).toBe(9);
+    await tick(stub);
+    expect((await request(stub, `/v1/jobs/${b.data.id}`)).data.status).toBe('completed');
+  });
   it('無料10局を予約込みで制限し、失敗・中止は集計しない', async () => {
     const stub = await setup();
     await sql(stub, 'INSERT INTO usage VALUES (?,9,0)', weekStart(Date.now()));
@@ -174,6 +198,13 @@ describe('永続ジョブと回数', () => {
     expect(failed.data.quota.totalRemaining).toBe(10);
     expect((await request(stub, `/v1/jobs/${a.data.id}?from=-1`)).status).toBe(400);
     expect((await request(stub, '/v1/jobs', 'POST', {...base, moves: [], sente: '名前'})).status).toBe(400);
+  });
+  it('本文サイズ・Content-Typeを入口で制限する', async () => {
+    const stub = await setup();
+    expect((await request(stub, '/v1/jobs', 'POST', {...base, extra: 'x'.repeat(17000)})).status).toBe(413);
+    const response = await stub.fetch('https://device/v1/jobs', {method: 'POST', body: JSON.stringify(base)});
+    expect(response.status).toBe(415);
+    expect((await SELF.fetch('https://api/v1/devices', {method: 'POST', body: '名前'})).status).toBe(400);
   });
   it('後週へは予約と回数を持ち越さない', async () => {
     const stub = await setup();
