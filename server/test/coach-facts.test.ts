@@ -34,15 +34,46 @@ describe('日本語事実の矛盾検査', () => {
   it.each(wrong)('明示的な矛盾を拒否する: %s', text => {
     expect(() => validateOutput(section(text), refs, facts)).toThrow('invalid_output');
   });
+  it.each([
+    'あなたが金を動かした局面ではあなたが有利です。',
+    'あなたが金を動かした局面ではあなたが勝ちました。',
+    'あなたが金を動かし相手が有利になった局面ではあなたが宣言可能です。',
+  ])('後続の主語の矛盾も個別に検査する: %s', text => {
+    expect(() => validateOutput(section(text), refs, facts)).toThrow('invalid_output');
+  });
+  it.each([
+    '相手が有利ではありません。',
+    '相手が有利ではなかったです。',
+    '相手が有利にならないように玉を守りましょう。',
+    '相手が有利なら玉を守りましょう。',
+    '相手が有利だった場合の手順を検討しましょう。',
+    '相手が有利になったと仮定します。',
+    'あなたが悪手を指せば相手が有利です。',
+    '相手が有利になるのを防ぐために受けを確認します。',
+    'あなたが勝ちましたとは言えません。',
+    'あなたが宣言可能でない局面もあります。',
+    '相手が玉を動かさないように備えましょう。',
+    '相手が有利になる可能性があります。',
+    'あなたが勝ちましたというのは誤解です。',
+    '相手が金を動かす練習を行います。',
+  ])('否定・仮定・予防の助言を断定として拒否しない: %s', text => {
+    const ownFavored = {...facts, 参照: facts.参照.map(r => ({...r, 優勢な側: 'あなた'}))};
+    expect(() => validateOutput(section(text), refs, ownFavored)).not.toThrow();
+  });
   it('観戦の呼称・未確定の宣言勝ちを拒否する', () => {
     expect(contradicts('あなたが有利です。', ['1:position'], {...facts, 視点: '観戦'})).toBe(true);
     expect(contradicts('相手玉の安全を考えましょう。', [], {...facts, 視点: '観戦'})).toBe(false);
     expect(contradicts('あなたが勝ちました。', [], {...facts, 終局: {勝敗: '不明'}})).toBe(true);
   });
-  it('資料と自由文のどちらからも生USIと符号付き評価を送らない', async () => {
-    const p = parseCoach({...await payload(), question: '7g7f の +600 と -300 は？'});
+  it('解析事実に生USIや評価値を含めず、利用者が書いた数値は表記を変えずに保持する', async () => {
+    const numbers = '評価は＋６００、−300、+ 500、+600、-300です';
+    const p = parseCoach({...await payload(), question: '7g7f の ' + numbers,
+      profile: {practice: [numbers], goal: numbers}, history: [{role: 'user', content: numbers}, {role: 'assistant', content: numbers}]});
     const sent = JSON.parse(messages(p, refs, facts)[1].content);
-    expect(JSON.stringify(sent)).not.toMatch(/7g7f|startpos|\+600|-300|"score"|"value"/);
+    expect(JSON.stringify(sent)).not.toMatch(/7g7f|startpos|"score"|"value"/);
+    expect(sent.question).toBe('（指し手は参照で確認） の ' + numbers);
+    expect(sent.profile).toEqual({practice: [numbers], goal: numbers});
+    expect(sent.history).toEqual(p.history);
     expect(sent.facts).toEqual(facts);
   });
 });
@@ -99,6 +130,26 @@ describe('依頼と取得の分離', () => {
       expect(output.status).toBe('cancelled'); expect(output.sections).toBeUndefined();
       expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
     } finally {release(); spy.mockRestore();}
+  }));
+  it('同期要求も実行前にwatchdogを永続化し、再生成後のalarmだけで入力を削除する', async () => fixture(async state => {
+    await state.storage.deleteAlarm();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(r => {release = r;});
+    const called = new Promise<void>(r => {entered = r;});
+    const c = new Coach(state.storage, config, 'device', () => true, async () => {entered(); await gate; return undefined;});
+    const p = await payload(), running = c.fetch(post(p, false));
+    await called;
+    let clock: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const {deadline} = state.storage.sql.exec<{deadline: number}>('SELECT deadline FROM coach_requests WHERE id=?', p.requestId).one();
+      expect(await state.storage.getAlarm()).toBe(deadline);
+      clock = vi.spyOn(Date, 'now').mockReturnValue(deadline + 1);
+      await new Coach(state.storage, config, 'device', () => true).alarm();
+      expect(state.storage.sql.exec('SELECT payload FROM coach_tasks WHERE id=?', p.requestId).one().payload).toBeNull();
+      expect(state.storage.sql.exec('SELECT status FROM coach_requests WHERE id=?', p.requestId).one().status).toBe('failed');
+      expect(c.quota().reserved).toBe(0);
+      release(); expect((await running).status).toBe(504);
+    } finally {release(); await running; clock?.mockRestore();}
   }));
   it('実行途中のプロセス消失は再送せず期限で予約を返す。保存結果は七日で削除', async () => fixture(async state => {
     const c = new Coach(state.storage, config, 'device', () => true), p = await payload();

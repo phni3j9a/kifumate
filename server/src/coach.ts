@@ -105,7 +105,7 @@ export function references(results: any[]): Reference[] {
 }
 export const SYSTEM_PROMPT = prompt;
 function prose(value: string) {
-  return value.replace(/(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/g, '（指し手は参照で確認）').replace(/[+-]\d+/g, '（評価は資料で確認）');
+  return value.replace(/(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/g, '（指し手は参照で確認）');
 }
 export function messages(input: CoachInput, _refs: Reference[], facts?: CoachFacts) {
   return [{role: 'system', content: SYSTEM_PROMPT}, {role: 'user', content: JSON.stringify({
@@ -266,8 +266,8 @@ export class Coach {
       await verifyAnalysis(this.env.COACH_SIGNING_KEY, this.device, input.input, input.results, input.proof);
       const asynchronous = request.headers.get('Prefer')?.includes('respond-async') ?? false;
       const timeout = timeoutMs(this.env), accepted = Date.now();
-      // 保存前にalarmを予約し、応答やプロセスが失われても一度だけ実行する。
-      if (asynchronous) await this.wake(accepted + 100);
+      // 同期も保存前にwatchdogを永続化し、プロセス消失後の入力削除を保証する。
+      await this.wake(asynchronous ? accepted + 100 : accepted + timeout);
       this.storage.transactionSync(() => {
         // 本文受信・署名検証の待機中に更新された権利を、確定直前に再確認する。
         if (!this.paid()) throw new ApiError(403, 'paid_required');

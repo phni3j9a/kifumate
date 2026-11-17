@@ -44,8 +44,7 @@ def references(results):
 
 
 def prose(value):
-    value = re.sub(r'(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])', '（指し手は参照で確認）', value)
-    return re.sub(r'[+-]\d+', '（評価は資料で確認）', value)
+    return re.sub(r'(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])', '（指し手は参照で確認）', value)
 
 
 def body(payload, provider, prompt=None, reasoning_effort="none", max_tokens=2000, api="chat"):

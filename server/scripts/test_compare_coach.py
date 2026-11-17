@@ -25,6 +25,18 @@ class ComparisonTest(unittest.TestCase):
             self.assertEqual(data["facts"]["参照"][0]["id"], "0:position")
         self.assertEqual(body(payload, "openai", "旧プロンプト")["messages"][0]["content"], "旧プロンプト")
 
+    def test_user_numbers_are_preserved_separately_from_analysis_facts(self):
+        numbers = '評価は＋６００、−300、+ 500、+600、-300です'
+        payload = {"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": {"kind": "cp", "value": -600}, "candidates": [], "mate": None}]},
+                   "perspective": "sente", "profile": {"practice": [numbers], "goal": numbers}, "style": {},
+                   "history": [{"role": "user", "content": numbers}], "question": '7g7f の ' + numbers}
+        sent = json.loads(body(payload, 'deepseek')["messages"][1]["content"])
+        self.assertEqual(sent["question"], '（指し手は参照で確認） の ' + numbers)
+        self.assertEqual(sent["profile"], payload["profile"])
+        self.assertEqual(sent["history"], payload["history"])
+        self.assertNotIn('-600', json.dumps(sent["facts"]))
+        self.assertNotIn('score', json.dumps(sent["facts"]))
+
     def test_max_reasoning_and_output_reservation(self):
         payload = {"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                    "perspective": "observer", "profile": {}, "style": {}, "history": []}
