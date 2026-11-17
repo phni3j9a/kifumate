@@ -48,6 +48,7 @@ def main():
         started = time.monotonic()
         payload = {'initial': 'startpos', 'moves': moves, 'mode': mode}
         results = []
+        server_seconds = None
         if args.direct:
             for ply in range(len(moves) + 1):
                 results.append(call(args.url + '/analyze', 'POST', {**payload, 'ply': ply}))
@@ -65,6 +66,7 @@ def main():
                 results.extend(progress['results'])
                 cursor = progress['next']
                 if progress['status'] == 'completed':
+                    server_seconds = (progress['finishedAt'] - progress['createdAt']) / 1000
                     break
                 if progress['status'] in ('failed', 'cancelled') or time.monotonic() >= deadline:
                     raise RuntimeError(f"解析未完了: {progress['status']}, {progress['error']}")
@@ -76,7 +78,8 @@ def main():
         encoded = json.dumps(results)
         assert not any(name.lower() in encoded.lower() for name in ('yaneura', 'suisho', '水匠', 'やねうら'))
         print(json.dumps({'mode': mode, 'plies': len(moves), 'positions': len(results),
-                          'seconds': round(time.monotonic() - started, 3), 'resultBytes': len(encoded.encode()),
+                          'seconds': round(time.monotonic() - started, 3), 'serverSeconds': server_seconds,
+                          'resultBytes': len(encoded.encode()),
                           'matePositions': [r['ply'] for r in results if r['mate']],
                           'duplicate': duplicate, 'jobId': job_id}, ensure_ascii=False), flush=True)
 

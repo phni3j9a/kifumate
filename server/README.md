@@ -67,6 +67,7 @@ Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析を実�
 - 詰みスコアは`kind: "mate"`、符号も先手視点、`winner: "sente" | "gote"`で勝つ側を示します。距離不明の`+ / -`は`value: null`。すでに詰んだ局面は距離0です。
 - `score.kind === "mate"`は探索スコアであり、詰みの証明ではありません。画面で「詰みあり」と出せるのは`mate`があるときだけです。
 - 証明結果は`mate: {plies: 1 | 3, pv: [...], branches: [{reply, mate}, ...]}`。`branches`は初手に対する全応手とその詰め手です。`null`は今回証明できていないという意味で、詰みなしの断定ではありません。王手されている局面はこの短手数検出の対象外です。
+- 入玉宣言は**27点ルール（`EnteringKingRule=CSARule27`）**です。`bestmove win`は`score: {kind: "declaration", value: null, winner: "sente" | "gote"}`とし、候補は`declarationWin: true, pv: []`で`move`を持ちません。通常の着手や証明済みの詰みではないので`mate`はnullです。
 - 候補がない終局では`candidates: []`。非詰みの終局で探索値がなければ`score: null`です。
 
 主なエラー：400（入力・カーソル）、401（端末未登録／認証）、403（精密に有料権利が必要）、404、413（本文過大）、415（JSON必須）、429（週上限、`quota.resetsAt`付き）。内部の例外やUSIの`id`・`info string`はAPIに返しません。
@@ -103,7 +104,12 @@ cp /home/server/projects/sekirei-weight/data/raw/teacher/suisho11plus/ee23379ab3
 
 Dockerfileは[やねうら王公式ソースのV9.70コミット](https://github.com/yaneurao/YaneuraOu/commit/76d58ef2e4cf64116784f41fd4816425ab6817ee)を固定し、公式の生成スクリプトで該当ヘッダーを作り、`YANEURAOU_ENGINE_SFNN_halfka2_1024_7_64_k3k3`でビルドします。
 
-[Cloudflare公式の対応イメージ](https://developers.cloudflare.com/containers/get-started/#the-container-image)は`linux/amd64`です。一方、AVX2/BMI2などの拡張命令の保証は公式資料では確認できませんでした。したがって`TARGET_CPU=OTHER`（`NO_SSE`スカラー実装）と`-march=x86-64 -mtune=generic`を選び、x86-64ベースライン以上を要求しません。公式Makefileの`NO_SSE`ターゲットは32bit用なので指定しません。AVX2専用ビルドより遅くなり得ますが、命令セットの非互換を避けます。stagingの実機でも両モードの動作を確認しました。
+[Cloudflare公式の対応イメージ](https://developers.cloudflare.com/containers/get-started/#the-container-image)は`linux/amd64`です。将来の配置先までAVX2/BMI2を保証する資料はないため、**互換版とAVX2版を同梱し、起動時に実機の命令セットを確認**します。
+
+- 互換版：`TARGET_CPU=OTHER`（`NO_SSE`スカラー実装）、`-march=x86-64 -mtune=generic`。公式Makefileの`NO_SSE`ターゲットは32bit用なので使いません。
+- 高速版：同じコミット・アーキテクチャの`TARGET_CPU=AVX2`。公式Makefileの`corei7-avx`とBMI1/BMI2の前提に合わせ、`avx avx2 xsave bmi1 bmi2 popcnt ssse3 sse4_1 sse4_2 aes pclmulqdq cx16`をすべて必要とします。
+- `/proc/cpuinfo`の**全vCPUの共通flags**が揃う場合のみAVX2版を使います。取得失敗・欠落・1 CPUでも非対応なら互換版へ戻します。CPUモデル名だけでは判断しません。
+- 両版は同じ評価関数・`FV_SCALE=40`・探索設定を使用します。時間制限は変えず、AVX2で同時間内の探索量を増やします。実機のモデル／flagsと局面数・深さの比較は[measurement.md](docs/measurement.md)に記録しています。
 
 中継はGPL-3.0-only、cshogiおよびエンジンはGPL-3.0系です。`container/LICENSE`が本文です。Worker部分と評価関数の利用条件とは別です。イメージを第三者へ配布する場合はソース提供を含むGPLおよび評価関数の条件を別途確認してください。既存の別アプリのコードは参照・コピーしていません。
 
@@ -120,6 +126,10 @@ npm run dev
 ```
 
 中継は外部に直接公開しません。ローカルのポートも上記のようにloopbackへ限定してください。テストの`measure.py`は`mock/data/sample-game.json`から指し手だけを抽出します。
+
+CPU確認・探索量比較には、HTTP非公開の`container/benchmark.py`を同じイメージ内で実行します。`--cpu-only`でモデル・flags・自動選択結果、`--sfen '<局面>' --modes std`で互換版/AVX2版の3反復中央値を出力します。各探索は新規プロセス・空ハッシュで、バイナリの順序を反復ごとに入れ替えます。ローカルは`docker run --rm --cpus=1 ... python /app/benchmark.py ...`、精密は2 CPUです。stagingでは公式のContainer実行APIを使用してください。
+
+今回のWrangler SSHは稼働中でもWebSocket 400となったため、一時的なsecret保護・staging限定入口から`ctx.container.exec(['python', '/app/benchmark.py', ...])`で比較しました。任意コマンドは受け付けず、固定ベンチだけを実行しました。比較中だけ停止猶予を90秒へ延長し、終了後に入口・RPC・secretを削除して10秒へ戻しました。診断用HTTP APIは残していません。
 
 ## stagingデプロイ・実測
 
