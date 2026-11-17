@@ -100,7 +100,7 @@ export class RealtimeSessions {
     this.abort?.abort(); this.account(this.now());
     this.sql.exec("UPDATE rt_sessions SET charged=NULL,status='paused',error='analysis_unavailable' WHERE owner=?", session.owner);
   }
-  async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void): Promise<Response> {
+  async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void, checkPaid?: () => Promise<boolean>): Promise<Response> {
     // 本文待機中も同じ端末の最新権利を参照し、完了した端末の情報は保持しない。
     const entitlement = this.entitlements.get(owner) ?? {paid, pending: 0};
     entitlement.paid = paid; entitlement.pending++;
@@ -133,6 +133,7 @@ export class RealtimeSessions {
       if ('mode' in position) throw new ApiError(400, 'invalid_input');
       // readJson は await するため、ここでも最新の貸与・権利・期限を確認する。
       await this.expire();
+      if (checkPaid && !await checkPaid()) entitlement.paid = false;
       if (!entitlement.paid) throw new ApiError(403, 'paid_required');
       const current = this.session(owner), active = this.active();
       if (active && active.owner !== owner) throw new ApiError(409, 'realtime_busy');

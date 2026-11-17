@@ -1,3 +1,5 @@
+import { Invitations, limit, type Entitlement } from './invitations';
+export { Invitations } from './invitations';
 import { Coach, coachConfiguration, signAnalysis, type CoachEnv } from './coach';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions } from './realtime';
@@ -9,6 +11,12 @@ export interface Env extends CoachEnv {
   STD: DurableObjectNamespace<StandardContainer>;
   PRECISE: DurableObjectNamespace<PreciseContainer>;
   REALTIME: DurableObjectNamespace<RealtimeContainer>;
+  INVITATIONS: DurableObjectNamespace<Invitations>;
+  INVITE_ADMIN_KEY?: string;
+  REGISTRATION_LIMITER?: RateLimit;
+  API_LIMITER?: RateLimit;
+  WRITE_LIMITER?: RateLimit;
+  INVITE_LIMITER?: RateLimit;
   REALTIME_IDLE_MS?: string;
   ENVIRONMENT: string;
   ALLOW_DEV_PAID: string;
@@ -63,7 +71,10 @@ export class RealtimeContainer extends StandardContainer {
   async fetch(request: Request): Promise<Response> {
     const owner = request.headers.get('X-Realtime-Owner');
     if (!owner || !/^[a-f0-9]{64}$/.test(owner)) return json({error: 'unauthorized'}, 401);
-    return this.sessions.fetch(request, owner, request.headers.get('X-Dev-Paid') === '1', work => this.ctx.waitUntil(work));
+    const devPaid = request.headers.get('X-Dev-Entitlement') === '1' && ['local', 'staging'].includes(this.env.ENVIRONMENT) && this.env.ALLOW_DEV_PAID === 'true';
+    const hash = request.headers.get('X-Device-Hash');
+    return this.sessions.fetch(request, owner, request.headers.get('X-Dev-Paid') === '1', work => this.ctx.waitUntil(work),
+      async () => devPaid || (!!hash && (await this.env.INVITATIONS.getByName('registry').entitlement(hash)).paid));
   }
 }
 
@@ -77,6 +88,7 @@ export class Device extends DurableObject<Env> {
   private busy = false;
   private coach: Coach;
   private coachConfig: CoachEnv;
+  private entitlement: Entitlement = {paid: false, source: null, expiresAt: null};
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.coachConfig = coachConfiguration(env);
@@ -89,7 +101,7 @@ export class Device extends DurableObject<Env> {
       });
       if (!response.ok) throw new ApiError(502, 'facts_unavailable');
       return await response.json();
-    });
+    }, () => this.refreshEntitlement());
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL,
@@ -103,10 +115,17 @@ export class Device extends DurableObject<Env> {
   private rows<T extends Record<string, SqlStorageValue>>(sql: string, ...params: SqlStorageValue[]): T[] {
     return this.ctx.storage.sql.exec<T>(sql, ...params).toArray();
   }
-  private paid(): boolean {
-    // shortcut: ストア検証は未実装。公開前に購入権利検証へ置き換える。production では常に無効。
+  private async refreshEntitlement() {
+    const hash = this.rows<{value: string}>("SELECT value FROM meta WHERE key='hash'")[0]?.value;
+    this.entitlement = hash && this.env.INVITATIONS ? await this.env.INVITATIONS.getByName('registry').entitlement(hash)
+      : {paid: false, source: null, expiresAt: null};
+  }
+  private devPaid(): boolean {
     return ['local', 'staging'].includes(this.env.ENVIRONMENT) && this.env.ALLOW_DEV_PAID === 'true'
       && this.rows<{value: string}>("SELECT value FROM meta WHERE key='paid'")[0]?.value === '1';
+  }
+  private paid(): boolean {
+    return this.devPaid() || (this.entitlement.paid && (this.entitlement.expiresAt === null || this.entitlement.expiresAt > Date.now()));
   }
   private quota(week = weekStart(Date.now())) {
     const paid = this.paid();
@@ -156,11 +175,26 @@ export class Device extends DurableObject<Env> {
       }
       if (!this.rows('SELECT key FROM meta WHERE key=?', 'registered').length) throw new ApiError(401, 'unauthorized');
       this.ctx.storage.sql.exec("INSERT INTO meta VALUES ('paid',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", request.headers.get('X-Dev-Paid') === '1' ? '1' : '0');
+      await this.refreshEntitlement();
+      if (url.pathname === '/v1/entitlements' && request.method === 'GET') return json({...this.entitlement, paid: this.paid(), source: this.devPaid() ? 'development' : this.entitlement.source});
+      if (url.pathname === '/v1/invitations/redeem' && request.method === 'POST') {
+        const hash = this.rows<{value: string}>("SELECT value FROM meta WHERE key='hash'")[0].value;
+        const registry = this.env.INVITATIONS.getByName('registry');
+        if (!await registry.attempt(hash, request.headers.get('X-Invite-IP') ?? 'unknown')) throw new ApiError(429, 'invite_rate_limited');
+        const input = await readJson(request, 1024) as Record<string, unknown>;
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || typeof input.code !== 'string' || !/^[a-f0-9]{64}$/.test(input.code)) throw new ApiError(400, 'invalid_input');
+        const result = await registry.redeem(hash, await sha256(input.code));
+        if ('error' in result) throw new ApiError(result.error === 'invite_full' ? 409 : 400, result.error);
+        this.entitlement = result;
+        return json(result);
+      }
       if (url.pathname === '/v1/coach' || /^\/v1\/coach\/[a-f0-9-]{36}$/.test(url.pathname)) return await this.coach.fetch(request);
       if (url.pathname === '/v1/realtime' || /^\/v1\/realtime\/[0-9a-f-]{36}$/.test(url.pathname)) {
         const headers = new Headers(request.headers);
         headers.set('X-Realtime-Owner', this.ctx.id.toString());
         headers.set('X-Dev-Paid', this.paid() ? '1' : '0');
+        headers.set('X-Dev-Entitlement', this.devPaid() ? '1' : '0');
+        headers.set('X-Device-Hash', this.rows<{value: string}>("SELECT value FROM meta WHERE key='hash'")[0].value);
         // 全局解析と独立した固定2枠。枠内は一端末へ排他的に貸与し、待ち行列を作らない。
         const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
         return await this.env.REALTIME.getByName('slot-' + slot).fetch(new Request(request, {headers}));
@@ -171,6 +205,7 @@ export class Device extends DurableObject<Env> {
       }
       if (url.pathname === '/v1/jobs' && request.method === 'POST') {
         const input = parseInput(await readJson(request));
+        await this.refreshEntitlement();
         const fingerprint = await sha256(JSON.stringify(input));
         // 先に alarm を永続化し、ジョブ保存直後のプロセス消失でも処理を起こす。
         await this.ctx.storage.setAlarm(Date.now() + 100);
@@ -211,6 +246,7 @@ export class Device extends DurableObject<Env> {
     if (this.busy) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; }
     this.busy = true;
     try {
+      await this.refreshEntitlement();
       await this.coach.alarm();
       this.prune(Date.now());
       const job = this.rows<Job & Record<string, SqlStorageValue>>("SELECT * FROM jobs WHERE status IN ('running','queued') ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,created,rowid LIMIT 1")[0];
@@ -272,7 +308,22 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(request.url);
+      // ネイティブアプリ専用。CORSを許可せず、ブラウザ由来の処理自体も拒否する。
+      if (env.ENVIRONMENT === 'production' && (request.headers.has('Origin') || request.method === 'OPTIONS')) throw new ApiError(403, 'browser_forbidden');
+      const ip = await sha256(request.headers.get('CF-Connecting-IP') ?? 'unknown');
+      if (url.pathname === '/admin/invitations' || /^\/admin\/invitations\/[a-f0-9]{64}$/.test(url.pathname)) {
+        await limit(env.REGISTRATION_LIMITER, 'admin:' + ip, env.ENVIRONMENT);
+        if (!env.INVITE_ADMIN_KEY || await sha256(request.headers.get('Authorization') ?? '') !== await sha256('Bearer ' + env.INVITE_ADMIN_KEY)) throw new ApiError(401, 'unauthorized');
+        const registry = env.INVITATIONS.getByName('registry');
+        if (request.method === 'DELETE' && url.pathname !== '/admin/invitations') return json(await registry.revoke(url.pathname.split('/').pop()!));
+        if (request.method !== 'POST' || url.pathname !== '/admin/invitations') throw new ApiError(404, 'not_found');
+        const input = await readJson(request, 1024) as any;
+        if (!input || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'expiresAt,hash,maxDevices') throw new ApiError(400, 'invalid_input');
+        const result = await registry.create(input.hash, input.maxDevices, input.expiresAt);
+        return json(result, 'error' in result ? 400 : 201);
+      }
       if (url.pathname === '/v1/devices' && request.method === 'POST') {
+        await limit(env.REGISTRATION_LIMITER, 'register:' + ip, env.ENVIRONMENT);
         if (request.body) {
           const reader = request.body.getReader();
           while (true) {
@@ -281,7 +332,7 @@ export default {
             if (value.byteLength) { await reader.cancel(); throw new ApiError(400, 'body_not_allowed'); }
           }
         }
-        // shortcut: 端末実在性・発行数制限は未実装。公開前に App Attest / Play Integrity と入口のレート制限を追加する。
+        // shortcut: 端末実在性は未検証。一般公開前に App Attest / Play Integrity を追加する。
         const bytes = crypto.getRandomValues(new Uint8Array(32));
         const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
         const hash = await sha256(token);
@@ -289,19 +340,34 @@ export default {
         if (!registered.ok) throw new ApiError(503, 'registration_unavailable');
         return json({token}, 201);
       }
-      if (!['/v1/jobs', '/v1/quota', '/v1/realtime', '/v1/coach'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime|coach)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
+      if (!['/v1/jobs', '/v1/quota', '/v1/realtime', '/v1/coach', '/v1/entitlements', '/v1/invitations/redeem'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime|coach)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
       const auth = /^Bearer ([0-9a-f]{64})$/.exec(request.headers.get('Authorization') ?? '');
       if (!auth) throw new ApiError(401, 'unauthorized');
       const hash = await sha256(auth[1]);
+      await limit(env.API_LIMITER, hash, env.ENVIRONMENT);
+      const family = url.pathname.split('/')[2];
+      if (!['GET', 'DELETE'].includes(request.method)) await limit(env.WRITE_LIMITER, hash + ':' + family, env.ENVIRONMENT);
+      if (url.pathname === '/v1/invitations/redeem') {
+        await limit(env.INVITE_LIMITER, 'device:' + hash, env.ENVIRONMENT);
+        await limit(env.INVITE_LIMITER, 'ip:' + ip, env.ENVIRONMENT);
+      }
       const headers = new Headers(request.headers); headers.delete('Authorization');
+      headers.set('X-Invite-IP', ip);
       // secret 更新時に既存 DO の env が残っても、入口の最新権利で上書きする。
       const paid = ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true'
         && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
       headers.set('X-Dev-Paid', paid ? '1' : '0');
       headers.set('X-Coach-Config', JSON.stringify(coachConfiguration(env)));
-      return await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
+      const response = await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
+      if (response.status === 429 && family === 'invitations') response.headers.set('Retry-After', '900');
+      console.log(JSON.stringify({event: 'api', family, method: request.method, status: response.status}));
+      return response;
     } catch (error) {
-      return json({error: error instanceof ApiError ? error.code : 'internal_error'}, error instanceof ApiError ? error.status : 500);
+      const status = error instanceof ApiError ? error.status : 500;
+      console.warn(JSON.stringify({event: 'api_rejected', status, error: error instanceof ApiError ? error.code : 'internal_error'}));
+      const response = json({error: error instanceof ApiError ? error.code : 'internal_error'}, status);
+      if (status === 429) response.headers.set('Retry-After', '60');
+      return response;
     }
   },
 } satisfies ExportedHandler<Env>;
