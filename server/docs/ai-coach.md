@@ -64,7 +64,7 @@ unset OPENAI_API_KEY DEEPSEEK_API_KEY
 
 **全モデル・全指示文で同じ予算台帳を共有**してください。呼び出し前に入力UTF-8バイト数＋余裕と出力上限から保守的な費用を予約し、usage取得後に実費推計へ置換します。合計上限は最大$3、次の予約が超える場合は送信しません。同時起動はファイルロックで直列化。HTTP失敗・タイムアウト・usage不明は予約を残して停止し、自動再試行しません。台帳を削除・分割して予算をリセットしないでください。単価・推計上限を誤れば請求額の保証にはならないので、台帳と提供元の使用量も確認します。
 
-出力・台帳は0600。応答は呼び出しごとに逐次保存し、途中で失敗してもそれまでのusageを残します。既存出力は上書きせず、例外本文・キー・HTTPヘッダーは保存しません。通信待ちのtimeoutは45秒（ソケット待ちの上限で、Workerの壁時計期限とは別）・出力2000トークン・応答128 KiB、リダイレクト禁止。生の応答は `choices / usage / model / id` だけを保存します。直接比較なのでWorkerの署名照合・後処理は通らず、出力検査は下記のように別途行います。
+出力・台帳は0600。応答は呼び出しごとに逐次保存し、途中で失敗してもそれまでのusageを残します。既存出力は上書きせず、例外本文・キー・HTTPヘッダーは保存しません。通信待ちのtimeoutは既定45秒（`--timeout`、ソケット待ちの上限で、Workerの壁時計期限とは別）・出力既定2000トークン（`--max-tokens`、推論も含む）・応答上限8 MiB、リダイレクト禁止。推論量は `--reasoning-effort` で指定し、既定の `none` は維持しています。生の応答は `choices / usage / model / id` だけを保存します。直接比較なのでWorkerの署名照合・後処理は通らず、出力検査は下記のように別途行います。
 
 ### 評価する観点
 
@@ -229,4 +229,56 @@ JS
 1. **形式保証と意味の正確さを別々に改善する**。refs必須の厳格な構造化出力や、自由文の通常表現を過剰拒否しない検査を検討。ただしこれは今回未実装・未比較。先手／後手・評価変化・宣言勝者・詰みの側の誤りは、JSONの厳格化だけでは防げません。
 2. 新しい指示文を採用する前に全条件を再比較。現行共有指示文を、この修正案で置き換えないこと。誤りを避けすぎて一般論だけになる問題と、モックが求める具体性の両立も必要です。
 3. 別の対局・512手に近い棋譜・長い履歴・自然な複数往復・失敗時・各条件三反復以上。今回2局は固定序盤が共通で、少数の意図的な難条件を含む予備比較です。統計的な優劣・人名ゼロ・本番の最大待ち時間を証明しません。
-4. 採用判断後、権限を分離したstagingで同設定を検証し、アプリ表示・中止・回数確定・通信断・体感待ち時間を確認。**今回は依頼どおりstaging実モデル検証を行っていません**。Issue #12を完了扱いで閉じる比較ではありません。
+4. 採用判断後、権限を分離したstagingで同設定を検証し、アプリ表示・中止・回数確定・通信断・体感待ち時間を確認。**この直接比較では依頼どおりstaging実モデル検証を行っていません**。Issue #12を完了扱いで閉じる比較ではありません。
+
+## 推論最大での再比較（2026-11-17）
+
+### 最大設定の確認と実行方法
+
+公式資料を同日に確認しました。
+
+- [Lunaモデル資料](https://developers.openai.com/api/docs/models/gpt-6-luna) は `none / low / medium / high / xhigh / max` を列挙し、最大は **`max`** です。ただし、実際のChat Completionsは `reasoning_effort:max` をHTTP 400 `unsupported_value` で拒否しました。診断を含め二回で停止し、自動再試行はしていません。**Responses APIの `reasoning:{effort:"max"}` は利用可能**でした。Restrictedキーでの権限不足は発生していません。
+- [DeepSeek思考モード](https://api-docs.deepseek.com/guides/thinking_mode/) と [Chat Completions仕様](https://api-docs.deepseek.com/api/create-chat-completion/) の最大は **`reasoning_effort:max`**。`xhigh` は `high` に対応するため最大ではありません。`max` 自体がthinkingを有効にし、別の `thinking` 指定は不要です。現行仕様はthinkingと `response_format:{type:"json_object"}` の併用を許容するので、JSONモードを外したり、JSONの自動修復を入れたりしていません。
+- OpenAIのResponsesでは `text.format:{type:"json_object"}`、`max_output_tokens` を指定します。指示文の全文と利用者メッセージはChatと同一です。usageの `input_tokens / output_tokens / input_tokens_details` を費用計算時だけ正規化し、原応答と原usageは保存します。**本番WorkerはChat Completionsのまま**です。
+- 主比較は **8条件×2反復×2モデル×旧指示文／修正案**。推論込みの出力上限 **65,536トークン**、ソケット待ち **900秒**、応答上限 **8 MiB**。出力上限に依存した保守的な予約を全呼び出しで共有し、累計予算は **$3** のままです。temperatureなどは未指定、非ストリーミング・逐次実行です。これらは比較専用の値であり、Workerの設定値は変更していません。
+- 事前のResponses診断は32,768トークン・300秒で一件成功（126.380秒・推論15,945トークン・$0.008544425）。次の呼び出し中にローカル実行コマンドの360秒制限でプロセスが終了したため、以降は背景実行へ切り替えました。完了不明分は予約を維持し、主比較の回答数には含めません。HTTP失敗二件も含め、台帳をリセットしていません。
+
+### 入力の再構築と比較の限界
+
+前回の生データは削除済みで、文書には質問・プロフィール・固定履歴の全文や全候補が残っていません。**前回とバイト単位で同じ入力を復元した、とは主張できません。** 同じ二つの棋譜のUSI列・開始局面・8条件・視点・重点・詳しさ・精密解析設定を再構築し、今回の四群には同じ `cases.json` を使います。質問・目標・固定履歴の再構築全文は生成スクリプトで追跡できます。前回の入力ハッシュとの一致や、推論量だけを原因とする改善の証明はできません。実エンジンの時間制限探索にも再現揺れがあります。
+
+新しい [build_coach_cases.py](../scripts/build_coach_cases.py) は、モックから指し手だけを読み、現行中継とローカルDockerイメージの実エンジンで再解析します。名前・モック評価・メタ情報は使いません。前回同様、精密1000ms・Threads 2・MultiPV 3、`--network none --cpus=2 --memory=2g`。専用コンテナは `--rm` で終了し、他のコンテナやstagingには触れません。
+
+再解析は1局目86局面 **84.243秒**、2局目96局面 **93.109秒**、宣言局面 **0.002秒**。確認済み詰みは同じ80手後、探索のみの詰みは同じ74手後から切り出し、参照plyを0に戻しました。生成時にこの区別と宣言勝者をassertで確認しています。両局とも最後はwinner=sente、後手の条件では負ける側が「あなた」です。前回例にある局面のスコアは再解析で変動します（例：1局目30手後は+801、2局目44→45手後は+928→-467）。
+
+```sh
+cd server
+mkdir -p container/eval
+cp /home/server/projects/kifumate/server/container/eval/nn.bin container/eval/nn.bin
+# 出力ディレクトリが存在すると停止。実解析・ケースを0600で保存する。
+umask 077
+python3 scripts/build_coach_cases.py --output-dir .local/coach-reasoning
+set -a
+. ~/.config/kifumate/llm.env
+set +a
+for variant in baseline revised; do
+  prompt=src/coach-prompt.txt
+  [ "$variant" != revised ] || prompt=docs/coach-prompt-candidate.txt
+  python3 scripts/compare_coach.py --provider openai --openai-api responses \
+    --request-file .local/coach-reasoning/cases.json --runs 2 --prompt-file "$prompt" \
+    --output ".local/coach-reasoning/max-$variant-openai.json" \
+    --reasoning-effort max --max-tokens 65536 --timeout 900 \
+    --input-usd-per-million 0.10 --cached-usd-per-million 0.01 \
+    --cache-write-usd-per-million 0.125 --output-usd-per-million 0.50 \
+    --budget-file .local/coach-reasoning/budget.jsonl --budget-usd 3
+  python3 scripts/compare_coach.py --provider deepseek \
+    --request-file .local/coach-reasoning/cases.json --runs 2 --prompt-file "$prompt" \
+    --output ".local/coach-reasoning/max-$variant-deepseek.json" \
+    --reasoning-effort max --max-tokens 65536 --timeout 900 \
+    --input-usd-per-million 0.30 --cached-usd-per-million 0.006 --output-usd-per-million 1.20 \
+    --budget-file .local/coach-reasoning/budget.jsonl --budget-usd 3
+done
+unset OPENAI_API_KEY DEEPSEEK_API_KEY
+```
+
+実行済みの出力を上書きせず、再実行時も同じ台帳を共有してください。上記はpeak単価での保守的な予算管理です。DeepSeekは [公式料金](https://api-docs.deepseek.com/quick_start/pricing) の実行時間帯の単価でも精算し、予約枠との差は結果に記録します。OpenAI料金は前回同様、入力$0.10／読込$0.01／書込$0.125／出力$0.50（100万トークンあたり）。**推論トークンは出力トークンの内数として課金**し、無料扱いも二重加算もしません。Cloudflare・税・為替は含みません。

@@ -11,6 +11,7 @@ from pathlib import Path
 import statistics
 import time
 import uuid
+from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROVIDERS = {
@@ -37,14 +38,27 @@ def references(results):
     return refs
 
 
-def body(payload, provider, prompt=None):
+def body(payload, provider, prompt=None, reasoning_effort="none", max_tokens=2000, api="chat"):
     _, model, _, token_parameter = PROVIDERS[provider]
     a = payload["analysis"]
     data = {"game": {"initial": a["initial"], "moves": a["moves"]}, "analysis": references(a["results"]),
             "perspective": payload["perspective"], "profile": payload["profile"], "style": payload["style"],
             "history": payload["history"], "question": payload.get("question", "対局を振り返ってください")}
-    return {"model": model, "messages": [{"role": "system", "content": PROMPT.read_text() if prompt is None else prompt}, {"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}],
-            "stream": False, "reasoning_effort": "none", "response_format": {"type": "json_object"}, token_parameter: 2000}
+    messages = [{"role": "system", "content": PROMPT.read_text() if prompt is None else prompt},
+                {"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}]
+    if api == "responses":
+        return {"model": model, "input": messages, "stream": False, "reasoning": {"effort": reasoning_effort},
+                "text": {"format": {"type": "json_object"}}, "max_output_tokens": max_tokens}
+    return {"model": model, "messages": messages, "stream": False, "reasoning_effort": reasoning_effort,
+            "response_format": {"type": "json_object"}, token_parameter: max_tokens}
+
+
+def cost_usage(data, api):
+    usage = data["usage"]
+    if api == "responses":
+        return {"prompt_tokens": usage["input_tokens"], "completion_tokens": usage["output_tokens"],
+                "prompt_tokens_details": usage.get("input_tokens_details")}
+    return usage
 
 
 def cost_usd(usage, prices):
@@ -61,7 +75,8 @@ def cost_usd(usage, prices):
 def reserve_usd(request_body, prices):
     # shortcut: tokenizer依存を避けUTF-8全バイト数+余裕を入力上限にする。巨大入力の比較時は公式tokenizerへ。
     incoming = len(json.dumps(request_body, ensure_ascii=False).encode()) + 4096
-    return (incoming * max(prices[0], prices[1], prices[3]) + 2000 * prices[2]) / 1_000_000
+    outgoing = request_body.get("max_output_tokens", request_body.get("max_completion_tokens", request_body.get("max_tokens", 2000)))
+    return (incoming * max(prices[0], prices[1], prices[3]) + outgoing * prices[2]) / 1_000_000
 
 
 def ledger_total(events):
@@ -95,6 +110,10 @@ def main():
     parser.add_argument("--output", type=Path, help="応答も含め0600で逐次保存。既存ファイルは上書きしない")
     parser.add_argument("--prompt-file", type=Path, default=PROMPT)
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--openai-api", choices=["chat", "responses"], default="chat")
+    parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high", "xhigh", "max"], default="none")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="推論を含む出力上限")
+    parser.add_argument("--timeout", type=float, default=45, help="ソケット待ち上限（秒）")
     parser.add_argument("--input-usd-per-million", type=float)
     parser.add_argument("--cached-usd-per-million", type=float)
     parser.add_argument("--output-usd-per-million", type=float)
@@ -115,9 +134,17 @@ def main():
         parser.error("provider、request-file、output、budget-file と runs=1〜20 が必要です")
     if any(p is None or not math.isfinite(p) or p < 0 for p in prices) or not 0 < args.budget_usd <= 3:
         parser.error("公式単価（入力・キャッシュ・出力）と budget-usd=0超〜3以下が必要です")
+    if not 1 <= args.max_tokens <= 128000 or not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("max-tokens=1〜128000 と正の有限 timeout が必要です")
+    if args.provider == "deepseek" and args.reasoning_effort not in ("none", "low", "high", "max"):
+        parser.error("DeepSeekの推論量は none/low/high/max を指定してください")
     if args.provider == "openai" and args.cache_write_usd_per_million is None:
         parser.error("OpenAIには公式のキャッシュ書込単価も必要です")
+    if args.provider != "openai" and args.openai_api != "chat":
+        parser.error("Responses APIの比較はOpenAIだけに対応しています")
     endpoint, model, key_name, _ = PROVIDERS[args.provider]
+    if args.openai_api == "responses":
+        endpoint = "https://api.openai.com/v1/responses"
     api_key = os.environ.get(key_name)
     if not api_key:
         parser.error(key_name + " を環境変数に設定してください（実行はしていません）")
@@ -127,7 +154,8 @@ def main():
         parser.error("比較ケースが空です")
     prompt = args.prompt_file.read_text()
     result = {"model": model, "promptSHA256": hashlib.sha256(prompt.encode()).hexdigest(),
-              "pricesPerMillion": prices, "records": []}
+              "pricesPerMillion": prices, "api": args.openai_api, "reasoningEffort": args.reasoning_effort,
+              "maxTokens": args.max_tokens, "timeoutSeconds": args.timeout, "records": []}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # ネットワーク前に上書き禁止を確定する。
     with os.fdopen(os.open(args.output, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as output:
@@ -140,7 +168,8 @@ def main():
         events = [json.loads(line) for line in ledger]
         for run in range(args.runs):
             for case in cases:
-                request_body = body(case["payload"], args.provider, prompt)
+                request_body = body(case["payload"], args.provider, prompt, args.reasoning_effort, args.max_tokens, args.openai_api)
+                user_message = request_body.get("messages", request_body.get("input"))[1]["content"]
                 reserved = reserve_usd(request_body, prices)
                 if ledger_total(events) + reserved > args.budget_usd:
                     raise SystemExit("次の呼び出しが予算を超える可能性があるため停止しました")
@@ -149,25 +178,27 @@ def main():
                 append_event(ledger, event)
                 events.append(event)
                 record = {"case": case["name"], "run": run + 1, "startedAt": datetime.now(timezone.utc).isoformat(),
-                          "inputSHA256": hashlib.sha256(request_body["messages"][1]["content"].encode()).hexdigest()}
+                          "inputSHA256": hashlib.sha256(user_message.encode()).hexdigest()}
                 start = time.monotonic()
                 try:
                     request = Request(endpoint, method="POST", data=json.dumps(request_body, ensure_ascii=False).encode(),
                                       headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json", "User-Agent": "kifumate-measurement/1.0"})
-                    with build_opener(NoRedirect).open(request, timeout=45) as response:
-                        raw = response.read(131073)
-                        if len(raw) > 131072:
+                    with build_opener(NoRedirect).open(request, timeout=args.timeout) as response:
+                        raw = response.read(8 * 1024 * 1024 + 1)
+                        if len(raw) > 8 * 1024 * 1024:
                             raise ValueError("応答上限超過")
                         data = json.loads(raw)
                     record["seconds"] = round(time.monotonic() - start, 3)
-                    record["response"] = {k: data[k] for k in ("id", "model", "choices", "usage") if k in data}
-                    record["estimatedUSD"] = cost_usd(data["usage"], prices)
+                    record["response"] = {k: data[k] for k in ("id", "model", "choices", "usage", "output", "status") if k in data}
+                    record["estimatedUSD"] = cost_usd(cost_usage(data, args.openai_api), prices)
                     event = {"id": identity, "usd": record["estimatedUSD"], "state": "settled"}
                     append_event(ledger, event)
                     events.append(event)
                 except Exception as error:
                     # 例外本文・HTTPヘッダーは保存しない。usage不明なら予約を残し、自動再試行しない。
                     record.update(seconds=round(time.monotonic() - start, 3), error=type(error).__name__, reservedUSD=reserved)
+                    if isinstance(error, HTTPError):
+                        record["httpStatus"] = error.code
                 result["records"].append(record)
                 save(args.output, result)
                 print(json.dumps({k: v for k, v in record.items() if k != "response"}), flush=True)
