@@ -181,6 +181,12 @@ test("HTTP：共有認証・非同期ヘッダー・statusだけのDELETE後も�
     });
     assert.equal(req.headers.authorization, `Bearer ${"a".repeat(64)}`);
     res.setHeader("Content-Type", "application/json");
+    if (req.url === "/v1/entitlements") {
+      res.end(
+        JSON.stringify({ paid: true, source: "invite", expiresAt: null }),
+      );
+      return;
+    }
     if (req.method === "DELETE") {
       cancelled = true;
       res.end(JSON.stringify({ status: "cancelled", quota }));
@@ -204,13 +210,14 @@ test("HTTP：共有認証・非同期ヘッダー・statusだけのDELETE後も�
     await c.createCoach(input);
     await c.getCoach(input.requestId);
     assert.equal((await c.cancelCoach(input.requestId)).status, "cancelled");
-    assert.equal(seen[1]!.prefer, "respond-async");
-    assert.deepEqual(JSON.parse(seen[1]!.body), input);
+    const operations = seen.filter((s) => s.url !== "/v1/entitlements");
+    assert.equal(operations[1]!.prefer, "respond-async");
+    assert.deepEqual(JSON.parse(operations[1]!.body), input);
     assert.deepEqual(
-      seen.map((s) => s.method),
+      operations.map((s) => s.method),
       ["GET", "POST", "GET", "DELETE", "GET"],
     );
-    assert(seen[2]!.url.endsWith(input.requestId));
+    assert(operations[2]!.url.endsWith(input.requestId));
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }

@@ -1,11 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 // 接続先ごとに分離。iOSでも移行しないKeychain項目として保存する。
-const key =
-  "analysis-device-" +
-  encodeURIComponent(process.env.EXPO_PUBLIC_ANALYSIS_URL || "").replace(
-    /[^a-zA-Z0-9._-]/g,
-    "_",
-  );
+import { API_URL } from "./environment";
+import { deviceStorageKey } from "./config";
+const key = deviceStorageKey(API_URL);
 export const tokenStore = {
   get: () => SecureStore.getItemAsync(key),
   set: (token: string) =>

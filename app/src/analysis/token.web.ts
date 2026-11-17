@@ -1,6 +1,7 @@
 // Webは動作確認用。秘密鍵を取り出せないIndexedDBの鍵で暗号化し、平文トークンを保存しない。
 // shortcut: 同一オリジンのスクリプトは復号できる。Webを製品化するときはサーバー側セッションへ移す。
-const name = "kifumate-device-" + (process.env.EXPO_PUBLIC_ANALYSIS_URL || "");
+import { API_URL } from "./environment";
+const name = "kifumate-device-" + API_URL;
 async function database() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const r = indexedDB.open(name, 1);

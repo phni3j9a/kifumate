@@ -93,6 +93,8 @@ test("認証・トークンを共用し、分岐APIには局面とsequence以外
     "https://example.test",
     { get: async () => "a".repeat(64), set: async () => {} },
     async (url, init) => {
+      if (String(url).endsWith("/v1/entitlements"))
+        return Response.json({ paid: true, source: "invite", expiresAt: null });
       bodies.push({
         path: String(url),
         method: init!.method!,

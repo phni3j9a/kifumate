@@ -1,3 +1,4 @@
+import { useEntitlements } from "../entitlements/provider";
 import {
   createContext,
   useContext,
@@ -80,5 +81,6 @@ export function useCoach() {
     () => controller.snapshot,
     () => controller.snapshot,
   );
-  return { ...state, controller };
+  const { entitlement } = useEntitlements();
+  return { ...state, paid: entitlement.paid, controller };
 }

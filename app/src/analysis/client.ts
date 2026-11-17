@@ -1,3 +1,7 @@
+import {
+  EntitlementController,
+  type Entitlement,
+} from "../entitlements/controller";
 import type {
   CoachInput,
   CoachReply,
@@ -19,6 +23,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     public quota?: Quota | RealtimeQuota | CoachQuota,
+    public retryAfter?: number,
   ) {
     super(code);
   }
@@ -27,11 +32,22 @@ export class AnalysisConfigurationError extends Error {}
 /** 端末登録は同時に一度だけ。401でも証明とひも付くトークンを勝手に作り直さない。 */
 export class AnalysisClient {
   private token: Promise<string> | undefined;
+  readonly access: EntitlementController;
   constructor(
     private base: string,
     private store: TokenStore,
     private http: typeof fetch = (url, init) => fetch(url, init),
-  ) {}
+    allowDevelopment = false,
+  ) {
+    this.access = new EntitlementController(this, allowDevelopment);
+  }
+  entitlements = (): Promise<Entitlement> => this.request("/v1/entitlements");
+  redeem = (code: string): Promise<Entitlement> =>
+    this.request("/v1/invitations/redeem", "POST", { code });
+  private async requirePaid() {
+    if (!(await this.access.refresh()).paid)
+      throw new ApiError(403, "paid_required");
+  }
   private async request(
     path: string,
     method = "GET",
@@ -70,6 +86,7 @@ export class AnalysisClient {
           response.status,
           data.error || "server_error",
           data.quota,
+          retryAfterSeconds(response.headers.get("Retry-After")),
         );
       return data;
     } finally {
@@ -90,9 +107,19 @@ export class AnalysisClient {
       throw e;
     }));
   }
-  coach = (): Promise<CoachOverview> => this.request("/v1/coach");
+  coach = async (): Promise<CoachOverview> => {
+    const [reply, entitlement] = await Promise.all([
+      this.request("/v1/coach"),
+      this.access.refresh(),
+    ]);
+    return { ...reply, paid: entitlement.paid };
+  };
   createCoach = (input: CoachInput): Promise<CoachReply> =>
-    this.request("/v1/coach", "POST", input, true, { Prefer: "respond-async" });
+    this.requirePaid().then(() =>
+      this.request("/v1/coach", "POST", input, true, {
+        Prefer: "respond-async",
+      }),
+    );
   getCoach = (id: string): Promise<CoachReply> =>
     this.request(`/v1/coach/${encodeURIComponent(id)}`);
   cancelCoach = async (id: string): Promise<CoachReply> => {
@@ -101,30 +128,49 @@ export class AnalysisClient {
     return this.getCoach(id);
   };
   quota = (): Promise<Quota> => this.request("/v1/quota");
-  create = (input: Input): Promise<Reply> =>
-    this.request("/v1/jobs", "POST", {
-      initial: input.initial,
-      moves: input.moves,
-      mode: input.mode,
-    });
+  // 応答不明の回収は事前照会をせず、サーバーの重複判定を権利検査より先に行う。
+  create = (input: Input, recovering = false): Promise<Reply> =>
+    (input.mode === "precise" && !recovering
+      ? this.requirePaid()
+      : Promise.resolve()
+    ).then(() =>
+      this.request("/v1/jobs", "POST", {
+        initial: input.initial,
+        moves: input.moves,
+        mode: input.mode,
+      }),
+    );
   get = (id: string, from: number): Promise<Reply> =>
     this.request(`/v1/jobs/${encodeURIComponent(id)}?from=${from}`);
-  realtime = (): Promise<RealtimeReply> => this.request("/v1/realtime");
+  realtime = async (): Promise<RealtimeReply> => {
+    const reply = await this.request("/v1/realtime");
+    // 350msの進捗取得ごとに権利GETを重ねず、変更の兆候があるときだけ再確認する。
+    if (
+      !this.access.snapshot.checked ||
+      reply.paid !== this.access.snapshot.entitlement.paid
+    )
+      await this.access.refresh();
+    return { ...reply, paid: this.access.snapshot.entitlement.paid };
+  };
   startRealtime = (input: RealtimeInput): Promise<RealtimeReply> =>
-    this.request("/v1/realtime", "POST", {
-      initial: input.initial,
-      moves: input.moves,
-    });
+    this.requirePaid().then(() =>
+      this.request("/v1/realtime", "POST", {
+        initial: input.initial,
+        moves: input.moves,
+      }),
+    );
   updateRealtime = (
     id: string,
     input: RealtimeInput,
     sequence: number,
   ): Promise<RealtimeReply> =>
-    this.request(`/v1/realtime/${encodeURIComponent(id)}`, "PUT", {
-      initial: input.initial,
-      moves: input.moves,
-      sequence,
-    });
+    this.requirePaid().then(() =>
+      this.request(`/v1/realtime/${encodeURIComponent(id)}`, "PUT", {
+        initial: input.initial,
+        moves: input.moves,
+        sequence,
+      }),
+    );
   stopRealtime = (id: string): Promise<RealtimeReply> =>
     this.request(`/v1/realtime/${encodeURIComponent(id)}`, "DELETE");
   cancel = (id: string): Promise<Reply> =>
@@ -146,4 +192,12 @@ export function errorText(error: unknown) {
     )[error.status] ||
     "解析を終えられませんでした。回数は減っていません。もう一度試せます"
   );
+}
+
+export function retryAfterSeconds(value: string | null, now = Date.now()) {
+  if (!value) return undefined;
+  const seconds = /^\d+$/.test(value)
+    ? Number(value)
+    : Math.ceil((Date.parse(value) - now) / 1000);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : undefined;
 }

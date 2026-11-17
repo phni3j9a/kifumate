@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -166,9 +167,10 @@ export function AnalysisPanel({
   const preciseInfo = () =>
     ask({
       title: "精密解析は、有料プランで使えます",
-      text: "候補を3手まで出し、より深く読みます。週20局まで使えます。課金は準備中です。",
-      ok: "閉じる",
-      single: true,
+      text: "候補を3手まで出し、より深く読みます。週20局まで使えます。招待コードで使えるようになります。",
+      ok: "有料プランを見る",
+      no: "閉じる",
+      onOk: () => router.push("/plan"),
     });
   async function cancel() {
     const previous = analysis?.saved?.jobId;

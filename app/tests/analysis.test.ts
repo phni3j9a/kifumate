@@ -73,6 +73,12 @@ test("偽HTTPサーバー: 登録一度・安全な保存後に認証・本文�
     }
     assert.equal(saved, token);
     assert.equal(req.headers.authorization, `Bearer ${token}`);
+    if (req.url === "/v1/entitlements") {
+      res.end(
+        JSON.stringify({ paid: true, source: "invite", expiresAt: null }),
+      );
+      return;
+    }
     if (req.url === "/v1/quota") {
       res.end(JSON.stringify(quota));
       return;
@@ -342,5 +348,85 @@ test("旧版の送信時刻不明の依頼も自動再送せず、中止でも�
     });
   } finally {
     sql.close();
+  }
+});
+
+test("精密POSTの応答喪失後に権利が失効しても、再起動で受理済みジョブを回収・中止できる", async (t) => {
+  for (const cancel of [false, true]) {
+    await t.test(
+      cancel ? "回収したジョブを中止" : "回収したジョブを完了まで保存",
+      async () => {
+        let paid = true,
+          posts = 0,
+          entitlementGets = 0,
+          cancels = 0;
+        const api = new AnalysisClient(
+          "https://example.test",
+          {
+            get: async () => "a".repeat(64),
+            set: async () => {},
+          },
+          async (url, init) => {
+            const path = new URL(String(url)).pathname;
+            if (path === "/v1/entitlements") {
+              entitlementGets++;
+              return Response.json({
+                paid,
+                source: paid ? "invite" : null,
+                expiresAt: null,
+              });
+            }
+            if (path === "/v1/quota") return Response.json({ ...quota, paid });
+            if (init?.method === "POST") {
+              assert.deepEqual(JSON.parse(String(init.body)), input);
+              posts++;
+              if (posts === 1) {
+                paid = false;
+                throw new TypeError("受理後に応答だけを喪失");
+              }
+              return Response.json({ ...reply(), quota: { ...quota, paid } });
+            }
+            if (init?.method === "DELETE") {
+              cancels++;
+              return Response.json({
+                ...reply("cancelled"),
+                quota: { ...quota, paid },
+              });
+            }
+            return Response.json({
+              ...reply("completed", 2),
+              results: [result(0), result(1)],
+              quota: { ...quota, paid },
+            });
+          },
+        );
+        const { controller, storage, sql } = await setup(api);
+        try {
+          await controller.start("a", input);
+          assert.equal(posts, 1);
+          assert.equal(controller.snapshot.records.a?.attempt?.job, null);
+          assert.ok(controller.snapshot.records.a?.attempt?.firstSentAt);
+          const reopened = new AnalysisController(api, storage);
+          await reopened.init();
+          if (cancel) await reopened.cancel("a");
+          else await reopened.sync();
+          assert.equal(posts, 2, "失効後も重複POSTで受理済みジョブを回収する");
+          assert.equal(entitlementGets, 1, "回収前の照会で403にしてはいけない");
+          if (!cancel) {
+            assert.equal(
+              reopened.snapshot.records.a?.attempt?.job?.id,
+              "job-1",
+            );
+            await reopened.sync();
+            assert.equal(reopened.snapshot.records.a?.saved?.results.length, 2);
+          }
+          assert.equal(reopened.snapshot.records.a?.attempt, null);
+          assert.equal(reopened.snapshot.records.a?.error, null);
+          assert.equal(cancels, cancel ? 1 : 0);
+        } finally {
+          sql.close();
+        }
+      },
+    );
   }
 });
