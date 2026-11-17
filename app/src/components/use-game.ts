@@ -1,18 +1,17 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useClassifications } from "./classifications-provider";
 import { useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import type { Game } from "../storage/repository";
+import { getGame, type Game } from "../storage/repository";
 export function useGame(id: string) {
   const db = useSQLiteContext();
+  const { revision } = useClassifications();
   const [game, setGame] = useState<Game | null>(null);
   const [error, setError] = useState("");
   const live = useRef(false);
   const reload = useCallback(async () => {
     try {
-      const g = await db.getFirstAsync<Game>(
-        "SELECT * FROM games WHERE id=?",
-        id,
-      );
+      const g = await getGame(db, id);
       if (!live.current) return;
       setGame(g);
       setError(g ? "" : "棋譜が見つかりません。一覧から開き直してください。");
@@ -32,5 +31,10 @@ export function useGame(id: string) {
       };
     }, [reload]),
   );
+  useEffect(() => {
+    if (!revision) return;
+    const timer = setTimeout(() => void reload(), 0);
+    return () => clearTimeout(timer);
+  }, [reload, revision]);
   return { game, error, db, reload };
 }

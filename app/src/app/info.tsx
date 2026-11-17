@@ -1,3 +1,4 @@
+import { ClassificationEditor } from "../components/classification-editor";
 import { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -32,7 +33,11 @@ export default function Info() {
   const { records, offline } = useAnalysis();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db, reload } = useGame(id);
-  const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
+  const kif = game?.kif;
+  const record = useMemo(
+    () => (kif === undefined ? null : readStoredKif(kif)),
+    [kif],
+  );
   const [sheet, setSheet] = useState(false);
   // 保存は押した順に1つずつ。前の保存と再読み込みが終わってから次を始める
   const queue = useRef(Promise.resolve());
@@ -136,6 +141,7 @@ export default function Info() {
         <Hint>
           登録した対局者名から自動で見分けています。ちがうときはここで直せます。「自分ではない」にすると、戦績には数えません。
         </Hint>
+        <ClassificationEditor game={game} db={db} save={save} />
       </PageScroll>
       <Sheet
         auto

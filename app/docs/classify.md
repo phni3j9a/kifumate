@@ -1,6 +1,6 @@
 # 戦法・囲いの自動分類
 
-Issue [#10](https://github.com/phni3j9a/kifumate/issues/10)、仕様 §4 の**判定ロジックのみ**。画面・DB・集計・手動修正の実装は含まない。`tsshogi` 以外の依存は追加していない。
+Issue [#10](https://github.com/phni3j9a/kifumate/issues/10)、仕様 §4 の**判定ロジックのみ**。判定ロジックは画面から独立している。Issue #18 で画面・DB・集計・手動修正と接続した（[アプリREADME](../README.md#戦績と分類の連携18)）。`tsshogi` 以外の依存は追加していない。
 
 ## 呼び出し方
 
@@ -110,11 +110,13 @@ const alternative = classifyMoves(startPosition, moves); // ImmutablePosition �
 ## 画面・DBと接続するとき
 
 - エントリーポイントは `src/core/classify/index.ts`。公開型は `Classification`, `SideClassification`, `Finding`, `CastleFinding`, `Evidence`, `Family`。
+- 画面・永続化との接続は `src/storage/classifications.ts`、集計は `src/core/stats.ts`。大分類の集計は最後に確認した `family` を使う。
+- `classifyRecordAsync(record)` は同期版と同じ結果を返し、16手ごとにイベントループへ戻る。保存済み棋譜の再判定には `classifyUsiAsync(sfen, moves)` を使い、KIF本文の再解析を避ける（開始SFENは4フィールド、本譜USIの配列）。規則の版は `rulesVersion` 定数でも公開する。いずれも合法性を検査し、分類できなければ例外にする。
 - `classificationCatalog` のIDで保存・フィルターし、名前で表示する。戦法と囲いで同じID（例: `gangi`）があるため、**種別とIDの組**で扱う。
 - 戦法は配列全体を保持する。囲いは履歴配列を保持し、発展は `parentId` と `evolvesFromPly` で表示する。未分類ステータスと空配列を画面に反映する。
 - 統計はイベント行の件数ではなく**対局IDの重複を除いて**数える。同じ囲いを築き直す場合や複数の戦法・大分類を経由する場合がある。大分類の絞り込みを「最終確認」か「一度でも観測」かは集計側で明示する。
 - `family` は最後に確認された大分類。履歴が必要なら `familyHistory` を使う。終局時の配置そのものを表示したい場合、この履歴APIの最後のイベントを現在形と断定しない。
-- `rulesVersion` と元棋譜を残せば再判定できる。手動修正は自動結果と分けて保存し、再判定で上書きしない。手動修正UI／DBマイグレーションは本変更に含まれない。
+- `rulesVersion` と元棋譜を残せば再判定できる。手動修正は自動結果と分けて保存し、再判定で上書きしない。接続側はv4マイグレーションで自動JSONと手動JSONを別列へ保存する。手動未分類も空配列として保持し、再判定は自動列のみ更新する。
 
 ## 検証
 
