@@ -16,10 +16,10 @@
       "expo-secure-store"
     ],
     "android": {
-      "package": "jp.kifumate.app"
+      "package": "com.quarterlambda.kifumate"
     },
     "ios": {
-      "bundleIdentifier": "jp.kifumate.app",
+      "bundleIdentifier": "com.quarterlambda.kifumate",
       "supportsTablet": true
     },
     "web": {

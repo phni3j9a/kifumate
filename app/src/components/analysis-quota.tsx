@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useAnalysis } from "../analysis/provider";
@@ -67,9 +68,12 @@ export function AnalysisQuota() {
           size="sm"
           wide
           style={{ marginTop: 12 }}
-          onPress={() => setDetails(true)}
+          onPress={() => router.push("/plan")}
         >
           {q?.paid ? "プランの内容を見る" : "有料プランを見る"}
+        </Button>
+        <Button size="sm" onPress={() => setDetails(true)}>
+          残り回数と更新日時
         </Button>
       </View>
       <Sheet
@@ -79,7 +83,7 @@ export function AnalysisQuota() {
         onClose={() => setDetails(false)}
       >
         <Text style={font(700, 13, 1.6)}>
-          無料は週10局。有料プランは合計週100局、うち精密解析は20局まで。精密解析では候補を3手まで比べられます。課金は準備中です。
+          無料は週10局。有料プランは合計週100局、うち精密解析は20局まで。精密解析では候補を3手まで比べられます。招待コードで使えます。
         </Text>
         {q && (
           <Text style={[font(500, 12, 1.6), { marginVertical: 12 }]}>

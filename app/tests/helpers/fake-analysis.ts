@@ -17,6 +17,10 @@ export async function fakeAnalysis(page: Page) {
     errors: [] as string[],
     online: true,
     paid: true,
+    entitlementExpiresAt: null as number | null,
+    inviteError: "",
+    inviteStatus: 400,
+    redeemed: [] as { code: string }[],
     remaining: 99,
     precise: 19,
     status: "running" as Reply["status"],
@@ -90,6 +94,34 @@ export async function fakeAnalysis(page: Page) {
     }
     if (url.pathname === "/v1/devices") {
       await send({ token: "a".repeat(64) }, 201);
+      return;
+    }
+    if (
+      url.pathname === "/v1/entitlements" ||
+      url.pathname === "/v1/invitations/redeem"
+    ) {
+      if (req.method() === "POST") {
+        state.redeemed.push(req.postDataJSON());
+        if (state.inviteError) {
+          await route.fulfill({
+            status: state.inviteStatus,
+            contentType: "application/json",
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Retry-After": "900",
+              "Access-Control-Expose-Headers": "Retry-After",
+            },
+            body: JSON.stringify({ error: state.inviteError }),
+          });
+          return;
+        }
+        state.paid = true;
+      }
+      await send({
+        paid: state.paid,
+        source: state.paid ? "invite" : null,
+        expiresAt: state.entitlementExpiresAt,
+      });
       return;
     }
     if (url.pathname === "/v1/quota") {

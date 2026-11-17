@@ -65,7 +65,7 @@ export function CoachSheet({
   const db = useSQLiteContext(),
     insets = useSafeAreaInsets(),
     { height } = useWindowDimensions();
-  const { records, overview, profile, offline, controller } = useCoach();
+  const { records, overview, profile, offline, controller, paid } = useCoach();
   const { records: analyses, quota: analysisQuota } = useAnalysis();
   const analysis = analyses[game.id],
     saved = analysis?.saved,
@@ -85,7 +85,6 @@ export function CoachSheet({
   );
   const answers = r?.answers ?? [],
     attempt = r?.attempt;
-  const paid = overview?.paid ?? analysisQuota?.paid ?? false;
   const q = overview?.quota ?? null,
     limit = !!q && q.remaining === 0;
   const hasAnswers = answers.length > 0;
@@ -526,14 +525,10 @@ export function CoachSheet({
             <Button
               wide
               kind="pri"
-              onPress={() =>
-                ask({
-                  title: "有料プランは準備中です",
-                  text: "精密解析・分岐中の解析・AIコーチが使えるプランを準備しています。購入はまだできません。",
-                  ok: "閉じる",
-                  single: true,
-                })
-              }
+              onPress={() => {
+                onClose();
+                router.push("/plan");
+              }}
             >
               有料プランを見る
             </Button>

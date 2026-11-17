@@ -1,3 +1,8 @@
+import { API_URL, ALLOW_DEVELOPMENT_ACCESS } from "./environment";
+import {
+  EntitlementsProvider,
+  useEntitlements,
+} from "../entitlements/provider";
 import { CoachProvider } from "../coach/provider";
 import {
   createContext,
@@ -25,8 +30,10 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
   const client = useMemo(
     () =>
       new AnalysisClient(
-        (process.env.EXPO_PUBLIC_ANALYSIS_URL || "").replace(/\/$/, ""),
+        API_URL,
         tokenStore,
+        undefined,
+        ALLOW_DEVELOPMENT_ACCESS,
       ),
     [],
   );
@@ -35,6 +42,17 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
     [client, db],
   );
   const realtime = useMemo(() => new RealtimeController(client), [client]);
+  useEffect(() => {
+    let paid = client.access.snapshot.entitlement.paid;
+    return client.access.subscribe(() => {
+      const next = client.access.snapshot.entitlement.paid;
+      if (next === paid) return;
+      paid = next;
+      void controller.sync();
+      if (!next) void realtime.stop();
+      else realtime.retry();
+    });
+  }, [client, controller, realtime]);
   useEffect(() => {
     realtime.setForeground(
       AppState.currentState !== "background" &&
@@ -104,7 +122,9 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
   return (
     <Context.Provider value={controller}>
       <RealtimeContext.Provider value={realtime}>
-        <CoachProvider client={client}>{children}</CoachProvider>
+        <EntitlementsProvider controller={client.access}>
+          <CoachProvider client={client}>{children}</CoachProvider>
+        </EntitlementsProvider>
       </RealtimeContext.Provider>
     </Context.Provider>
   );
@@ -116,7 +136,8 @@ export function useRealtime() {
     () => controller.snapshot,
     () => controller.snapshot,
   );
-  return { ...state, controller };
+  const { entitlement, checked } = useEntitlements();
+  return { ...state, paid: checked ? entitlement.paid : null, controller };
 }
 export function useAnalysis() {
   const controller = useContext(Context)!;
@@ -125,5 +146,10 @@ export function useAnalysis() {
     () => controller.snapshot,
     () => controller.snapshot,
   );
-  return { ...state, controller };
+  const { entitlement } = useEntitlements();
+  return {
+    ...state,
+    quota: state.quota ? { ...state.quota, paid: entitlement.paid } : null,
+    controller,
+  };
 }

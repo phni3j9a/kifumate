@@ -73,6 +73,12 @@ test("偽HTTPサーバー: 登録一度・安全な保存後に認証・本文�
     }
     assert.equal(saved, token);
     assert.equal(req.headers.authorization, `Bearer ${token}`);
+    if (req.url === "/v1/entitlements") {
+      res.end(
+        JSON.stringify({ paid: true, source: "invite", expiresAt: null }),
+      );
+      return;
+    }
     if (req.url === "/v1/quota") {
       res.end(JSON.stringify(quota));
       return;

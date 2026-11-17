@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { Pressable, StyleSheet, Text } from "react-native";
 import type { RealtimeState } from "../analysis/realtime-types";
 import { Icon } from "./icons";
@@ -9,13 +10,7 @@ export function realtimeInfo() {
     text: "分岐で指すたびに、その局面の評価値と最善手が出ます。",
     ok: "有料プランを見る",
     no: "閉じる",
-    onOk: () =>
-      ask({
-        title: "有料プランは準備中です",
-        text: "分岐中の解析・精密解析・AIコーチが使えるプランを準備しています。購入はまだできません。",
-        ok: "閉じる",
-        single: true,
-      }),
+    onOk: () => router.push("/plan"),
   });
 }
 export function realtimeLabel(state: RealtimeState) {
