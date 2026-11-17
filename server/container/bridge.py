@@ -2,6 +2,7 @@
 """USI 中継。外部へは Worker 経由だけで到達させる。棋譜の個人情報は受け取らない。"""
 import json
 import os
+from pathlib import Path
 import queue
 import re
 import signal
@@ -162,9 +163,36 @@ def mate_proof(board):
     return {"plies": 3, "pv": [usi, branches[0]["reply"], branches[0]["mate"]], "branches": branches}
 
 
+# 公式AVX2ターゲット（corei7-avx + BMI1/BMI2）の前提。全vCPUの共通集合で判定する。
+AVX2_FLAGS = frozenset("avx avx2 xsave bmi1 bmi2 popcnt ssse3 sse4_1 sse4_2 aes pclmulqdq cx16".split())
+
+
+def cpu_details(text=None):
+    if text is None:
+        try:
+            text = Path("/proc/cpuinfo").read_text()
+        except OSError:
+            text = ""
+    processors = []
+    models = set()
+    for block in text.strip().split("\n\n"):
+        fields = dict(line.split(":", 1) for line in block.splitlines() if ":" in line)
+        fields = {k.strip(): v.strip() for k, v in fields.items()}
+        if "model name" in fields:
+            models.add(fields["model name"])
+        if "processor" in fields:
+            processors.append(set(fields.get("flags", "").split()))
+    flags = set.intersection(*processors) if processors else set()
+    return {"models": sorted(models), "flags": sorted(flags), "avx2Usable": AVX2_FLAGS <= flags}
+
+
+def selected_engine(cpuinfo=None):
+    return "/app/engine-avx2" if cpu_details(cpuinfo)["avx2Usable"] else "/app/engine-compatible"
+
+
 class Engine:
     def __init__(self, command=None):
-        self.process = subprocess.Popen(command or [os.environ.get("ENGINE_PATH", "/app/engine")],
+        self.process = subprocess.Popen(command or [os.environ.get("ENGINE_PATH") or selected_engine()],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, bufsize=1)
         self.lines = queue.Queue()
@@ -175,7 +203,7 @@ class Engine:
             self.until("usiok", 15)
             for name, value in [("EvalDir", os.environ.get("EVAL_DIR", "/app/eval")), ("FV_SCALE", 40),
                                 ("USI_Hash", 128), ("BookFile", "no_book"), ("NetworkDelay", 0),
-                                ("MinimumThinkingTime", 0)]:
+                                ("MinimumThinkingTime", 0), ("EnteringKingRule", "CSARule27")]:
                 self.send(f"setoption name {name} value {value}")
             self.mode = None
         except Exception:
@@ -199,7 +227,7 @@ class Engine:
             if line is None:
                 raise RuntimeError("analysis_unavailable")
             if line.startswith(prefix):
-                return lines
+                return lines + [line]
             lines.append(line)
             if len(lines) > 10000 or time.monotonic() >= deadline:
                 raise RuntimeError("analysis_timeout")
@@ -224,6 +252,11 @@ class Engine:
             if info and info["rank"] <= multipv:
                 candidates[info["rank"]] = info
         ordered = [candidates[k] for k in sorted(candidates)]
+        # 宣言勝ちは着手でも詰みでもない。bestmove の終端を見て専用結果にする。
+        if lines[-1].split()[1:2] == ["win"]:
+            score = {"kind": "declaration", "value": None, "winner": "sente" if board.turn == cshogi.BLACK else "gote"}
+            candidate = {"rank": 1, "depth": 0, "score": score, "declarationWin": True, "pv": []}
+            return {"ply": ply, "score": score, "candidates": [candidate], "mate": None}
         score = ordered[0]["score"] if ordered else None
         if board.is_check() and not list(board.legal_moves):
             score = score_for_sente("mate", "0", board.turn)

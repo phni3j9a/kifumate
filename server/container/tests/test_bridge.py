@@ -109,3 +109,49 @@ def test_http_rejects_private_fields_and_masks_engine_errors(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_cpu_dispatch_requires_all_features_on_every_vcpu(monkeypatch):
+    flags = ' '.join(bridge.AVX2_FLAGS)
+    full = f'processor : 0\nmodel name : Test CPU\nflags : {flags}\n'
+    assert bridge.selected_engine(full) == '/app/engine-avx2'
+    assert bridge.cpu_details(full)['models'] == ['Test CPU']
+    for required in bridge.AVX2_FLAGS:
+        missing = full.replace(required, '', 1)
+        assert bridge.selected_engine(missing) == '/app/engine-compatible'
+    assert bridge.selected_engine(full + '\nprocessor : 1\nflags : sse2\n') == '/app/engine-compatible'
+    assert bridge.selected_engine(full + '\nprocessor : 1\n') == '/app/engine-compatible'
+    assert bridge.selected_engine('') == '/app/engine-compatible'
+    monkeypatch.setattr(bridge.Path, 'read_text', lambda *_: (_ for _ in ()).throw(OSError()))
+    assert bridge.selected_engine() == '/app/engine-compatible'
+
+
+def test_benchmark_counts_cumulative_nodes_once_and_ignores_strings():
+    from benchmark import search_stats
+    assert search_stats([
+        'info depth 5 multipv 1 nodes 100',
+        'info depth 5 multipv 2 nodes 100',
+        'info string nodes 999999 depth 99',
+        'info depth 7 multipv 1 nodes 200',
+        'info depth 8 multipv 2 nodes 250',
+        'info depth bad nodes bad',
+    ]) == {'nodes': 250, 'depth': 7}
+
+
+@pytest.mark.parametrize('sfen,winner', [
+    ('+P+P+P+PK+P+P+P+P/+P+P7/9/9/9/9/9/9/4k4 b 2R2B8P 1', 'sente'),
+    ('4K4/9/9/9/9/9/9/7+p+p/+p+p+p+pk+p+p+p+p w 2r2b8p 1', 'gote'),
+])
+def test_declaration_win_is_not_a_move_or_proven_mate(sfen, winner):
+    board = cshogi.Board(sfen)
+    assert board.is_nyugyoku() and not board.is_game_over()
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py'), '--win'])
+    try:
+        result = engine.analyze(payload(initial=sfen))
+        assert result['score'] == {'kind': 'declaration', 'value': None, 'winner': winner}
+        assert result['candidates'][0]['declarationWin'] is True
+        assert 'move' not in result['candidates'][0]
+        assert result['candidates'][0]['pv'] == []
+        assert result['mate'] is None
+    finally:
+        engine.close()
