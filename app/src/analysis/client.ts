@@ -1,3 +1,9 @@
+import type {
+  CoachInput,
+  CoachReply,
+  CoachOverview,
+  CoachQuota,
+} from "../coach/types";
 import type { Input, Quota, Reply } from "./types";
 import type {
   RealtimeInput,
@@ -12,7 +18,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
-    public quota?: Quota | RealtimeQuota,
+    public quota?: Quota | RealtimeQuota | CoachQuota,
   ) {
     super(code);
   }
@@ -31,6 +37,7 @@ export class AnalysisClient {
     method = "GET",
     body?: object,
     auth = true,
+    headers: Record<string, string> = {},
   ): Promise<any> {
     if (!this.base)
       throw new AnalysisConfigurationError("解析サーバーの接続先が未設定です");
@@ -47,6 +54,7 @@ export class AnalysisClient {
         method,
         signal: controller.signal,
         headers: {
+          ...headers,
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
@@ -82,6 +90,13 @@ export class AnalysisClient {
       throw e;
     }));
   }
+  coach = (): Promise<CoachOverview> => this.request("/v1/coach");
+  createCoach = (input: CoachInput): Promise<CoachReply> =>
+    this.request("/v1/coach", "POST", input, true, { Prefer: "respond-async" });
+  getCoach = (id: string): Promise<CoachReply> =>
+    this.request(`/v1/coach/${encodeURIComponent(id)}`);
+  cancelCoach = (id: string): Promise<CoachReply> =>
+    this.request(`/v1/coach/${encodeURIComponent(id)}`, "DELETE");
   quota = (): Promise<Quota> => this.request("/v1/quota");
   create = (input: Input): Promise<Reply> =>
     this.request("/v1/jobs", "POST", {

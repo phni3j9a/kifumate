@@ -1,3 +1,4 @@
+import { CoachProvider } from "../coach/provider";
 import {
   createContext,
   useContext,
@@ -103,7 +104,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
   return (
     <Context.Provider value={controller}>
       <RealtimeContext.Provider value={realtime}>
-        {children}
+        <CoachProvider client={client}>{children}</CoachProvider>
       </RealtimeContext.Provider>
     </Context.Provider>
   );

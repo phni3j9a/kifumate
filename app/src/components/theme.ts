@@ -18,6 +18,8 @@ export const colors = {
   trend: "#FFE27A", // 戦績グラフの面
   sand: "#FFE9A8", // タグ・行アイコン・選ばれていないタブ
   sky: "#DCE6FF", // 相手側のタグ
+  advice: "#E4F8F3", // AIコーチの助言
+  skeleton: "#F1E8CF",
   mintSoft: "#C9F3EA", // 分岐・進行中
   coralSoft: "#FFD9D4", // 注意（本譜に戻る・削除）
   badCard: "#FFE9E6",

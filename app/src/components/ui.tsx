@@ -23,6 +23,20 @@ import { colors, font, line, mono, radius, shadow } from "./theme";
 
 // マスコット（mock/assets/mascot）。RN は height だけでは幅が決まらないので縦横比を持つ。
 export const mascots = {
+  "chat-default": { source: require("../assets/chat-default.webp"), ratio: 1 },
+  "chat-listening": {
+    source: require("../assets/chat-listening.webp"),
+    ratio: 1,
+  },
+  "chat-thinking": {
+    source: require("../assets/chat-thinking.webp"),
+    ratio: 1,
+  },
+  "chat-explaining": {
+    source: require("../assets/chat-explaining.webp"),
+    ratio: 1,
+  },
+  "onb-5": { source: require("../assets/onb-5.webp"), ratio: 320 / 300 },
   "sys-offline": {
     source: require("../assets/sys-offline.webp"),
     ratio: 193 / 300,
