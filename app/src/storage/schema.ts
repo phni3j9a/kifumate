@@ -1,4 +1,6 @@
 // 将来の解析・分類・解説は games.id を参照するテーブルをマイグレーションで追加する。
+// 棋譜の削除でいっしょに消えるよう、必ず `REFERENCES games(id) ON DELETE CASCADE` を付ける
+// （外部キーは migrate() が接続ごとに有効にしている）。
 export const migrations = [
   String.raw`
 CREATE TABLE games (
@@ -24,6 +26,17 @@ CREATE TABLE aliases (
   created_at TEXT NOT NULL
 );
 CREATE INDEX games_played_at ON games(played_at DESC);
+`,
+  // winner：手で直した「どちらが勝ったか」（NULL は棋譜の結果どおり）。先後と切り離して持つので、
+  // 「自分ではない」を挟んでも消えない。result（自分から見た勝ち負け）は先後と winner から決め直す。
+  // それまでの手動の結果は、先後が分かるものだけ勝った側に直して引き継ぐ。
+  String.raw`
+ALTER TABLE games ADD COLUMN winner TEXT CHECK(winner IN ('black','white','draw','unknown'));
+UPDATE games SET winner = CASE result
+    WHEN 'win' THEN self_side
+    WHEN 'loss' THEN CASE self_side WHEN 'black' THEN 'white' ELSE 'black' END
+    ELSE result END
+  WHERE result_manual = 1 AND self_side IS NOT NULL;
 `,
 ];
 

@@ -25,8 +25,14 @@ export interface Game {
   result: Result;
   side_manual: number;
   result_manual: number;
+  /** 手で直した勝ち側。NULL は棋譜の結果どおり */
+  winner: Winner | null;
   favorite: number;
 }
+export type Winner = "black" | "white" | "draw" | "unknown";
+// 先後 side と勝ち側 w（SQL の式）から、自分から見た結果を出す SQL。resultFor と同じ規則。
+const resultSql = (side: string, w: string) =>
+  `CASE WHEN ${side} IS NULL THEN 'unknown' WHEN ${w}='draw' THEN 'draw' WHEN ${w}=${side} THEN 'win' WHEN ${w} IN ('black','white') THEN 'loss' ELSE 'unknown' END`;
 export interface Alias {
   id: string;
   name: string;
@@ -37,6 +43,17 @@ export const listGames = (db: SQLiteDatabase) =>
   );
 export const listAliases = (db: SQLiteDatabase) =>
   db.getAllAsync<Alias>("SELECT id, name FROM aliases ORDER BY created_at");
+/** 同じ開始局面・同じ指し手の棋譜がすでにあれば、その id */
+export async function findDuplicate(
+  db: SQLiteDatabase,
+  record: ShogiRecord,
+): Promise<string | null> {
+  const found = await db.getFirstAsync<{ id: string }>(
+    "SELECT id FROM games WHERE identity = ?",
+    identity(record),
+  );
+  return found?.id ?? null;
+}
 export async function importGame(
   db: SQLiteDatabase,
   record: ShogiRecord,
@@ -46,11 +63,8 @@ export async function importGame(
   resultManual: boolean,
 ): Promise<{ id: string; duplicate: boolean }> {
   const key = identity(record);
-  const duplicate = await db.getFirstAsync<{ id: string }>(
-    "SELECT id FROM games WHERE identity = ?",
-    key,
-  );
-  if (duplicate) return { id: duplicate.id, duplicate: true };
+  const duplicate = await findDuplicate(db, record);
+  if (duplicate) return { id: duplicate, duplicate: true };
   const storedKif = writeKif(record);
   readStoredKif(storedKif);
   const id = randomUUID(),
@@ -75,19 +89,37 @@ export async function importGame(
   );
   return { id, duplicate: false };
 }
-export async function updateInfo(
-  db: SQLiteDatabase,
-  id: string,
-  side: Side,
-  result: Result,
-) {
+// 先後と勝ち側は別々に直す。どちらも1つの UPDATE で今の行のもう一方と合わせて result を決め直すので、
+// 続けて操作しても、古い画面の値で先の変更を上書きしない。
+export async function setSelfSide(db: SQLiteDatabase, id: string, side: Side) {
+  const row = await db.getFirstAsync<{ kif: string }>(
+    "SELECT kif FROM games WHERE id=?",
+    id,
+  );
+  if (!row) return;
   await db.runAsync(
-    "UPDATE games SET self_side=?, result=?, side_manual=1, result_manual=1, updated_at=? WHERE id=?",
+    `UPDATE games SET self_side=?1, side_manual=1, result=${resultSql("?1", "COALESCE(winner, ?2)")}, updated_at=?3 WHERE id=?4`,
     side,
-    result,
+    gameOutcome(readStoredKif(row.kif)),
     new Date().toISOString(),
     id,
   );
+}
+export async function setWinner(
+  db: SQLiteDatabase,
+  id: string,
+  winner: Winner,
+) {
+  await db.runAsync(
+    `UPDATE games SET winner=?1, result_manual=1, result=${resultSql("self_side", "?1")}, updated_at=?2 WHERE id=?3`,
+    winner,
+    new Date().toISOString(),
+    id,
+  );
+}
+// 元に戻せない。games.id を参照する行（解析結果・分類・解説など）は ON DELETE CASCADE でいっしょに消える。
+export async function deleteGame(db: SQLiteDatabase, id: string) {
+  await db.runAsync("DELETE FROM games WHERE id=?", id);
 }
 export async function toggleFavorite(db: SQLiteDatabase, game: Game) {
   await db.runAsync(
@@ -118,9 +150,14 @@ export async function saveAliases(db: SQLiteDatabase, names: string[]) {
       const side = game.side_manual
         ? game.self_side
         : matchNames(game.black, game.white, [...unique.values()]).side;
-      const result = game.result_manual
-        ? game.result
-        : resultFor(side, gameOutcome(readStoredKif(game.kif)));
+      const result = resultFor(
+        side,
+        !game.winner
+          ? gameOutcome(readStoredKif(game.kif))
+          : game.winner === "unknown"
+            ? null
+            : game.winner,
+      );
       await db.runAsync(
         "UPDATE games SET self_side=?, result=?, updated_at=? WHERE id=?",
         side,

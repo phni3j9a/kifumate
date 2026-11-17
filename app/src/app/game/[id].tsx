@@ -1,21 +1,103 @@
-import { useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
-import { Color, formatKIFMove, Move, Square, type PieceType } from "tsshogi";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  BackHandler,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import Svg, { Line } from "react-native-svg";
+import { router, useLocalSearchParams } from "expo-router";
+import { Color, formatMove, Move, Square, type PieceType } from "tsshogi";
 import { Board } from "../../components/board";
-import { useGame } from "../../components/use-game";
+import ExportSheet from "../../components/export-sheet";
+import { EvalGraph } from "../../components/graph";
+import { Icon } from "../../components/icons";
+import { ask, MenuRow, Sheet, toast } from "../../components/overlay";
+import { colors, font, line, radius, shadow } from "../../components/theme";
 import {
   Button,
-  Card,
-  colors,
-  IconButton,
-  Label,
-  Message,
-  Page,
-  styles,
+  PageHeader,
+  Problem,
+  RoundButton,
+  Screen,
 } from "../../components/ui";
+import { useGame } from "../../components/use-game";
+import { dateParts, moveText } from "../../core/format";
 import { Branch, legalMoves, readStoredKif } from "../../core/kif";
-import { toggleFavorite } from "../../storage/repository";
+import { deleteGame, toggleFavorite } from "../../storage/repository";
+
+/** まだ形勢が分からないときのバー（.bar.na）：白と砂色の斜めじま */
+function StripedBar() {
+  const [w, setW] = useState(0);
+  const lines = [];
+  // 135°・12px 周期のしま。x + y = 9√2 + 12√2·k の線を太さ6で引く。
+  for (let c = 12.73; c < w + 9; c += 16.97) lines.push(c);
+  return (
+    <View
+      accessibilityRole="image"
+      accessibilityLabel="形勢はまだ分かりません"
+      onLayout={(e) => setW(e.nativeEvent.layout.width)}
+      style={s.bar}
+    >
+      <Svg width={w} height={9}>
+        {lines.map((c) => (
+          <Line
+            key={c}
+            x1={c + 3}
+            y1={-3}
+            x2={c - 12}
+            y2={12}
+            stroke="#EFE6CC"
+            strokeWidth={6}
+          />
+        ))}
+      </Svg>
+    </View>
+  );
+}
+/** 対局者名（.id）。手番の側はミント色になり「手番」と出る */
+function PlayerName({
+  name,
+  color,
+  turn,
+  bottom,
+}: {
+  name: string;
+  color: Color;
+  turn: boolean;
+  bottom: boolean;
+}) {
+  const avatar = (
+    <View style={[s.av, { backgroundColor: bottom ? colors.you : colors.opp }]}>
+      <Text style={font(500, 8)}>{color === Color.BLACK ? "☗" : "☖"}</Text>
+    </View>
+  );
+  const tn = turn && <Text style={font(900, 9.5)}>手番</Text>;
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${color === Color.BLACK ? "先手" : "後手"} ${name}${turn ? "、手番" : ""}`}
+      style={[
+        s.id,
+        bottom
+          ? { paddingLeft: 8, paddingRight: 1 }
+          : { paddingLeft: 1, paddingRight: 8 },
+        turn && { backgroundColor: colors.mint, borderColor: colors.ink },
+      ]}
+    >
+      {bottom ? tn : avatar}
+      <Text numberOfLines={1} style={[font(700, 11.5, 1.3), { flexShrink: 1 }]}>
+        {name}
+      </Text>
+      {bottom ? avatar : tn}
+    </View>
+  );
+}
+
 export default function GameScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db } = useGame(id);
@@ -25,38 +107,70 @@ export default function GameScreen() {
     [, redraw] = useState(0);
   const [selected, setSelected] = useState<Square | PieceType | null>(null),
     [promotion, setPromotion] = useState<Move[]>([]),
-    [message, setMessage] = useState(""),
     [flipped, setFlipped] = useState(false),
-    [showMoves, setShowMoves] = useState(false),
+    [sheet, setSheet] = useState<"moves" | "menu" | "export" | null>(null),
     [favorite, setFavorite] = useState<number | null>(null);
+  const told = useRef(false);
+  const { width: W, height: H } = useWindowDimensions();
+  const base = branch?.base;
+  // 戻る操作は、まず分岐を抜ける（モックの back()）。
+  useEffect(() => {
+    if (base === undefined) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setPly(base);
+      setBranch(null);
+      setSelected(null);
+      setPromotion([]);
+      return true;
+    });
+    return () => sub.remove();
+  }, [base]);
   if (!record || !game)
     return (
-      <Page>
-        <Message text={error || "棋譜を読み込んでいます…"} error={!!error} />
-      </Page>
+      <Screen>
+        <PageHeader title="対局" />
+        <Problem text={error || "棋譜を読み込んでいます…"} />
+      </Screen>
     );
+  // 画面の高さに合わせて少しだけ大きくする（app.css の --u：720px で 0、900px で 10）
+  const u = Math.max(0, Math.min(10, (H - 720) / 18));
+  const cb = 34 + u * 0.7;
   const total = game.plies;
   record.goto(Math.min(ply, total));
   const position = branch?.position || record.position;
-  const baseBottom = game.self_side === "white" ? Color.WHITE : Color.BLACK;
+  const own = !!game.self_side;
+  const self = game.self_side === "white" ? Color.WHITE : Color.BLACK;
   const bottom = flipped
-    ? baseBottom === Color.BLACK
+    ? self === Color.BLACK
       ? Color.WHITE
       : Color.BLACK
-    : baseBottom;
+    : self;
   const top = bottom === Color.BLACK ? Color.WHITE : Color.BLACK;
-  const name = (color: Color) =>
-    `${color === Color.BLACK ? "☗ " + game.black : "☖ " + game.white}${position.color === color ? " ・手番" : ""}`;
+  const nameOf = (color: Color) =>
+    color === Color.BLACK ? game.black : game.white;
+  const sideOf = (color: Color) => (color === Color.BLACK ? "先手" : "後手");
+  const over = !branch && ply >= total;
   const moves = selected ? legalMoves(position, selected) : [];
   const last = branch
     ? (branch.moves[branch.at - 1] ?? null)
     : record.current.move instanceof Move
       ? record.current.move
       : null;
+  const mainText = (n: { displayText: string }) => moveText(n.displayText);
+  const branchText = (i: number) =>
+    moveText(
+      formatMove(branch!.positions[i]!, branch!.moves[i]!, {
+        lastMove: i ? branch!.moves[i - 1] : (mainLast ?? undefined),
+      }),
+    );
+  const mainLast =
+    record.current.move instanceof Move ? record.current.move : null;
+  const at = branch?.at ?? ply,
+    end = branch?.moves.length ?? total;
+  const mainMoves = record.moves.filter((n) => n.move instanceof Move);
   function clear() {
     setSelected(null);
     setPromotion([]);
-    setMessage("");
   }
   function leaveBranch() {
     setPly(branch?.base ?? ply);
@@ -64,17 +178,38 @@ export default function GameScreen() {
     clear();
   }
   function commit(move: Move) {
+    // 本譜の次の手と同じなら、分岐にせず本譜を1手進める（モックの commitMove と同じ）
+    const next = mainMoves[ply]?.move;
+    if (!branch && next instanceof Move && move.equals(next)) {
+      setPly(ply + 1);
+      clear();
+      return;
+    }
     try {
       const b = branch ?? new Branch(ply, position);
       b.play(move);
       setBranch(b);
       redraw((v) => v + 1);
       clear();
+      if (!branch && !told.current) {
+        told.current = true;
+        toast("分岐は保存されません。本譜や戦績は変わりません");
+      }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "指せませんでした。");
+      toast(e instanceof Error ? e.message : "指せませんでした。");
     }
   }
+  const turnName = () =>
+    own
+      ? position.color === self
+        ? "あなた"
+        : "相手"
+      : (position.color === Color.BLACK ? "☗" : "☖") + sideOf(position.color);
   function square(sq: Square) {
+    if (promotion.length) {
+      clear();
+      return;
+    }
     const choices = moves.filter((m) => m.to.equals(sq));
     if (choices.length === 1) {
       commit(choices[0]!);
@@ -88,286 +223,565 @@ export default function GameScreen() {
     clear();
     if (!piece) return;
     if (piece.color !== position.color) {
-      setMessage("いまは反対側の手番です。");
+      toast(`いまは${turnName()}の番です`);
       return;
     }
     if (!(selected instanceof Square && selected.equals(sq))) setSelected(sq);
   }
   function hand(color: Color, type: PieceType) {
     clear();
-    if (color !== position.color) setMessage("いまは反対側の手番です。");
+    if (color !== position.color) toast(`いまは${turnName()}の番です`);
     else setSelected(selected === type ? null : type);
   }
   function step(to: number) {
     clear();
-    if (branch) {
+    if (!branch) setPly(Math.max(0, Math.min(total, to)));
+    else if (to < 1) leaveBranch();
+    else {
       branch.step(to);
       redraw((v) => v + 1);
-    } else setPly(Math.max(0, Math.min(total, to)));
-  }
-  const at = branch?.at ?? ply,
-    end = branch?.moves.length ?? total;
-  async function fav() {
-    try {
-      await toggleFavorite(db, {
-        ...game!,
-        favorite: favorite ?? game!.favorite,
-      });
-      setFavorite((previous) => ((previous ?? game!.favorite) ? 0 : 1));
-    } catch {
-      setMessage("お気に入りを保存できませんでした。");
     }
   }
+  const isFavorite = !!(favorite ?? game.favorite);
+  async function fav() {
+    setSheet(null);
+    try {
+      await toggleFavorite(db, { ...game!, favorite: +isFavorite });
+      setFavorite(isFavorite ? 0 : 1);
+      toast(isFavorite ? "お気に入りから外しました" : "お気に入りに入れました");
+    } catch {
+      toast("お気に入りを保存できませんでした");
+    }
+  }
+  function remove() {
+    setSheet(null);
+    ask({
+      title: "この棋譜を削除しますか",
+      text: "戦績からも外れます。元には戻せません。",
+      ok: "削除する",
+      danger: true,
+      onOk: async () => {
+        try {
+          await deleteGame(db, id);
+          router.dismissTo("/");
+          toast("削除しました");
+        } catch {
+          toast("削除できませんでした。もう一度お試しください");
+        }
+      },
+    });
+  }
+  const date = dateParts(game.played_at);
+  const plyLabel = (n: number) => (n ? `${n}手目` : "開始局面");
   return (
-    <Page>
-      <Stack.Screen
-        options={{
-          title: branch ? "分岐を検討" : "対局",
-          headerRight: () => (
-            <IconButton
-              name="information-outline"
-              label="対局情報"
-              onPress={() => router.push({ pathname: "/info", params: { id } })}
-            />
-          ),
-        }}
-      />
-      <View style={s.readout}>
-        <Label muted>{game.self_side ? "あなた" : "先手"}</Label>
-        <Text style={s.badge}>{branch ? "分岐中" : "未解析"}</Text>
-        <Label muted>{game.self_side ? "相手" : "後手"}</Label>
-      </View>
-      <View accessibilityLabel="形勢はまだ分かりません" style={s.bar}>
-        <View style={{ backgroundColor: colors.yellow, width: "50%" }} />
-        <View style={{ backgroundColor: colors.blue, flex: 1 }} />
-      </View>
-      <Text style={s.player} numberOfLines={2}>
-        {name(top)}
-      </Text>
-      <Board
-        position={position}
-        bottom={bottom}
-        selected={selected}
-        moves={moves}
-        onSquare={square}
-        onHand={hand}
-        last={last}
-      />
-      <Text style={[s.player, { textAlign: "right" }]} numberOfLines={2}>
-        {name(bottom)}
-      </Text>
-      <View style={[styles.row, { justifyContent: "space-between" }]}>
-        <IconButton
-          name={branch ? "undo" : "skip-backward"}
-          label={branch ? "本譜に戻る" : "最初へ"}
-          onPress={() => (branch ? leaveBranch() : step(0))}
-        />
-        <IconButton
-          name="chevron-left"
-          label="1手戻る"
-          disabled={at === 0}
-          onPress={() => step(at - 1)}
-        />
-        <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={{ color: colors.ink, fontWeight: "800", fontSize: 13 }}>
-            {branch
-              ? `分岐 ${at}手目`
-              : ply
-                ? `${ply}手目 / ${total}手`
-                : "開始局面"}
-          </Text>
-          <Text style={{ color: colors.ink, fontSize: 14 }}>
-            {last ? formatKIFMove(last) : "　"}
-          </Text>
+    <Screen bottom>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[s.hd, { height: 42 + u * 0.4 }]}>
+          <RoundButton
+            icon="prev"
+            label="戻る"
+            onPress={() =>
+              branch
+                ? leaveBranch()
+                : router.canGoBack()
+                  ? router.back()
+                  : router.replace("/")
+            }
+          />
+          <View style={{ flex: 1, gap: 3 }}>
+            <View style={s.wl}>
+              <Text style={font(700, 10.5)}>
+                {own ? "あなた" : sideOf(bottom)}
+              </Text>
+              <View style={s.jg}>
+                <Text style={font(900, 10.5)}>
+                  {branch ? "分岐中" : "未解析"}
+                </Text>
+              </View>
+              <Text style={font(700, 10.5)}>{own ? "相手" : sideOf(top)}</Text>
+            </View>
+            <StripedBar />
+          </View>
+          <RoundButton
+            icon="more"
+            label="この対局のメニュー"
+            onPress={() => setSheet("menu")}
+          />
         </View>
-        <IconButton
-          name="chevron-right"
-          label="1手進む"
-          disabled={at >= end}
-          onPress={() => step(at + 1)}
+        <View style={s.sp} />
+        <View style={[s.nmr, { height: 21 + u * 0.2 }]}>
+          <PlayerName
+            name={nameOf(top)}
+            color={top}
+            turn={!over && position.color === top}
+            bottom={false}
+          />
+        </View>
+        <Board
+          position={position}
+          bottom={bottom}
+          selected={selected}
+          moves={promotion.length ? [] : moves}
+          onSquare={square}
+          onHand={hand}
+          last={last}
+          promotion={promotion}
+          onPromote={commit}
+          over={over}
+          label={`${branch ? `分岐${at}手目` : plyLabel(ply)}の盤面`}
         />
-        <IconButton
-          name="skip-forward"
-          label="最後へ"
-          disabled={at >= end}
-          onPress={() => step(end)}
-        />
-      </View>
-      <Message text={message} />
-      {branch ? (
-        <Card>
-          <Label>本譜の{branch.base}手目から分岐中</Label>
-          <Label muted>
-            駒または持ち駒を選んで、色の付いたマスへ。本譜と戦績は変わりません。分岐はこの画面を閉じると消えます。
-          </Label>
-          <Button primary onPress={leaveBranch}>
-            本譜に戻る
-          </Button>
-        </Card>
-      ) : (
-        <Button
-          primary
-          onPress={() => {
-            clear();
-            setBranch(new Branch(ply, position));
-          }}
+        <View
+          style={[s.nmr, { height: 21 + u * 0.2, justifyContent: "flex-end" }]}
         >
-          ここから分岐を試す
-        </Button>
-      )}
-      <View style={[styles.row, { justifyContent: "space-between" }]}>
-        <Button onPress={() => setShowMoves(!showMoves)}>
-          {showMoves ? "手順を閉じる" : "棋譜の手順"}
-        </Button>
-        <IconButton
-          name="rotate-3d-variant"
-          label="盤の向きを変える"
+          {branch && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="本譜に戻る"
+              onPress={leaveBranch}
+              hitSlop={{ top: 9, bottom: 9, left: 4, right: 4 }}
+              style={s.brl}
+            >
+              <Icon name="undo" size={12} strokeWidth={2.2} />
+              <Text style={font(900, 11)}>
+                本譜（{plyLabel(branch.base)}）に戻る
+              </Text>
+            </Pressable>
+          )}
+          <PlayerName
+            name={nameOf(bottom)}
+            color={bottom}
+            turn={!over && position.color === bottom}
+            bottom
+          />
+        </View>
+        <View style={s.sp} />
+        <View
+          style={[
+            s.ct,
+            { paddingTop: 2 + u * 0.2, paddingBottom: 6 + u * 0.2 },
+          ]}
+        >
+          <RoundButton
+            size={cb}
+            warn={!!branch}
+            icon={branch ? "undo" : "first"}
+            label={branch ? "本譜に戻る" : "最初へ"}
+            onPress={() => (branch ? leaveBranch() : step(0))}
+          />
+          <RoundButton
+            size={cb}
+            icon="prev"
+            label="1手戻る"
+            disabled={at === 0}
+            onPress={() => step(at - 1)}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="棋譜を開く"
+            onPress={() => setSheet("moves")}
+            style={({ pressed }) => [
+              s.now,
+              { height: cb },
+              branch && { backgroundColor: colors.mintSoft },
+              pressed && { transform: [{ translateY: 2 }], boxShadow: "none" },
+            ]}
+          >
+            <Text style={font(700, 10.5, 1, colors.ink2)}>
+              {branch ? `分岐${at}手目` : plyLabel(ply)}
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={[font(900, 15 + u * 0.12), { flexShrink: 1 }]}
+            >
+              {!last
+                ? ""
+                : branch
+                  ? branchText(at - 1)
+                  : mainText(record.current)}
+            </Text>
+            <Icon name="down" size={14} strokeWidth={2.6} />
+          </Pressable>
+          <RoundButton
+            size={cb}
+            icon="next"
+            label="1手進む"
+            disabled={at >= end}
+            onPress={() => step(at + 1)}
+          />
+          <RoundButton
+            size={cb}
+            icon="last"
+            label="最後へ"
+            disabled={at >= end}
+            onPress={() => step(end)}
+          />
+        </View>
+        <View style={s.sp} />
+        <View style={{ marginHorizontal: 12 }}>
+          <View style={[s.tbs, { minHeight: 29 + u * 0.25 }]}>
+            <View style={[s.tbx, { height: 27 + u * 0.25 }]}>
+              <Text style={font(900, 11)}>{branch ? "分岐" : "解析"}</Text>
+            </View>
+          </View>
+          <View
+            style={[
+              s.bc,
+              {
+                minHeight: 54 + u * 1.4,
+                paddingTop: 3 + u * 0.2,
+                paddingBottom: 5 + u * 0.2,
+              },
+            ]}
+          >
+            {/* モックは2行のグリッド：余った高さを2行に等しく分け、各行の中央に置く */}
+            <View
+              style={{
+                flex: 1,
+                alignSelf: "stretch",
+                justifyContent: "space-around",
+              }}
+            >
+              <Text numberOfLines={1} style={font(900, 15.5 + u * 0.15, 1.25)}>
+                {branch ? "自由に指して試せます" : "この対局を解析する"}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}
+              >
+                {branch
+                  ? "分岐は保存されません。本譜は変わりません"
+                  : "解析は準備中です"}
+              </Text>
+            </View>
+            {!branch && (
+              <Button kind="pri" size="sm" disabled onPress={() => {}}>
+                解析する
+              </Button>
+            )}
+          </View>
+        </View>
+        <View style={s.sp} />
+        <View
+          style={[
+            s.gc,
+            { maxHeight: 29 + u * 0.3 + Math.min(0.4 * W, 0.18 * H) },
+          ]}
+        >
+          <View style={[s.ro, { height: 20 + u * 0.3 }]}>
+            {branch ? (
+              <>
+                <View style={s.bk}>
+                  <Text style={font(900, 10.5)}>分岐 {at}手目</Text>
+                </View>
+                <Text style={font(700, 10.5, 1, colors.ink2)}>
+                  評価値は出ません
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={font(700, 10.5, 1, colors.ink2)}>評価値</Text>
+                <Text style={font(900, 12.5)}>—</Text>
+                <Text style={font(700, 10.5, 1, colors.ink2)}>
+                  まだ解析していません
+                </Text>
+              </>
+            )}
+          </View>
+          <EvalGraph ply={ply} total={total} />
+        </View>
+        <View style={s.spb} />
+      </ScrollView>
+      <Sheet
+        visible={sheet === "moves"}
+        title={
+          branch
+            ? "分岐の手順"
+            : `棋譜（${date ? `${date.m}/${date.d}・` : ""}${total}手）`
+        }
+        onClose={() => setSheet(null)}
+        scrollToY={branch ? 0 : Math.max(0, ply * 36.2 - 80)}
+      >
+        {branch ? (
+          <>
+            <View style={s.mrh}>
+              <Text style={[font(700, 11.5, 1.4, colors.ink2), { flex: 1 }]}>
+                {plyLabel(branch.base)}
+                から分かれた手順です。本譜と戦績は変わりません。
+              </Text>
+              <Button
+                size="sm"
+                onPress={() => {
+                  setSheet(null);
+                  leaveBranch();
+                }}
+              >
+                本譜に戻る
+              </Button>
+            </View>
+            {branch.moves.map((m, i) => (
+              <Pressable
+                key={i}
+                accessibilityRole="button"
+                aria-selected={i + 1 === at}
+                onPress={() => {
+                  setSheet(null);
+                  step(i + 1);
+                }}
+                style={[s.mr, i + 1 === at && { backgroundColor: colors.you }]}
+              >
+                <Text style={s.mn}>{i + 1}</Text>
+                <Text style={font(700, 13.5, 1.2)}>{branchText(i)}</Text>
+              </Pressable>
+            ))}
+          </>
+        ) : (
+          // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
+          [null, ...mainMoves].map((n, i) => (
+            <Pressable
+              key={i}
+              accessibilityRole="button"
+              aria-selected={i === ply}
+              onPress={() => step(i)}
+              style={[s.mr, i === ply && { backgroundColor: colors.you }]}
+            >
+              <Text style={s.mn}>{i || ""}</Text>
+              <Text style={font(700, 13.5, 1.2)}>
+                {n ? mainText(n) : "開始局面"}
+              </Text>
+            </Pressable>
+          ))
+        )}
+      </Sheet>
+      <Sheet
+        auto
+        visible={sheet === "menu"}
+        title="この対局"
+        onClose={() => setSheet(null)}
+      >
+        <MenuRow
+          first
+          icon="star"
+          tone={isFavorite ? "on" : undefined}
+          label={isFavorite ? "お気に入りから外す" : "お気に入りに入れる"}
+          onPress={() => void fav()}
+        />
+        <MenuRow
+          icon="info"
+          label="対局情報"
+          sub="対局者・結果（修正もここから）"
           onPress={() => {
+            setSheet(null);
+            router.push({ pathname: "/info", params: { id } });
+          }}
+        />
+        <MenuRow
+          icon="refresh"
+          label="盤の向きを変える"
+          sub={`いまは${sideOf(bottom)}の側から見ています`}
+          onPress={() => {
+            setSheet(null);
             setFlipped(!flipped);
             clear();
           }}
         />
-        <IconButton
-          name={(favorite ?? game.favorite) ? "star" : "star-outline"}
-          label="お気に入りを切り替える"
-          onPress={() => void fav()}
+        <MenuRow
+          icon="export"
+          label="KIFを書き出す"
+          sub={
+            Platform.OS === "web"
+              ? "コピー・ファイルに保存"
+              : "コピー・ファイルに保存・共有"
+          }
+          onPress={() => setSheet("export")}
         />
-      </View>
-      {showMoves && (
-        <Card>
-          {branch ? (
-            <>
-              <Label muted>分岐の手順</Label>
-              <Button onPress={() => step(0)}>分岐の開始局面</Button>
-              {branch.moves.map((m, i) => (
-                <Button key={i} onPress={() => step(i + 1)}>
-                  {i + 1} {formatKIFMove(m)}
-                </Button>
-              ))}
-            </>
-          ) : (
-            <>
-              <Button onPress={() => step(0)}>開始局面</Button>
-              {record.moves
-                .filter((n) => n.move instanceof Move)
-                .map((n) => (
-                  <Button key={n.ply} onPress={() => step(n.ply)}>
-                    {n.ply} {n.displayText}
-                  </Button>
-                ))}
-            </>
-          )}
-        </Card>
-      )}
-      <View style={s.graph} accessibilityLabel="評価値グラフ 未解析">
-        {[3000, 1500, 0, -1500, -3000].map((v) => (
-          <View key={v} style={s.graphRow}>
-            <Text style={s.axis}>
-              {v > 0 ? "+" : ""}
-              {v}
-            </Text>
-            <View style={s.line} />
-          </View>
-        ))}
-        <Text style={s.graphMessage}>未解析・まだ評価値はありません</Text>
-      </View>
-      <Card>
-        <Label>候補手　—</Label>
-        <Label muted>
-          未解析です。解析の連携は準備中です。盤を動かして、別の手を試すことはできます。
-        </Label>
-      </Card>
-      <Button
-        onPress={() => router.push({ pathname: "/info", params: { id } })}
-      >
-        対局情報・結果を直す
-      </Button>
-      <Button
-        onPress={() => router.push({ pathname: "/export", params: { id } })}
-      >
-        KIFを書き出す
-      </Button>
-      <Modal
-        visible={promotion.length > 0}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPromotion([])}
-      >
-        <View style={s.overlay}>
-          <View style={styles.card}>
-            <Label title>成りますか？</Label>
-            {promotion.map((m) => (
-              <Button key={m.usi} primary={m.promote} onPress={() => commit(m)}>
-                {m.promote ? "成る" : "成らない"}
-              </Button>
-            ))}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setPromotion([])}
-              style={{ padding: 16 }}
-            >
-              <Label>キャンセル</Label>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    </Page>
+        <MenuRow
+          icon="trash"
+          tone="danger"
+          label="この棋譜を削除"
+          onPress={remove}
+        />
+      </Sheet>
+      <ExportSheet
+        visible={sheet === "export"}
+        onClose={() => setSheet(null)}
+        id={id}
+        kif={game.kif}
+      />
+    </Screen>
   );
 }
 const s = StyleSheet.create({
-  readout: {
+  sp: { flex: 1 },
+  spb: { flexGrow: 1.5, flexShrink: 1, flexBasis: 10, minHeight: 10 },
+  hd: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+  },
+  wl: {
+    height: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  jg: {
+    // 高さ16の行からはみ出す分（18.5−16）。Android は行の高さで文字を切るため、余白で逃がす
+    marginVertical: -1.25,
+    paddingTop: 2,
+    paddingHorizontal: 8,
+    paddingBottom: 3,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+  },
+  bar: {
+    height: 13,
+    borderWidth: line.ol,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    overflow: "hidden",
+  },
+  nmr: { flexDirection: "row", alignItems: "center", paddingHorizontal: 4 },
+  id: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "52%",
+    paddingVertical: 1,
+    borderWidth: line.thin,
+    borderColor: "transparent",
+    borderRadius: radius.pill,
+  },
+  av: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brl: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    height: 19,
+    marginRight: "auto",
+    paddingLeft: 5,
+    paddingRight: 7,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.coralSoft,
+  },
+  ct: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 12,
+  },
+  now: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 6,
+    borderWidth: line.ol,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    boxShadow: shadow.small,
+  },
+  tbs: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 4,
+    paddingLeft: 16,
+    paddingRight: 1,
+    marginBottom: -2,
+    zIndex: 1,
+  },
+  tbx: {
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderWidth: line.ol,
+    borderColor: colors.ink,
+    borderBottomColor: colors.white,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    backgroundColor: colors.white,
+  },
+  bc: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingLeft: 12,
+    paddingRight: 9,
+    backgroundColor: colors.white,
+    borderWidth: line.ol,
+    borderColor: colors.ink,
+    borderRadius: radius.card,
+    boxShadow: shadow.card,
+  },
+  gc: {
+    flexGrow: 1000,
+    flexShrink: 0,
+    flexBasis: 112,
+    marginTop: 5,
+    marginHorizontal: 12,
+    paddingTop: 4,
+    paddingHorizontal: 5,
+    paddingBottom: 1,
+    backgroundColor: colors.white,
+    borderWidth: line.ol,
+    borderColor: colors.ink,
+    borderRadius: radius.card,
+    boxShadow: shadow.card,
+  },
+  ro: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 5,
+  },
+  bk: {
+    paddingTop: 2,
+    paddingHorizontal: 7,
+    paddingBottom: 3,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.mintSoft,
+  },
+  mr: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    padding: 10,
+    borderRadius: 10,
+  },
+  mn: {
+    ...font(700, 11, 1.2, colors.ink2),
+    width: 30,
+    fontVariant: ["tabular-nums"],
+  },
+  mrh: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-  },
-  badge: {
-    color: colors.ink,
-    backgroundColor: "#EEEADD",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 99,
-    fontWeight: "800",
-  },
-  bar: {
-    height: 12,
-    borderRadius: 99,
-    borderWidth: 2,
-    borderColor: colors.ink,
-    flexDirection: "row",
-    overflow: "hidden",
-  },
-  player: {
-    color: colors.ink,
-    fontWeight: "800",
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  graph: {
-    height: 150,
-    position: "relative",
-    justifyContent: "space-between",
-    backgroundColor: "#FFFFFF88",
+    marginHorizontal: 2,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: line.thin,
+    borderStyle: "dashed",
+    borderColor: colors.dash,
     borderRadius: 12,
-    padding: 8,
-  },
-  graphRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  axis: { fontSize: 10, width: 36, textAlign: "right", color: colors.muted },
-  line: { height: 1, backgroundColor: colors.line, flex: 1 },
-  graphMessage: {
-    position: "absolute",
-    top: 58,
-    alignSelf: "center",
-    color: colors.muted,
-    backgroundColor: colors.background,
-    padding: 8,
-    fontSize: 12,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: "#24284699",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
   },
 });

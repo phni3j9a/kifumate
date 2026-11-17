@@ -1,24 +1,61 @@
-import { router } from "expo-router";
-import { Button, Card, Label, Page } from "../../components/ui";
+import { useCallback, useState } from "react";
+import { ScrollView } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
+import {
+  AppBar,
+  Card,
+  Hint,
+  Row,
+  Screen,
+  SectionTitle,
+} from "../../components/ui";
+import { listAliases } from "../../storage/repository";
 export default function Settings() {
+  const db = useSQLiteContext();
+  const [names, setNames] = useState("");
+  useFocusEffect(
+    useCallback(() => {
+      listAliases(db)
+        .then((a) => setNames(a.map((n) => n.name).join("、")))
+        .catch(() => setNames(""));
+    }, [db]),
+  );
   return (
-    <Page>
-      <Card>
-        <Label title>自分の対局</Label>
-        <Label muted>いつもの名前を登録すると、先後と勝敗を見分けます。</Label>
-        <Button onPress={() => router.push("/names")}>自分の対局者名</Button>
-      </Card>
-      <Card>
-        <Label>オフラインで使えます</Label>
-        <Label muted>
-          棋譜はこの端末だけに保存されます。解析・AIコーチ・一括バックアップ・同期は準備中です。大切な棋譜はKIFで書き出して保管してください。
-        </Label>
-      </Card>
-      <Card>
-        <Label>このアプリについて</Label>
-        <Label muted>kifumate 0.1.0</Label>
-        <Button onPress={() => router.push("/licenses")}>ライセンス</Button>
-      </Card>
-    </Page>
+    <Screen>
+      <AppBar title="設定" />
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: 9,
+          paddingHorizontal: 14,
+          paddingBottom: 22,
+        }}
+      >
+        <SectionTitle first>対局</SectionTitle>
+        <Card>
+          <Row
+            first
+            icon="user"
+            title="自分の対局者名"
+            sub={names || "未登録"}
+            onPress={() => router.push("/names")}
+          />
+        </Card>
+        <SectionTitle>データ</SectionTitle>
+        <Hint style={{ marginTop: 0 }}>
+          棋譜はこの端末の中だけに保存されています。まとめてバックアップする機能は準備中です。大切な棋譜は、対局の「…」から「KIFを書き出す」で保管してください。
+        </Hint>
+        <SectionTitle>このアプリ</SectionTitle>
+        <Card>
+          <Row
+            first
+            icon="info"
+            title="このアプリについて"
+            sub="ライセンス"
+            onPress={() => router.push("/about")}
+          />
+        </Card>
+      </ScrollView>
+    </Screen>
   );
 }

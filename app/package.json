@@ -11,9 +11,11 @@
     "lint": "expo lint",
     "test": "tsx --test tests/*.test.ts && node scripts/check-product-names.mjs",
     "test:web": "playwright test",
-    "check": "npm run test && npm run typecheck && npm run lint"
+    "check": "npm run test && npm run typecheck && npm run lint",
+    "compare": "tsx scripts/compare-mock.mts"
   },
   "dependencies": {
+    "@expo-google-fonts/zen-maru-gothic": "^0.4.2",
     "@expo/vector-icons": "^15.0.2",
     "encoding-japanese": "^2.5.0",
     "expo": "^58.0.25",
@@ -33,6 +35,7 @@
     "react-native": "0.88.1",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
+    "react-native-svg": "15.16.0",
     "react-native-web": "^0.21.4",
     "tsshogi": "^2.3.4"
   },

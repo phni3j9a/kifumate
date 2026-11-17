@@ -299,6 +299,14 @@ export function gameOutcome(record: ShogiRecord): Side | "draw" {
       : null;
   return winner === null ? null : winner === Color.BLACK ? "black" : "white";
 }
+/** 棋譜に書かれた結果を1行で（例：95手で先手の勝ち（詰み））。画面表示用 */
+export function outcomeText(record: ShogiRecord): string {
+  const outcome = gameOutcome(record);
+  const plies = describe(record).plies;
+  if (!outcome) return `${plies}手・結果は書かれていません`;
+  const end = record.moves[record.moves.length - 1]!.displayText;
+  return `${plies}手で${outcome === "draw" ? "引き分け" : outcome === "black" ? "先手の勝ち" : "後手の勝ち"}（${end}）`;
+}
 export function resultFor(side: Side, outcome: Side | "draw"): Result {
   return !side
     ? "unknown"
