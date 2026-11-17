@@ -1,9 +1,44 @@
+import { PieceType, standardPieceName } from "tsshogi";
+import { classificationCatalog } from "../core/classify/rules";
 import type { CoachInput, Message, Profile, Style } from "./types";
 import type { Saved } from "../analysis/types";
 import type { Game } from "../storage/repository";
-// サーバーの正規化より前に、全角・大小文字・不可視文字違いの登録名も伏せる。
+// 照合だけで空白・全半角・不可視文字の差を除き、送る文の数字や表記は保つ。
 const normalize = (s: string) =>
-  s.replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, "").normalize("NFKC");
+  s
+    .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, "")
+    .normalize("NFKC")
+    .replace(/\s/gu, "");
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const shogiTerms = new RegExp(
+  [
+    ...Object.values(PieceType).map(standardPieceName),
+    "王",
+    "王将",
+    "玉将",
+    "歩兵",
+    "香車",
+    "桂馬",
+    "銀将",
+    "金将",
+    "角行",
+    "飛車",
+    "と金",
+    "龍",
+    "龍王",
+    "竜王",
+    "龍馬",
+    "竜馬",
+    "居飛車",
+    "振り飛車",
+    ...classificationCatalog.strategies.map((t) => t.name),
+    ...classificationCatalog.castles.map((t) => t.name),
+  ]
+    .sort((a, b) => b.length - a.length)
+    .map(escape)
+    .join("|"),
+  "gu",
+);
 export function redact(
   text: string,
   aliases: string[],
@@ -39,7 +74,7 @@ export function redact(
       const last = clusters[clusters.length - 1]!;
       last.text += char;
       last.end = end;
-    } else if (!/[\p{Cf}\p{Default_Ignorable_Code_Point}]/u.test(char)) {
+    } else if (!/[\s\p{Cf}\p{Default_Ignorable_Code_Point}]/u.test(char)) {
       clusters.push({ text: char, start: offset, end });
     }
     offset = end;
@@ -51,13 +86,27 @@ export function redact(
     comparable += normalized;
     for (let i = 0; i < normalized.length; i++) spans.push(cluster);
   }
-  const pattern = new RegExp(
-    keys.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-    "giu",
-  );
+  const pattern = new RegExp(keys.map(escape).join("|"), "giu");
+  const terms = [...comparable.matchAll(shogiTerms)].map((m) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
   let result = "",
     previous = 0;
   for (const match of comparable.matchAll(pattern)) {
+    const honorific = /^(?:さん|くん|君|ちゃん|氏|様|さま|先生|殿)/u.test(
+      comparable.slice(match.index + match[0].length),
+    );
+    // 敬称なら人名を優先し、それ以外は既知の将棋用語と敬称のない1文字を保って誤置換を防ぐ。
+    if (
+      !honorific &&
+      ([...match[0]].length === 1 ||
+        terms.some(
+          (t) =>
+            t.start <= match.index && t.end >= match.index + match[0].length,
+        ))
+    )
+      continue;
     const first = spans[match.index!]!,
       last = spans[match.index! + match[0].length - 1]!;
     if (first.start < previous) continue;
@@ -93,7 +142,7 @@ export function coachInput(
         : game.self_side === "white"
           ? "gote"
           : "observer",
-    profile: { practice: profile.practice.map(hide), goal: hide(profile.goal) },
+    profile: { practice: profile.practice, goal: hide(profile.goal) },
     style,
     history: history
       .slice(-20)

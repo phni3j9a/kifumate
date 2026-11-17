@@ -141,6 +141,8 @@ export class CoachController {
     const r = this.snapshot.records[gameId];
     if (!r?.attempt) return;
     await this.save({ ...r, attempt: { ...r.attempt, cancel: true } });
+    // 待機中のPOST/GETがpendingで戻っても、画面の次の同期に頼らず中止を処理する。
+    await this.working;
     await this.sync();
   }
   sync = (): Promise<void> => {

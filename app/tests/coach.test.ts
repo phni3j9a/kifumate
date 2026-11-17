@@ -458,3 +458,114 @@ test("伏せ字は名前以外の全角数値・符号を変えず、結合文�
     "あなたの評価は＋６００、−20。あなたさん",
   );
 });
+
+for (const [name, text, expected] of [
+  ["山田 太郎", "山田太郎さんの評価は＋６００", "あなたさんの評価は＋６００"],
+  ["山田太郎", "山田　 太郎さんと 山田  太郎さん", "あなたさんと あなたさん"],
+  [
+    "Ｔｓｕ　ｂａｍｅ",
+    "tsu  BAMEさん、評価 ＋６００",
+    "あなたさん、評価 ＋６００",
+  ],
+] as const) {
+  test(`伏せ字：空白差を吸収し名前以外の位置・表記を保つ（${name}）`, () => {
+    assert.equal(
+      redact(text, [name], { ...game, black: "", white: "" }),
+      expected,
+    );
+  });
+}
+test("伏せ字：両対局者の空白差も目標・質問・再送履歴から除く", () => {
+  const p = coachInput(
+    "id",
+    saved,
+    { black: "山田 太郎", white: "佐藤　花子", self_side: "black" },
+    [],
+    { ...defaultProfile, goal: "山田太郎さんと練習" },
+    defaultProfile.style,
+    [
+      { role: "user", content: "佐藤 花子さん" },
+      { role: "assistant", content: "山田　太郎さん" },
+    ],
+    "佐藤花子さんの狙いは？",
+  );
+  assert.equal(p.profile.goal, "あなたさんと練習");
+  assert.equal(p.question, "相手さんの狙いは？");
+  assert.deepEqual(
+    p.history.map((m) => m.content),
+    ["相手さん", "あなたさん"],
+  );
+});
+test("伏せ字：固定の学習戦法は名前が重なっても変えない", () => {
+  const p = coachInput(
+    "id",
+    saved,
+    game,
+    ["銀", "棒銀", "四間飛車"],
+    {
+      ...defaultProfile,
+      practice: ["棒銀", "四間飛車"],
+      goal: "銀さんと棒銀を練習したい",
+    },
+    defaultProfile.style,
+    [],
+  );
+  assert.deepEqual(p.profile.practice, ["棒銀", "四間飛車"]);
+  assert.equal(p.profile.goal, "あなたさんと棒銀を練習したい");
+});
+test("伏せ字：駒・戦法・囲いの語を保ち、1文字名は敬称が続くときだけ伏せる", () => {
+  assert.equal(
+    redact(
+      "銀さん、銀くん、銀氏、銀様、棒銀、銀冠、成銀、銀を使う",
+      ["銀"],
+      game,
+    ),
+    "あなたさん、あなたくん、あなた氏、あなた様、棒銀、銀冠、成銀、銀を使う",
+  );
+  assert.equal(
+    redact("Ａさん、aくん、a pawn", ["a"], game),
+    "あなたさん、あなたくん、a pawn",
+  );
+  assert.equal(
+    redact(
+      "美濃囲い・高美濃・美濃さん・穴熊・熊くん・右四間飛車・四間さん",
+      ["美濃", "熊", "四間"],
+      game,
+    ),
+    "美濃囲い・高美濃・あなたさん・穴熊・あなたくん・右四間飛車・あなたさん",
+  );
+});
+for (const method of ["createCoach", "getCoach"] as const) {
+  test(`中止：${method}の応答待ちに重なっても追加syncなしで同じIDへDELETE`, async () => {
+    let resolveReply!: (r: CoachReply) => void, entered!: () => void;
+    const waiting = new Promise<CoachReply>((r) => {
+      resolveReply = r;
+    });
+    const started = new Promise<void>((r) => {
+      entered = r;
+    });
+    const deletes: string[] = [];
+    const s = await setup({
+      cancelCoach: async (id) => {
+        deletes.push(id);
+        return reply("cancelled");
+      },
+    });
+    if (method === "getCoach") await s.c.start("a", input);
+    s.client[method] = async () => {
+      entered();
+      return waiting;
+    };
+    const syncing =
+      method === "createCoach" ? s.c.start("a", input) : s.c.sync();
+    await started;
+    const cancelling = s.c.cancel("a");
+    await new Promise<void>((r) => setImmediate(r));
+    assert.equal((await s.storage.load())[0]!.attempt!.cancel, true);
+    resolveReply(reply());
+    await Promise.all([syncing, cancelling]);
+    assert.deepEqual(deletes, [input.requestId]);
+    assert.equal(s.c.snapshot.records.a!.attempt, null);
+    s.sql.close();
+  });
+}

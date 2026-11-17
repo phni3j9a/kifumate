@@ -159,3 +159,43 @@ test("POST応答喪失と再起動でも同一IDをGETし、二重POSTしない"
   ).toBeVisible();
   expect(coach.requests).toHaveLength(1);
 });
+
+test("通信復帰の再確認は新しい依頼を作らず、保存済みの解説とチャットを保つ", async ({
+  page,
+}) => {
+  const { coach } = await imported(page);
+  coach.status = "completed";
+  await button(page, "AIに聞く").click();
+  await button(page, "解説をつくる").click();
+  await expect(
+    page.getByText("この対局のまとめ", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "AIコーチへの質問" })
+    .fill("保存しておく質問");
+  await button(page, "質問を送る").click();
+  await expect(page.getByText("この対局のまとめ", { exact: true })).toHaveCount(
+    2,
+  );
+  await button(page, "AIコーチを閉じる").click();
+  coach.online = false;
+  await button(page, "AIに聞く").click();
+  await expect(page.getByText(/通信できません。保存済みの解説/)).toBeVisible();
+  coach.online = true;
+  await button(page, "もう一度試す").click();
+  await expect(button(page, "もう一度試す")).toHaveCount(0);
+  // 定期同期の1周期後にも、新規POSTやチャットの置き換えが起きないことを確かめる。
+  await page.waitForTimeout(3500);
+  expect(coach.requests).toHaveLength(2);
+  await expect(
+    page.getByText("保存しておく質問", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("この対局のまとめ", { exact: true })).toHaveCount(
+    2,
+  );
+  await page.reload();
+  await button(page, "AIに聞く").click();
+  await expect(
+    page.getByText("保存しておく質問", { exact: true }),
+  ).toBeVisible();
+});

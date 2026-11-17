@@ -179,7 +179,7 @@ export function CoachSheet({
   }
   const notice = quotaNotice(q);
   const retry = () => {
-    if (attempt) void controller.sync();
+    if (offline || attempt || !r?.error) void controller.sync();
     else void send(r?.failedQuestion);
   };
   const pendingQuestion = attempt?.input.question;
