@@ -3,14 +3,7 @@ import { useCallback, useState } from "react";
 import { ScrollView } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import {
-  AppBar,
-  Card,
-  Hint,
-  Row,
-  Screen,
-  SectionTitle,
-} from "../../components/ui";
+import { AppBar, Card, Row, Screen, SectionTitle } from "../../components/ui";
 import { useAnalysis } from "../../analysis/provider";
 import { AnalysisQuota } from "../../components/analysis-quota";
 import { listAliases } from "../../storage/repository";
@@ -65,16 +58,28 @@ export default function Settings() {
           />
         </Card>
         <SectionTitle>データ</SectionTitle>
-        <Hint style={{ marginTop: 0 }}>
-          棋譜はこの端末の中だけに保存されています。まとめてバックアップする機能は準備中です。大切な棋譜は、対局の「…」から「KIFを書き出す」で保管してください。
-        </Hint>
+        <Card>
+          <Row
+            first
+            icon="box"
+            title="バックアップと復元"
+            sub="機種変更のときはここから"
+            onPress={() => router.push("/backup")}
+          />
+        </Card>
         <SectionTitle>このアプリ</SectionTitle>
         <Card>
           <Row
             first
+            icon="play"
+            title="使い方をもう一度見る"
+            sub="はじめの紹介を最初から"
+            onPress={() => router.push("/onboarding")}
+          />
+          <Row
             icon="info"
             title="このアプリについて"
-            sub="ライセンス"
+            sub="利用規約・ライセンス"
             onPress={() => router.push("/about")}
           />
         </Card>

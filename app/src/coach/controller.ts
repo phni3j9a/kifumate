@@ -1,3 +1,4 @@
+import { dataPaused } from "../storage/maintenance";
 import { ApiError, type AnalysisClient } from "../analysis/client";
 import type { CoachStorage } from "./storage";
 import {
@@ -145,7 +146,12 @@ export class CoachController {
     await this.working;
     await this.sync();
   }
+  async idle() {
+    await this.working;
+    await this.profileWrites;
+  }
   sync = (): Promise<void> => {
+    if (dataPaused) return Promise.resolve();
     if (this.working) return this.working;
     this.working = this.run().finally(() => {
       this.working = null;

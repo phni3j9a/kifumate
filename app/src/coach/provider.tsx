@@ -1,3 +1,5 @@
+import { useAppData } from "../components/data-provider";
+import { registerDataDrain } from "../storage/maintenance";
 import { useEntitlements } from "../entitlements/provider";
 import {
   createContext,
@@ -25,10 +27,12 @@ export function CoachProvider({
   children,
 }: PropsWithChildren<{ client: AnalysisClient }>) {
   const db = useSQLiteContext();
+  const { revision } = useAppData();
   const controller = useMemo(
     () => new CoachController(client, coachStorage(db)),
     [client, db],
   );
+  useEffect(() => registerDataDrain(() => controller.idle()), [controller]);
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -71,7 +75,7 @@ export function CoachProvider({
       clearTimeout(timer);
       sub.remove();
     };
-  }, [controller]);
+  }, [controller, revision]);
   return <Context.Provider value={controller}>{children}</Context.Provider>;
 }
 export function useCoach() {

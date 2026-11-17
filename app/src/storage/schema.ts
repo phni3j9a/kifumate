@@ -61,6 +61,12 @@ CREATE TABLE coaches (
 );
 CREATE TABLE coach_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
 `,
+  String.raw`
+ALTER TABLE games ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1));
+CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+-- 更新前から使っている人には初回の紹介を割り込ませない。
+INSERT INTO settings SELECT 'onboardingCompleted','true' WHERE EXISTS(SELECT 1 FROM games) OR EXISTS(SELECT 1 FROM aliases);
+`,
 ];
 
 export interface MigrationDatabase {

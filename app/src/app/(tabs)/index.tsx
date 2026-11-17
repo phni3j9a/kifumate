@@ -1,3 +1,5 @@
+import { randomUUID } from "expo-crypto";
+import { addSampleGame } from "../../storage/sample";
 import {
   GameTags,
   TagFilterGroups,
@@ -127,7 +129,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
   }>();
   const { revision } = useClassifications();
   const db = useSQLiteContext();
-  const { records, offline, quota } = useAnalysis();
+  const { records, offline, quota, controller } = useAnalysis();
   const [games, setGames] = useState<Game[] | null>(null),
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
@@ -203,7 +205,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         <EmptyState
           image="sys-empty"
           title="まだ棋譜がありません"
-          detail="指した将棋のKIFを取り込むと、ここに並びます。盤に並べて、振り返りを始めましょう。"
+          detail="指した将棋のKIFを取り込むと、ここに並びます。解析して、振り返りを始めましょう。"
         >
           <Button
             kind="pri"
@@ -213,6 +215,18 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
           >
             棋譜を取り込む
           </Button>
+          <TextButton
+            onPress={() => {
+              void addSampleGame(db, randomUUID)
+                .then(async (id) => {
+                  await controller.init();
+                  router.push(`/game/${id}`);
+                })
+                .catch(() => toast("見本の対局を開けませんでした"));
+            }}
+          >
+            見本の対局で試してみる
+          </TextButton>
           <View style={{ marginTop: 2 }}>
             <KifHelpLink />
           </View>
@@ -466,9 +480,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                             : `${g.black} 対 ${g.white}`}
                       </Text>
                       <Text style={font(700, 11, 1, colors.ink2)}>
-                        {g.self_side
-                          ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
-                          : "自分以外の対局"}
+                        {g.is_sample
+                          ? "サンプル"
+                          : g.self_side
+                            ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
+                            : "自分以外の対局"}
                       </Text>
                     </View>
                     <View style={s.tg}>

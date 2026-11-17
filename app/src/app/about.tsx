@@ -1,6 +1,8 @@
 import { Image, Text, View } from "react-native";
 import { router } from "expo-router";
 import Constants from "expo-constants";
+import * as Linking from "expo-linking";
+import { ask, toast } from "../components/overlay";
 import { colors, font, line, shadow } from "../components/theme";
 import {
   Card,
@@ -50,6 +52,35 @@ export default function About() {
         <Card>
           <Row
             first
+            title="利用規約"
+            onPress={() =>
+              router.push({ pathname: "/legal", params: { kind: "terms" } })
+            }
+          />
+          <Row
+            title="プライバシーポリシー"
+            onPress={() =>
+              router.push({ pathname: "/legal", params: { kind: "privacy" } })
+            }
+          />
+          <Row
+            title="お問い合わせ"
+            onPress={() =>
+              ask({
+                title: "お問い合わせ",
+                text: "配布者へ直接ご連絡ください。不具合は公開の報告先にも送れますが、棋譜・名前・招待コード・バックアップなどの個人情報を載せないでください。",
+                ok: "公開の報告先を開く",
+                onOk: () => {
+                  void Linking.openURL(
+                    "https://github.com/phni3j9a/kifumate/issues",
+                  ).catch(() =>
+                    toast("開けませんでした。配布者へご連絡ください"),
+                  );
+                },
+              })
+            }
+          />
+          <Row
             title="ライセンス"
             sub="このアプリに含まれるソフトウェア"
             onPress={() => router.push("/licenses")}

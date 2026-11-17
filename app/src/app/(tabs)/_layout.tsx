@@ -1,7 +1,8 @@
+import { useAppData } from "../../components/data-provider";
 import type { ComponentProps } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { Icon, type IconName } from "../../components/icons";
 import { colors, font, line, radius } from "../../components/theme";
 
@@ -88,6 +89,8 @@ function TabBar({ state, descriptors, emitter, navigateToTab }: TabBarProps) {
   );
 }
 export default function TabLayout() {
+  const { completed } = useAppData();
+  if (!completed) return <Redirect href="/onboarding" />;
   return (
     <Tabs
       tabBar={(props) => <TabBar {...props} />}

@@ -438,7 +438,7 @@ test("プロフィールとスタイル保存は順番を守り、無料・オ�
 });
 test("v4→v5移行は棋譜を保持し、再実行・CASCADE・プロフィールを確認", async () => {
   const s = await setup();
-  s.sql.exec("DROP TABLE coaches;DROP TABLE coach_meta;PRAGMA user_version=4");
+  s.sql.exec("ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches;DROP TABLE coach_meta;PRAGMA user_version=4");
   await migrate(s.db);
   await migrate(s.db);
   assert.equal(

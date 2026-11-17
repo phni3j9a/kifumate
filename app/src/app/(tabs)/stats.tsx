@@ -255,7 +255,7 @@ export default function Stats() {
         <AppBar title="戦績" />
       </Screen>
     );
-  if (!games.some((g) => g.self_side))
+  if (!games.some((g) => g.self_side && !g.is_sample))
     return (
       <Screen>
         <AppBar title="戦績" />
@@ -276,7 +276,7 @@ export default function Stats() {
       </Screen>
     );
   const visible = games.filter(
-      (g) => g.self_side && matchesGame(g, filter, now),
+      (g) => g.self_side && !g.is_sample && matchesGame(g, filter, now),
     ),
     t = tally(visible);
   const chron = [...visible].sort(

@@ -230,7 +230,7 @@ test("v3から移行して既存棋譜を逐次分類、再実行とCASCADE", as
       false,
     );
     sql.exec(
-      "DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
+      "ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
     );
     await migrate(db);
     await migrate(db);
@@ -306,7 +306,7 @@ test("v4移行の失敗はv3の棋譜・解析・版を保持してロールバ�
       false,
     );
     sql.exec(
-      "DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
+      "ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
     );
     const original = db.execAsync.bind(db);
     db.execAsync = async (query) => {

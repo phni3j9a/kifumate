@@ -33,6 +33,7 @@ export interface Game {
   /** 手で直した勝ち側。NULL は棋譜の結果どおり */
   winner: Winner | null;
   favorite: number;
+  is_sample?: number;
   classification_auto?: string | null;
   classification_manual?: string | null;
   classification_error?: string | null;
@@ -52,7 +53,7 @@ export const listGames = (db: SQLiteDatabase) =>
 // 一覧・集計では大きなKIF本文を読まない。対局画面は getGame で本文も取得する。
 export const listGameSummaries = (db: SQLiteDatabase) =>
   db.getAllAsync<Game>(
-    `${classificationSelect.replace("games.*", "games.id,games.black,games.white,games.played_at,games.plies,games.self_side,games.result,games.side_manual,games.result_manual,games.winner,games.favorite,'' AS kif")} ORDER BY played_at DESC, created_at DESC`,
+    `${classificationSelect.replace("games.*", "games.id,games.black,games.white,games.played_at,games.plies,games.self_side,games.result,games.side_manual,games.result_manual,games.winner,games.favorite,games.is_sample,'' AS kif")} ORDER BY played_at DESC, created_at DESC`,
   );
 export const getGame = (db: SQLiteDatabase, id: string) =>
   db.getFirstAsync<Game>(`${classificationSelect} WHERE games.id=?`, id);
