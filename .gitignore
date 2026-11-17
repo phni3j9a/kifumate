@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+.dev.vars*
+.env*
+!.env.example
+server/container/eval/
+nn.bin
+server/container/engine
+server/container/YaneuraOu*
+server/container/.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+server/.local/
