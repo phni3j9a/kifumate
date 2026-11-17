@@ -18,8 +18,8 @@ cd app
 npm ci
 cp .env.example .env.local # 開発はstaging。実機確認で接続先を変えるときはこのファイルを編集
 npm run web       # Web。端末内DBはブラウザの同じオリジンに保存
-npm start         # QRコードから Expo Go で開く
-npm run android   # 接続したAndroid / 使用可能なエミュレータで開く
+npm start         # --goを指定済み。QRコードから Expo Go で開く
+npm run android   # 接続したAndroid / 使用可能なエミュレータのExpo Goで開く
 ```
 
 USB 接続の実機を使う場合：
@@ -27,14 +27,114 @@ USB 接続の実機を使う場合：
 ```sh
 adb devices
 adb reverse tcp:8081 tcp:8081
-npx expo start --localhost
+npm start -- --localhost
 # 別のターミナルで
 adb shell am start -a android.intent.action.VIEW -d exp://127.0.0.1:8081 host.exp.exponent
+```
+
+既定の `start`・`android`・`web` は `--go` を指定しています。`expo-dev-client` が依存にあっても、`npm start` は `Using Expo Go` と接続先の `exp://` を表示します。SDK 58ではQRからアプリ選択ページを経由する場合があるので、その場合はExpo Goを選んでください。
+
+EASの `development` プロファイルで作成・インストールした開発クライアントを使う場合だけ、次で起動します（今回は開発APKをビルドしません）。
+
+```sh
+npm run start:dev              # APP_VARIANT=development と --dev-client を指定済み
+npm run start:dev -- --android # 開発用の別IDのアプリを開く
 ```
 
 開発サーバーの停止は `Ctrl+C`。Web は動作確認用で、インストール可能なオフラインPWAではありません。Web を再読み込みするには開発サーバーまたは配信先への接続が必要です。Android / iOS の保存データの閲覧・操作には解析サーバーも外部通信も不要です。解析の依頼・進捗・回数の更新には通信が必要です。
 
 Web の本番用バンドル：`npx expo export --platform web`。配信時は SPA のルートフォールバック、WASM の MIME `application/wasm`、`Cross-Origin-Embedder-Policy: credentialless` と `Cross-Origin-Opener-Policy: same-origin` を設定してください。expo-sqlite の Web 対応は実験的です。
+
+## Androidの配布APKビルド
+
+EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）です。ビルドとAndroid署名鍵をEASで管理します。表示名はモックと同じ **kifumate**、表示用の版は **0.1.0**。`android/`・`ios/`は生成物でコミットしません。
+
+| `eas.json` のプロファイル | 用途 | 接続先・ID |
+| --- | --- | --- |
+| `development` | `expo-dev-client` の開発APK | staging・`com.quarterlambda.kifumate.development`・kifumate（開発） |
+| `apk` | 招待制の署名付きリリースAPK（`buildType: apk`） | 本番・`com.quarterlambda.kifumate`・開発判定は無効 |
+| `production` | 将来のストア用AAB（設定のみ） | 本番・同じリリースID。購入・ストア公開は別作業 |
+
+配布用の `apk` と将来のストア用 `production` は **arm64-v8a専用**です。公式の `expo-build-properties` の `android.buildArchs: ["arm64-v8a"]` を `app.config.ts` のリリース側にだけ設定し、Prebuildで `reactNativeArchitectures` を生成します。**32bit ARM端末（64bit CPUでもOSが32bitの端末を含む）とx86／x86_64端末にはインストールできません**。開発プロファイルは従来の4ABIのままで、エミュレータ向けのABIも残しています。
+
+`app.config.ts` はEASプロファイルの `APP_VARIANT=development` のときだけ開発用IDへ変更します。既定と配布版はリリースIDです。Expo Go・開発版と配布版の棋譜／トークンは別アプリのデータで、自動移行されません。開発版を作るだけでは招待権利は付きません。APKは `__DEV__ === false` のリリースで、環境変数を変えても本番URL固定・開発用権利は拒否します。
+
+### クラウドでビルド・保存
+
+```sh
+cd app
+npm ci
+npx eas-cli@latest login  # asitaka.k。既にログイン済みなら不要
+npx eas-cli@latest whoami
+npm run check
+npm run test:web
+npx eas-cli@latest build --platform android --profile apk
+# 完了後、EASのビルド画面からAPKをダウンロードし、例えば次へ保管する
+mkdir -p ~/kifumate-releases
+# ~/kifumate-releases/kifumate-0.1.0-<versionCode>.apk
+```
+
+EASプロジェクトの `internalDistributionBuildPrivacy` は **PRIVATE**（未認証アクセス無効）に設定しています。ビルドURLは本人用の管理画面で、知人へはAPKの実体を個別に渡します。EASの内部配布URL／APKのダウンロードURLを公開しないでください。`.easignore` は開発環境変数・ネイティブ生成物・ローカル検証データ・署名情報をアップロードから除きます。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。無料枠を節約するため、ローカル検証を通してから依頼し、AABや開発版を確認のためだけに追加ビルドしません。
+
+クラウドが混雑している場合や上書き更新確認の2回目は、Android SDK・NDK・JDKがあるLinux/macOSで同じEAS設定を使えます。ローカルでもログイン・EASの鍵と版番号への接続が必要です。
+
+```sh
+# このマシンは JDK 17、~/Android/Sdk（SDK Platform 37.0・Build Tools 37.0.0）を使用
+JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
+  ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
+  npx eas-cli@latest build --platform android --profile apk --local \
+  --output "$HOME/kifumate-releases/kifumate-0.1.0-update.apk"
+```
+
+ローカルでも同じ `apk` プロファイルがEAS上の番号を先に更新し、その番号をネイティブへ埋め込みます。手元だけで番号を変更したり、クラウドの番号を巻き戻したりしません。完了後は `aapt dump badging <APK>` で番号を確かめ、配布ファイル名にも `versionCode` を付けてください。
+
+### 版と上書き更新
+
+- **表示用の版**：`app.json` の `expo.version`（現在 `0.1.0`）を変更し、`package.json`／lockfileの版もそろえます。自動では上がりません。
+- **更新の番号**：`cli.appVersionSource: remote` と各プロファイルの `autoIncrement: true` でEASがAndroid `versionCode`を採番します。`app.json`に手で番号を書かず、ビルド失敗で欠番ができても戻しません。確認は `npx eas-cli@latest build:version:get --platform android --profile apk`。
+- 同じアプリID・**同じ署名鍵**で、より大きな `versionCode`のAPKを配ります。先にアンインストールせず、端末で新しいAPKを開き「更新」を選びます。棋譜・解析・解説・設定が残ることを確認します。USB確認は `adb -s 8AFX0S69E install -r <新しいAPK>`。古い番号への戻しやデータ消去はしません。
+- リポジトリにはAPK・AABを置かず、**公開リポジトリやGitHub Releasesにもアップロードしません**。信頼できる私的な共有経路で対象者だけへファイルと表示版・更新番号を伝えます。自動更新通知はありません。
+
+### 署名鍵とバックアップ
+
+EASの既定のAndroid keystoreを継続使用します。バックアップ1部は **`~/.config/kifumate/android-keystore/`** の `credentials.json` と `credentials/android/keystore.jks`。ディレクトリ0700、ファイル0600です。パスワードは `credentials.json` に含まれるので、**中身を表示・ログ保存・チャット送信・コミットしないでください**。利用者本人が両方をパスワードマネージャー等の安全な保管先へ移してください。通常のAPK配布に鍵は渡しません。
+
+再ダウンロードは `npx eas-cli@latest credentials --platform android` → `apk` → `credentials.json: Upload/Download...` → `Download credentials from EAS to credentials.json`。**CLIは実行ディレクトリに書くため、リポジトリ内でダウンロードしないこと**。リポジトリ外の0700の一時ディレクトリへ `app.json`・`eas.json`・`package.json`・`app.config.ts`をコピーし、依存解決用に `node_modules` への一時シンボリックリンクを用意して実行します。`EAS_NO_VCS=1`を指定し、`umask 077`で作成、終了後は設定のコピー・リンクを取り除いて0700/0600を再確認します。機密情報を表示する質問には「いいえ」を選びます。
+
+EAS上の鍵とバックアップを両方失うと、配布済みアプリを同じIDのまま更新できません。新しい鍵へ勝手に作り直さないでください。再インストールにはアンインストールが必要となり、バックアップ未実装の棋譜・解析・解説は失われます。鍵／EASアカウントの漏えいにも注意してください。
+
+### 知人へのインストール案内
+
+1. 本人から受け取ったAPKであることと版を確認し、Android端末へ保存して開きます（iPhoneには入りません）。
+2. ブラウザ／ファイルアプリに「この提供元からのアプリを許可」を求められたときだけ、設定の「不明なアプリのインストール」でそのアプリを一時的に許可します。端末によって表示名は違います。Play Protectの警告を無条件で無視せず、送信者とファイルを確認してください。
+3. インストール後、許可を元へ戻してkifumateを開きます。無料の取り込み・再生・ふつうの解析を使えます。有料機能は発行者から私的に受け取った招待コードを設定から入力します。コードも公開しません。
+4. 次の版も同じ方法で開き「更新」を選びます。**アンインストールやアプリデータ削除はしないでください**。大切な棋譜は事前にKIFでも保管します。
+
+### 見た目・権限
+
+通常アイコンは `assets/mascot-kit/00-app/app-icon.png` の1024px素材、起動画面とAndroidアダプティブアイコンの透過前景は `01-onboarding/01-welcome.png` から作成しています。前景はAndroidの安全域内に収め、背景色はモックの黄色、起動画面は共通のクリーム色。フォント読み込みまで起動画面を保ちます。
+
+棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動・未使用の生体認証の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
+
+公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)・[ABI指定（BuildProperties）](https://docs.expo.dev/versions/latest/sdk/build-properties/#pluginconfigtypeandroid)。
+
+### #33 の配布確認（2026-11-17）
+
+- 初回の配布確認に使った版5は **旧版**として `~/kifumate-releases/kifumate-0.1.0-5-old-universal.apk` へ改名しました（112.84MB／107.61MiB、表示版0.1.0／`versionCode=5`、4ABI）。現在の配布の正本は下記の版6です。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
+- 今回は**クラウド無料枠の待ち時間のためEASローカルビルドで代用**しました。クラウド1件（番号2）は約39分未開始で取消済み。ローカルは3回：番号3はJava21がJREのみだったため約4分51秒で失敗、JDK17へ直した番号4は18分44秒、配布用番号5は15分18秒で成功。番号の欠番はそのまま残し、EAS管理の同じ署名鍵と連番を使っています。クラウドのコンパイル完了は未確認です。
+- Pixel 3 `8AFX0S69E`／Android 11：版4の起動・KIF取り込み（通常入力欄へ検証用UiAutomatorで日本語を入力）・保存・再起動・再生・合法分岐・本番ふつう解析1局を確認。期限1時間／1端末の招待を入力し、精密解析1局（どちらも1手・2局面）、分岐中の解析1セッション、AIコーチ解説1回（総合・かんたん、追加質問なし）が成功しました。
+- 招待を取消し、コード原文と取消メタデータを削除。無料への復帰と、保存した精密候補・解説の閲覧を確認。15:57 UTCに本番の全3 Container・全slotがinactive、`active=0 / assigned=0`を確認。secret・serverソースは変更せず、`wrangler tail`も使用していません。
+- `adb install -r` で**同じ鍵の版4→5へ上書き更新**。初回インストール日時が変わらず、架空の棋譜1局・お気に入り・自分の側・精密3候補・同じ解説が残り、回数も2/10局のまま（同じ端末トークン）であることを確認。版5の署名はバックアップの証明書とも一致し、APK内の本番URL・非debuggable・通常の権限がINTERNETのみ（ほかはAndroidXのアプリ内署名権限）であることを確認しました。
+- `npm run check`（単体158件・禁止名称・型・lint）、Web E2E66件、Androidのリリースバンドル出力と配布物の禁止名称検査が通過。比較は解析モックが撮影前に完了する競合を直し、**84場面×2幅**が通過しました。実機の起動画面・アイコン・Aboutも画像で確認しています。
+- 画像／動画は `.local/screenshots/android/issue33-*`、比較は `.local/compare/{360x800,393x852}/`（gitignore対象）。iPhone・開発ビルド・AAB／ストア公開・購入連携は実施していません。`expo-doctor`には既存のExpo／FileSystem／Router／SQLiteの新しいパッチ版推奨が残ります。SDK更新や `npm audit fix --force` は行っていません。
+
+### arm64専用の版6（2026-11-17）
+
+- **配布の正本**：`~/kifumate-releases/kifumate-0.1.0-6-arm64-release.apk`。表示版は0.1.0、EAS管理の `versionCode=6`。ローカルビルド1回・8分17秒で成功しました。旧版5を配布物と取り違えないでください。
+- 大きさは版5の **112.84MB（107.61MiB）→41.79MB（39.85MiB）、62.97%減**。APK内のネイティブライブラリがarm64-v8aだけであることを確認しました。32bit ARM・x86／x86_64端末は対象外です。
+- `expo config --type introspect` でリリースの `reactNativeArchitectures=arm64-v8a` と、開発プロファイルの従来の4ABIを確認。`npm run check`（単体159件・禁止名称・型・lint）が通過しました。
+- Pixel 3 `8AFX0S69E`／Android 11で版5→6を上書き更新。初回インストール日時・既存1棋譜・お気に入り・自分の側・精密3候補・保存した解説・端末トークンを保持し、起動と再生を確認しました。署名は版5と同じで、本番URL・非debuggable・最小権限も維持しています。
+- 旧結果を上書きしない確認用の1手棋譜で、**本番のふつう解析を1局（2局面）だけ**実行して成功。確認用棋譜は削除し、元のデータを保持しました。端末の使用量は2→3/10局。精密・分岐中の解析・AI生成・招待発行は追加していません。22:49 UTCに本番3 Containerの全slot inactive、`active=0 / assigned=0`を確認しました。
 
 ## いま使えること
 
@@ -117,7 +217,7 @@ npm run compare -- 393x852 game    # 大きさと、名前に game を含む場�
 
 Web はブラウザのサイトデータ削除・プライベートブラウズ、ネイティブはアプリデータ削除／アンインストールで棋譜が失われます。一括バックアップが入るまでは大切な棋譜をKIFで保管してください。
 
-`npm audit` では Expo の開発・ビルド用 `@expo/fingerprint` 経由の `minimatch` に moderate（ReDoS）が残ります。SDKを旧版へ戻す自動修正は適用していません。アプリが棋譜処理に使う依存ではありませんが、公開前に上流の修正を追ってください。
+`npm audit` は現時点で既存依存の44件（high 42／moderate 2）を報告しています。arm64対応前のlockfileでも同数で、追加した `expo-build-properties` による増加ではありません。影響範囲と修正可否の精査は別途必要です。SDKを旧版へ戻す修正や `npm audit fix --force` は適用していません。
 
 ### 確認した環境（2026-11-17）
 

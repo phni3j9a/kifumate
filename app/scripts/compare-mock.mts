@@ -28,8 +28,8 @@ async function ensureServer() {
     );
   if (await up()) return null;
   const server = spawn(
-    "npx",
-    ["expo", "start", "--web", "--port", new URL(APP).port],
+    "npm",
+    ["run", "web", "--", "--port", new URL(APP).port],
     {
       stdio: "ignore",
       detached: true,
@@ -609,14 +609,14 @@ async function run(width: number, height: number) {
         }
       : null,
   })) as AnalysisResult[];
-  await act("analyze");
-  await tap("解析する");
-  await a.getByRole("button", { name: "中止", exact: true }).waitFor();
+  // アプリ側の待機中にモックが完了しないよう、開始とタイマー停止を同じイベント内で行う。
   await m.evaluate(() => {
     (window as any).__compare(
-      "clearInterval(RUN.timer); RUN.done=30; renderGame();",
+      "A.analyze(); clearInterval(RUN.timer); RUN.done=30; renderGame();",
     );
   });
+  await tap("解析する");
+  await a.getByRole("button", { name: "中止", exact: true }).waitFor();
   fake.next = 31;
   await pause(2300);
   await shot("analysis-running");

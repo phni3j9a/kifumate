@@ -8,3 +8,12 @@ test-results/
 playwright-report/
 
 .env.local
+
+# 署名情報と配布物はリポジトリ外に保管する。
+credentials.json
+*.jks
+*.keystore
+*.apk
+*.aab
+credentials/
+*.key
