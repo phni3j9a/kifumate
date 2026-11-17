@@ -58,6 +58,28 @@ class ComparisonTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             cost_usage({"usage": {"input_tokens": 1000}}, "responses")
 
+    def test_responses_success_persists_raw_output_and_settles_ledger(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            request, output, ledger = root / "request.json", root / "result.json", root / "budget.jsonl"
+            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": []},
+                                           "perspective": "observer", "profile": {}, "style": {}, "history": []}))
+            response = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
+                        "usage": {"input_tokens": 100, "input_tokens_details": {"cache_write_tokens": 80},
+                                  "output_tokens": 20, "output_tokens_details": {"reasoning_tokens": 15}}}
+            args = ["compare_coach.py", "--provider", "openai", "--openai-api", "responses", "--reasoning-effort", "max",
+                    "--request-file", str(request), "--runs", "1", "--output", str(output), "--budget-file", str(ledger),
+                    "--input-usd-per-million", "0.1", "--cached-usd-per-million", "0.01",
+                    "--output-usd-per-million", "0.5", "--cache-write-usd-per-million", "0.125"]
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-only-not-a-real-key"}), patch("sys.argv", args), patch("compare_coach.build_opener") as network:
+                network.return_value.open.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+                main()
+            persisted = json.loads(output.read_text())
+            self.assertEqual(persisted["api"], "responses")
+            self.assertEqual(persisted["records"][0]["response"], response)
+            self.assertEqual(network.return_value.open.call_args.args[0].full_url, "https://api.openai.com/v1/responses")
+            self.assertAlmostEqual(ledger_total([json.loads(line) for line in ledger.read_text().splitlines()]), 0.000022)
+
     def test_rebuilt_cases_preserve_positions_and_anonymize(self):
         source = {"initial": "startpos", "moves": ["7g7f"] * 85, "sfens": ["任意の開始局面"] * 86,
                   "results": [{"ply": n, "score": {"kind": "cp", "value": 0}, "candidates": [], "mate": None} for n in range(86)]}
