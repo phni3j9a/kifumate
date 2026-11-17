@@ -58,7 +58,7 @@ export async function verifyAnalysis(secret: string, device: string, input: Inpu
 }
 
 // 製品名だけを検査し、人名の伏せ字は登録名を持つアプリ側で行う。
-const FORBIDDEN = /水匠|suisho|やねうら王|yaneura|技巧|elmo|nnue|halfka|apery|ponanza|dlshogi|将棋ウォーズ|将棋倶楽部|将棋クエスト|ぴよ将棋|shogi\s*(?:wars|quest|club)|81dojo|lishogi|将棋ドットコム|openai|deepseek|chatgpt|gpt[\s-]*\d|luna|claude|gemini/iu;
+const FORBIDDEN = /水匠|suisho|やねうら王|yaneura|技巧\s*[0-9０-９]|elmo|nnue|halfka|apery|ponanza|dlshogi|将棋ウォーズ|将棋倶楽部|将棋クエスト|ぴよ将棋|shogi\s*(?:wars|quest|club)|81dojo|lishogi|将棋ドットコム|openai|deepseek|chatgpt|gpt[\s-]*\d|luna|claude|gemini/iu;
 export function checkNames(text: string): string {
   const cleaned = text.replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, '');
   if (FORBIDDEN.test(cleaned.normalize('NFKC'))) throw new ApiError(400, 'unsafe_names');

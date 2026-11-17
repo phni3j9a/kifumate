@@ -64,7 +64,7 @@ describe('入力・名前・指し手の境界', () => {
   });
   it('既知の内部名・サービスを入力と出力で拒否する', async () => {
     const p = await payload('device');
-    for (const name of ['水匠11 Plus', 'YaneuraOu', 'NNUE', '将棋ウォーズ', '81Dojo', 'ＤｅｅｐＳｅｅｋ', 'ChatGPT']) {
+    for (const name of ['水匠11 Plus', 'YaneuraOu', 'NNUE', '将棋ウォーズ', '81Dojo', 'ＤｅｅｐＳｅｅｋ', 'ChatGPT', '技巧2']) {
       expect(() => checkNames(name)).toThrow('unsafe_names');
       expect(() => parseCoach({...p, question: name})).toThrow('unsafe_names');
       expect(() => validateOutput({sections: [{...safe.sections[0], text: name}]}, refs)).toThrow('invalid_output');
@@ -72,7 +72,7 @@ describe('入力・名前・指し手の境界', () => {
     expect(() => checkNames('あなたと相手の解析結果')).not.toThrow();
     expect(JSON.stringify(messages(parseCoach(p), refs))).not.toMatch(/水匠|YaneuraOu|DeepSeek/i);
   });
-  it.each(['王様を安全にしたい', 'たくさん練習したい', '同様の局面', '模様を良くしたい'])('普通の日本語「%s」を名前と推測して拒否しない', async sentence => {
+  it.each(['王様を安全にしたい', 'たくさん練習したい', '同様の局面', '模様を良くしたい', '技巧的な寄せを覚えたい'])('普通の日本語「%s」を名前と推測して拒否しない', async sentence => {
     const p = await payload('device');
     const parsed = parseCoach({...p, question: sentence, profile: {...p.profile, goal: sentence}, history: [{role: 'user', content: sentence}]});
     expect(parsed.question).toBe(sentence);
