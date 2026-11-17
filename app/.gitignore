@@ -1,0 +1,8 @@
+.expo/
+dist/
+.local/
+android/
+ios/
+coverage/
+test-results/
+playwright-report/
