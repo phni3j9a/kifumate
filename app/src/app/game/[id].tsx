@@ -167,6 +167,7 @@ export default function GameScreen() {
     record.current.move instanceof Move ? record.current.move : null;
   const at = branch?.at ?? ply,
     end = branch?.moves.length ?? total;
+  const mainMoves = record.moves.filter((n) => n.move instanceof Move);
   function clear() {
     setSelected(null);
     setPromotion([]);
@@ -177,6 +178,13 @@ export default function GameScreen() {
     clear();
   }
   function commit(move: Move) {
+    // 本譜の次の手と同じなら、分岐にせず本譜を1手進める（モックの commitMove と同じ）
+    const next = mainMoves[ply]?.move;
+    if (!branch && next instanceof Move && move.equals(next)) {
+      setPly(ply + 1);
+      clear();
+      return;
+    }
     try {
       const b = branch ?? new Branch(ply, position);
       b.play(move);
@@ -265,7 +273,6 @@ export default function GameScreen() {
   }
   const date = dateParts(game.played_at);
   const plyLabel = (n: number) => (n ? `${n}手目` : "開始局面");
-  const mainMoves = record.moves.filter((n) => n.move instanceof Move);
   return (
     <Screen bottom>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -620,6 +627,8 @@ const s = StyleSheet.create({
     gap: 6,
   },
   jg: {
+    // 高さ16の行からはみ出す分（18.5−16）。Android は行の高さで文字を切るため、余白で逃がす
+    marginVertical: -1.25,
     paddingTop: 2,
     paddingHorizontal: 8,
     paddingBottom: 3,

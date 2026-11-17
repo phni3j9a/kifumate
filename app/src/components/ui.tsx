@@ -440,16 +440,22 @@ function useFocusRing() {
   };
 }
 /** 1行の入力（.inp） */
-export function Input(props: TextInputProps) {
+// フォーカスの輪（影）は外側の View に描く。Android は TextInput の影を変えると内側の余白が消える。
+export function Input({
+  style,
+  ...props
+}: Omit<TextInputProps, "style"> & { style?: StyleProp<ViewStyle> }) {
   const ring = useFocusRing();
   return (
-    <TextInput
-      placeholderTextColor={placeholder}
-      {...props}
-      onFocus={ring.onFocus}
-      onBlur={ring.onBlur}
-      style={[s.inp, ring.focused && s.ring, props.style]}
-    />
+    <View style={[s.inpBox, ring.focused && s.ring, style]}>
+      <TextInput
+        placeholderTextColor={placeholder}
+        {...props}
+        onFocus={ring.onFocus}
+        onBlur={ring.onBlur}
+        style={s.inp}
+      />
+    </View>
   );
 }
 /** KIFの本文を入れる・見せる欄（.ta.kif / .kifx）。invalid は読み取れないとき（.ng） */
@@ -461,25 +467,33 @@ export function KifArea({
 }: TextInputProps & { invalid?: boolean; height?: number; size?: number }) {
   const ring = useFocusRing();
   return (
-    <TextInput
-      multiline
-      autoCapitalize="none"
-      autoCorrect={false}
-      spellCheck={false}
-      placeholderTextColor={placeholder}
-      {...props}
-      onFocus={ring.onFocus}
-      onBlur={ring.onBlur}
+    <View
       style={[
-        s.kif,
-        { height, fontSize: size, lineHeight: size * 1.5 },
+        s.kifBox,
         invalid && {
-          borderColor: colors.coral,
-          boxShadow: `0 0 0 2px ${colors.coralSoft}`,
+          outlineWidth: 2,
+          outlineStyle: "solid",
+          outlineColor: colors.coralSoft,
         },
         ring.focused && s.ring,
       ]}
-    />
+    >
+      <TextInput
+        multiline
+        autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        placeholderTextColor={placeholder}
+        {...props}
+        onFocus={ring.onFocus}
+        onBlur={ring.onBlur}
+        style={[
+          s.kif,
+          { height, fontSize: size, lineHeight: size * 1.5 },
+          invalid && { borderColor: colors.coral },
+        ]}
+      />
+    </View>
   );
 }
 /** マスコット付きの空の状態（.emp）。small は一覧の中に出す小さい形（.emp.sm） */
@@ -591,7 +605,8 @@ export const s = StyleSheet.create({
   },
   hairTop: { borderTopWidth: line.thin, borderTopColor: colors.hair },
   down2: { transform: [{ translateY: 2 }], boxShadow: "none" },
-  ring: { boxShadow: `0 0 0 2px ${colors.mint}` },
+  // .inp:focus-visible の box-shadow 2px。Android は影だと角丸に沿わないので輪郭線で描く
+  ring: { outlineWidth: 2, outlineStyle: "solid", outlineColor: colors.mint },
   ab: {
     height: 50,
     flexDirection: "row",
@@ -692,6 +707,9 @@ export const s = StyleSheet.create({
     paddingHorizontal: 20,
     textAlign: "center",
   },
+  // 背景色がないと Android は角丸を輪郭線に使わない（中の欄と同じ白で隠れる）
+  inpBox: { borderRadius: radius.pill, backgroundColor: colors.white },
+  kifBox: { borderRadius: radius.field, backgroundColor: colors.white },
   inp: {
     ...pill,
     ...font(500, 16),

@@ -75,6 +75,12 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
   await expect(page.getByText("1手目", { exact: true })).toBeVisible();
   await page.screenshot({ path: `${shots}/03-replay.png` });
   await button(page, "最初へ").click();
+  // 本譜と同じ手（▲7六歩）は分岐にせず、本譜を進める
+  await page.getByTestId("square-7-7").click();
+  await page.getByTestId("square-7-6").click();
+  await expect(page.getByText("1手目", { exact: true })).toBeVisible();
+  await expect(page.getByText("分岐中", { exact: true })).toHaveCount(0);
+  await button(page, "最初へ").click();
   await page.getByTestId("square-2-7").click();
   await page.getByTestId("square-2-6").click();
   await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();

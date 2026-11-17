@@ -168,7 +168,6 @@ export function Sheet({
       transparent
       animationType="none"
       statusBarTranslucent
-      navigationBarTranslucent
       onRequestClose={onClose}
     >
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
@@ -301,7 +300,6 @@ export function DialogHost() {
       transparent
       animationType="none"
       statusBarTranslucent
-      navigationBarTranslucent
       onRequestClose={close}
     >
       <View style={s.dlg}>
