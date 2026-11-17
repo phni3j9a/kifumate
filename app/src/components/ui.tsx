@@ -53,7 +53,7 @@ export function MascotImage({
       source={mascots[name].source}
       resizeMode="contain"
       accessibilityIgnoresInvertColors
-      style={{ height, aspectRatio: mascots[name].ratio }}
+      style={{ height, width: Math.round(height * mascots[name].ratio) }}
     />
   );
 }
@@ -284,7 +284,7 @@ export function Chip({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={raised ? undefined : { selected }}
+      aria-selected={raised ? undefined : selected}
       onPress={onPress}
       hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
       style={[
@@ -338,7 +338,7 @@ export function Segmented<T extends string>({
         <Pressable
           key={v}
           accessibilityRole="radio"
-          accessibilityState={{ checked: value === v }}
+          aria-checked={value === v}
           onPress={() => onChange(v)}
           hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
           style={[s.sgItem, value === v && { backgroundColor: colors.ink }]}
@@ -700,6 +700,7 @@ export const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 0,
     outlineWidth: 0,
+    outlineStyle: "solid", // Web: auto のままだと幅0でも既定のフォーカス枠が出る
   },
   kif: {
     paddingVertical: 10,
@@ -712,6 +713,7 @@ export const s = StyleSheet.create({
     fontFamily: mono,
     textAlignVertical: "top",
     outlineWidth: 0,
+    outlineStyle: "solid", // Web: auto のままだと幅0でも既定のフォーカス枠が出る
   },
   emp: {
     flex: 1,

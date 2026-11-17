@@ -35,7 +35,7 @@ function TabBar({ state, descriptors, emitter, navigateToTab }: TabBarProps) {
           <Pressable
             key={route.key}
             accessibilityRole="tab"
-            accessibilityState={{ selected: on }}
+            aria-selected={on}
             accessibilityLabel={title}
             onPress={() => {
               const event = emitter.emit({

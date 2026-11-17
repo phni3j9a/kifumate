@@ -48,10 +48,13 @@ export default function Names() {
     const name = text.trim();
     if (!name || !names || busy) return;
     if (names.some((n) => normalizeName(n) === normalizeName(name))) {
-      toast(`「${name}」は登録済みです`);
+      toast("その名前は登録済みです");
       return;
     }
-    if (await save([...names, name])) setText("");
+    if (await save([...names, name])) {
+      setText("");
+      toast(`「${name}」を登録しました`);
+    }
   }
   async function remove(name: string) {
     if (!names || busy) return;

@@ -1,9 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import Encoding from "encoding-japanese";
 import { identity, readKif } from "../../src/core/kif";
 const kif = readFileSync("tests/fixtures/standard.kif", "utf8");
-test("名前登録→貼り付け→保存→再起動→再生→分岐→書き出し、ファイル重複と手動補正", async ({
+const button = (page: Page, name: string | RegExp) =>
+  page.getByRole("button", { name, exact: typeof name === "string" });
+test("名前登録→貼り付け→保存→再起動→再生→分岐→書き出し→対局情報、ファイル重複、削除", async ({
   page,
   context,
 }, testInfo) => {
@@ -17,96 +19,111 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
     .getByRole("tab", { name: /棋譜/ })
     .getByText("棋譜", { exact: true })
     .boundingBox();
-  expect(tabLabel?.height).toBeGreaterThanOrEqual(16);
-  await page.getByText("設定", { exact: true }).last().click();
+  expect(tabLabel?.height).toBeGreaterThanOrEqual(10.5); // モックの .tb（10.5px/1）が欠けずに出る
+
+  // 対局者名は1件ずつ足し、× で外すと「元に戻す」が出る
+  await page.getByRole("tab", { name: /設定/ }).click();
   await page.getByText("自分の対局者名", { exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "自分の対局者名" })
-    .fill("つばめ\ntsubame");
-  await page.getByRole("button", { name: "登録名を保存" }).click();
-  await expect(
-    page.getByText("保存しました。自動判定の棋譜を更新しました。"),
-  ).toBeVisible();
-  await expect(page.getByText("登録名を保存", { exact: true })).toBeEnabled();
+  const nameBox = page.getByRole("textbox", { name: "追加する対局者名" });
+  for (const name of ["つばめ", "tsubame", "こまどり"]) {
+    await nameBox.fill(name);
+    await button(page, "追加").click();
+    await expect(page.getByText(`「${name}」を登録しました`)).toBeVisible();
+  }
+  await button(page, "こまどり を削除").click();
+  await expect(page.getByText("「こまどり」を外しました")).toBeVisible();
+  await button(page, "元に戻す").click();
+  await expect(button(page, "こまどり を削除")).toBeVisible();
+  await button(page, "こまどり を削除").click();
+  await expect(button(page, "こまどり を削除")).toHaveCount(0);
+
+  // 貼り付けると自動で読み取り、登録名から先手と分かる
   await page.goto("/");
-  await page
-    .getByRole("button", { name: "棋譜を取り込む", exact: true })
-    .click();
-  await page.getByRole("textbox", { name: "KIFの本文" }).fill(kif);
-  await page.getByRole("button", { name: "内容を確認", exact: true }).click();
-  await expect(
-    page.getByText("登録名から判定しました。違っていたら直せます。"),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "棋譜を保存", exact: true })
-    .scrollIntoViewIfNeeded();
+  await button(page, "棋譜を取り込む").click();
+  await page.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
+  await expect(page.getByText("あなたは先手")).toBeVisible();
+  await expect(page.getByText("重複はありません")).toBeVisible();
+  await button(page, "保存する").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${shots}/01-import.png` });
-  await page.getByRole("button", { name: "棋譜を保存", exact: true }).click();
-  await expect(page.getByText("あなたは先手・勝ち")).toBeVisible();
-  await page.reload();
-  await expect(page.getByText("あなたは先手・勝ち")).toBeVisible();
-  await page.screenshot({ path: `${shots}/02-list.png` });
-  await page
-    .getByRole("button", { name: "お気に入りに入れる", exact: true })
-    .click();
-  await page.getByRole("button", { name: "お気に入り", exact: true }).click();
-  await page.getByRole("textbox", { name: "棋譜を検索" }).fill("こまどり");
-  await page
-    .getByRole("button", { name: /つばめ 対 こまどり、5手を開く/ })
-    .click();
+  await button(page, "保存する").click();
+  await expect(page.getByText("保存しました", { exact: true })).toBeVisible();
   await expect(page.getByText("開始局面", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "1手進む", exact: true }).click();
+
+  // 再起動しても残り、一覧で絞り込める
+  await page.goto("/");
+  await expect(page.getByRole("img", { name: "勝ち" })).toBeVisible();
+  await page.reload();
+  const card = button(page, "つばめ 対 こまどり、5手を開く");
+  await expect(card).toBeVisible();
+  await expect(page.getByText("あなたは☗先手")).toBeVisible();
+  await page.screenshot({ path: `${shots}/02-list.png` });
+  await button(page, "お気に入りに入れる").click();
+  await expect(button(page, "お気に入りから外す")).toBeVisible();
+  await button(page, "お気に入り").click();
+  await expect(card).toBeVisible();
+  await button(page, "検索").click();
+  await page.getByLabel("棋譜を検索").fill("こまどり");
+  await expect(card).toBeVisible();
+  await page.getByLabel("棋譜を検索").fill("zzz");
+  await expect(page.getByText("「zzz」に合う棋譜がありません")).toBeVisible();
+  await page.getByLabel("棋譜を検索").fill("こまどり");
+  await card.click();
+
+  // 再生と、駒を動かして始まる分岐
+  await expect(page.getByText("開始局面", { exact: true })).toBeVisible();
+  await button(page, "1手進む").click();
+  await expect(page.getByText("1手目", { exact: true })).toBeVisible();
   await page.screenshot({ path: `${shots}/03-replay.png` });
-  await page.getByRole("button", { name: "最初へ", exact: true }).click();
-  await page
-    .getByRole("button", { name: "ここから分岐を試す", exact: true })
-    .click();
+  await button(page, "最初へ").click();
   await page.getByTestId("square-2-7").click();
   await page.getByTestId("square-2-6").click();
-  await expect(page.getByText("分岐 1手目", { exact: true })).toBeVisible();
+  await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("分岐は保存されません。本譜や戦績は変わりません"),
+  ).toBeVisible();
   await page.screenshot({ path: `${shots}/04-branch.png` });
-  await page
-    .getByRole("button", { name: "本譜に戻る", exact: true })
-    .last()
-    .click();
+  await button(page, "本譜に戻る").last().click();
   await expect(page.getByText("開始局面", { exact: true })).toBeVisible();
-  await page
-    .getByRole("button", { name: "KIFを書き出す", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "ファイルに保存", exact: true })
-    .scrollIntoViewIfNeeded();
+
+  // 「…」メニューから KIF を書き出す
+  await button(page, "この対局のメニュー").click();
+  await button(page, "KIFを書き出す").click();
+  await expect(
+    page.getByRole("textbox", { name: "書き出すKIF" }),
+  ).toBeVisible();
   await page.screenshot({ path: `${shots}/05-export.png` });
   const download = page.waitForEvent("download");
-  await page
-    .getByRole("button", { name: "ファイルに保存", exact: true })
-    .click();
+  await button(page, "ファイルに保存").click();
   const downloaded = await download;
   await downloaded.saveAs(".local/screenshots/web/exported.kifu");
   assertIdentity(readFileSync(".local/screenshots/web/exported.kifu", "utf8"));
-  await page.getByRole("button", { name: "閉じる", exact: true }).click();
-  await page
-    .getByRole("button", { name: "対局情報・結果を直す", exact: true })
-    .click();
-  await page.getByRole("button", { name: "後手", exact: true }).click();
-  await page.getByRole("button", { name: "引き分け", exact: true }).click();
-  await page
-    .getByRole("button", { name: "対局情報を保存", exact: true })
-    .click();
-  await expect(page.getByText("対局情報を保存しました。")).toBeVisible();
+  await button(page, "閉じる").last().click();
+
+  // 対局情報：先手か後手かは押した時点で保存、結果はシートで直す
+  await button(page, "この対局のメニュー").click();
+  await button(page, "対局情報").click();
+  await page.getByRole("radio", { name: "☖ こまどり" }).click();
+  await expect(page.getByRole("radio", { name: "☖ こまどり" })).toBeChecked();
+  await button(page, "結果を修正").click();
+  await button(page, "引き分け").click();
+  await button(page, "これでよい").click();
+  await expect(page.getByText("5手・引き分け")).toBeVisible();
+  await expect(page.getByText("手で修正")).toBeVisible();
+  await page.screenshot({ path: `${shots}/06-info.png` });
+
+  // 名前を変えて再照合しても、手で直した先後と結果は残る
   await page.goto("/names");
-  await page.getByRole("textbox", { name: "自分の対局者名" }).fill("つばめ");
-  await page.getByRole("button", { name: "登録名を保存" }).click();
-  await expect(
-    page.getByText("保存しました。自動判定の棋譜を更新しました。"),
-  ).toBeVisible();
+  await button(page, "tsubame を削除").click();
+  await expect(page.getByText("「tsubame」を外しました")).toBeVisible();
   await page.goto("/");
-  await expect(page.getByText("あなたは後手・引き分け")).toBeVisible();
-  await page.getByRole("button", { name: "＋ 取り込む", exact: true }).click();
+  await expect(page.getByText("あなたは☖後手")).toBeVisible();
+  await expect(page.getByRole("img", { name: "引き分け" })).toBeVisible();
+
+  // Shift_JIS のファイルは保存前に重複と分かる
+  await button(page, "取り込む").click();
+  await page.getByRole("radio", { name: "ファイル" }).click();
   const chooser = page.waitForEvent("filechooser");
-  await page
-    .getByRole("button", { name: "ファイルを選ぶ", exact: true })
-    .click();
+  await button(page, "ファイルを選ぶ").click();
   const bytes = Buffer.from(
     Encoding.convert(Encoding.stringToCode(kif), {
       from: "UNICODE",
@@ -116,15 +133,30 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
   await (
     await chooser
   ).setFiles({ name: "test.kif", mimeType: "text/plain", buffer: bytes });
-  await page.getByRole("button", { name: "棋譜を保存", exact: true }).click();
-  await expect(page.getByText(/重ねて保存していません/)).toBeVisible();
-  await page
-    .getByRole("button", { name: "保存済みの棋譜を開く", exact: true })
-    .click();
+  await expect(
+    page.getByText("同じ棋譜がすでに保存されています"),
+  ).toBeVisible();
+  await expect(button(page, "保存する")).toHaveCount(0);
+  await button(page, "保存済みの棋譜を開く").click();
   await context.setOffline(true);
-  await page.getByRole("button", { name: "1手進む", exact: true }).click();
-  await expect(page.getByText("1手目 / 5手", { exact: true })).toBeVisible();
+  await button(page, "1手進む").click();
+  await expect(page.getByText("1手目", { exact: true })).toBeVisible();
   await context.setOffline(false);
+
+  // 削除は確認してから。一覧に戻り「削除しました」
+  await button(page, "この対局のメニュー").click();
+  await button(page, "この棋譜を削除").click();
+  await expect(page.getByText("この棋譜を削除しますか")).toBeVisible();
+  await page.screenshot({ path: `${shots}/07-delete.png` });
+  await button(page, "やめる").click();
+  await expect(page.getByText("この棋譜を削除しますか")).toHaveCount(0);
+  await button(page, "この対局のメニュー").click();
+  await button(page, "この棋譜を削除").click();
+  await button(page, "削除する").click();
+  await expect(page.getByText("削除しました", { exact: true })).toBeVisible();
+  await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
   expect(errors).toEqual([]);
 });
 function assertIdentity(text: string) {

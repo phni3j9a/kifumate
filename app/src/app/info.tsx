@@ -141,7 +141,8 @@ export default function Info() {
         title="結果を直す"
         onClose={() => setSheet(false)}
       >
-        <View style={{ gap: 6, marginBottom: 12 }}>
+        {/* モックは .opt の下余白12と .hint の上余白8が重なって12（RN は重ならない） */}
+        <View style={{ gap: 6, marginBottom: 4 }}>
           {choices.map(([value, label]) => (
             <Chip
               key={label}

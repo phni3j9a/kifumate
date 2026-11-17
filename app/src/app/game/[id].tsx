@@ -515,7 +515,7 @@ export default function GameScreen() {
               <Pressable
                 key={i}
                 accessibilityRole="button"
-                accessibilityState={{ selected: i + 1 === at }}
+                aria-selected={i + 1 === at}
                 onPress={() => {
                   setSheet(null);
                   step(i + 1);
@@ -533,7 +533,7 @@ export default function GameScreen() {
             <Pressable
               key={i}
               accessibilityRole="button"
-              accessibilityState={{ selected: i === ply }}
+              aria-selected={i === ply}
               onPress={() => step(i)}
               style={[s.mr, i === ply && { backgroundColor: colors.you }]}
             >

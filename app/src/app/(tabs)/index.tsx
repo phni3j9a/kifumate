@@ -313,114 +313,118 @@ export default function Games() {
                   {month}
                 </Text>
               )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${g.black} 対 ${g.white}、${g.plies}手を開く`}
-                onPress={() => router.push(`/game/${g.id}`)}
-                style={({ pressed }) => [
-                  s.gcd,
-                  pressed && {
-                    transform: [{ translateY: 2 }],
-                    boxShadow: shadow.pressed,
-                  },
-                ]}
-              >
-                <View
-                  accessibilityRole="image"
-                  accessibilityLabel={stamp ? stamp[1] : "自分以外の対局"}
-                  style={[
-                    s.rs,
-                    { backgroundColor: stamp ? stamp[2] : "transparent" },
-                    (!stamp || g.result === "unknown") && {
-                      borderStyle: "dashed",
+              {/* お気に入りの星はカードの上に重ねる（ボタンの中にボタンを入れない） */}
+              <View style={{ marginBottom: 9 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${g.black} 対 ${g.white}、${g.plies}手を開く`}
+                  onPress={() => router.push(`/game/${g.id}`)}
+                  style={({ pressed }) => [
+                    s.gcd,
+                    pressed && {
+                      transform: [{ translateY: 2 }],
+                      boxShadow: shadow.pressed,
                     },
                   ]}
                 >
-                  <Text
-                    style={font(
-                      900,
-                      17,
-                      1,
-                      !stamp || g.result === "unknown"
-                        ? colors.ink2
-                        : colors.ink,
-                    )}
+                  <View
+                    accessibilityRole="image"
+                    accessibilityLabel={stamp ? stamp[1] : "自分以外の対局"}
+                    style={[
+                      s.rs,
+                      { backgroundColor: stamp ? stamp[2] : "transparent" },
+                      (!stamp || g.result === "unknown") && {
+                        borderStyle: "dashed",
+                      },
+                    ]}
                   >
-                    {stamp ? stamp[0] : "他"}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={s.g1}>
                     <Text
-                      numberOfLines={1}
-                      style={[font(900, 14.5, 1.3), { flexShrink: 1 }]}
+                      style={font(
+                        900,
+                        17,
+                        1,
+                        !stamp || g.result === "unknown"
+                          ? colors.ink2
+                          : colors.ink,
+                      )}
                     >
-                      {g.self_side === "black"
-                        ? g.white
-                        : g.self_side === "white"
-                          ? g.black
-                          : `${g.black} 対 ${g.white}`}
-                    </Text>
-                    <Text style={font(700, 11, 1, colors.ink2)}>
-                      {g.self_side
-                        ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
-                        : "自分以外の対局"}
+                      {stamp ? stamp[0] : "他"}
                     </Text>
                   </View>
-                  <View style={s.tg}>
-                    {g.self_side ? (
-                      <View style={[s.t, s.tUn]}>
-                        <Text style={font(700, 11, 1, colors.ink2)}>
-                          未分類
-                        </Text>
-                      </View>
-                    ) : (
-                      ["☗", "☖"].map((mark) => (
-                        <View
-                          key={mark}
-                          style={[s.t, { backgroundColor: colors.sky }]}
-                        >
-                          <Text
-                            style={[
-                              font(700, 9.5, 1, colors.ink2),
-                              { marginRight: 3 },
-                            ]}
-                          >
-                            {mark}
+                  <View style={{ flex: 1 }}>
+                    <View style={s.g1}>
+                      <Text
+                        numberOfLines={1}
+                        style={[font(900, 14.5, 1.3), { flexShrink: 1 }]}
+                      >
+                        {g.self_side === "black"
+                          ? g.white
+                          : g.self_side === "white"
+                            ? g.black
+                            : `${g.black} 対 ${g.white}`}
+                      </Text>
+                      <Text style={font(700, 11, 1, colors.ink2)}>
+                        {g.self_side
+                          ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
+                          : "自分以外の対局"}
+                      </Text>
+                    </View>
+                    <View style={s.tg}>
+                      {g.self_side ? (
+                        <View style={[s.t, s.tUn]}>
+                          <Text style={font(700, 11, 1, colors.ink2)}>
+                            未分類
                           </Text>
-                          <Text style={font(700, 11)}>未分類</Text>
                         </View>
-                      ))
-                    )}
+                      ) : (
+                        ["☗", "☖"].map((mark) => (
+                          <View
+                            key={mark}
+                            style={[s.t, { backgroundColor: colors.sky }]}
+                          >
+                            <Text
+                              style={[
+                                font(700, 9.5, 1, colors.ink2),
+                                { marginRight: 3 },
+                              ]}
+                            >
+                              {mark}
+                            </Text>
+                            <Text style={font(700, 11)}>未分類</Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                    <Text style={font(500, 11, 1.2, colors.ink2)}>
+                      {dateShort(g.played_at)}・{g.plies}手
+                    </Text>
                   </View>
-                  <Text style={font(500, 11, 1.2, colors.ink2)}>
-                    {dateShort(g.played_at)}・{g.plies}手
-                  </Text>
-                </View>
-                <View style={s.gx}>
-                  <View style={s.nopill}>
-                    <Text style={font(700, 11, 1, colors.ink2)}>未解析</Text>
+                  <View style={s.gx}>
+                    <View style={s.nopill}>
+                      <Text style={font(700, 11, 1, colors.ink2)}>未解析</Text>
+                    </View>
+                    <View style={s.fv} />
                   </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      g.favorite ? "お気に入りから外す" : "お気に入りに入れる"
-                    }
-                    accessibilityState={{ selected: !!g.favorite }}
-                    onPress={() => void favorite(g)}
-                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                    style={s.fv}
-                  >
-                    <Icon
-                      name="star"
-                      size={17}
-                      strokeWidth={2}
-                      color={g.favorite ? colors.ink : colors.dash}
-                      fill={g.favorite ? colors.you : "none"}
-                    />
-                  </Pressable>
-                </View>
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    g.favorite ? "お気に入りから外す" : "お気に入りに入れる"
+                  }
+                  aria-selected={!!g.favorite}
+                  onPress={() => void favorite(g)}
+                  hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                  style={[s.fv, s.fvOn]}
+                >
+                  <Icon
+                    name="star"
+                    size={17}
+                    strokeWidth={2}
+                    color={g.favorite ? colors.ink : colors.dash}
+                    fill={g.favorite ? colors.you : "none"}
+                  />
+                </Pressable>
+              </View>
             </>
           );
         }}
@@ -503,6 +507,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     color: colors.ink,
     outlineWidth: 0,
+    outlineStyle: "solid", // Web: auto のままだと幅0でも既定のフォーカス枠が出る
   },
   sfClose: {
     width: 28,
@@ -537,7 +542,6 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 9,
     paddingVertical: 8,
     paddingLeft: 10,
     paddingRight: 8,
@@ -600,6 +604,14 @@ const s = StyleSheet.create({
     justifyContent: "center",
     marginRight: -2,
     marginBottom: -3,
+  },
+  // カードの枠＋内側の余白から、上の負の余白（-2, -3）を引いた位置
+  fvOn: {
+    position: "absolute",
+    right: line.ol + 8 - 2,
+    bottom: line.ol + 8 - 3,
+    marginRight: 0,
+    marginBottom: 0,
   },
   fab: {
     position: "absolute",
