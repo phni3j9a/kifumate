@@ -78,6 +78,7 @@ export function AnalysisPanel({
   realtime,
   retryRealtime,
   toggleRealtime,
+  onCoach,
 }: {
   analysis?: Analysis;
   branch: boolean;
@@ -93,6 +94,7 @@ export function AnalysisPanel({
   realtime?: RealtimeState;
   retryRealtime?: () => void;
   toggleRealtime?: () => void;
+  onCoach?: () => void;
 }) {
   const { quota, offline, controller } = useAnalysis();
   const [mode, setMode] = useState<Mode>("precise");
@@ -379,22 +381,16 @@ export function AnalysisPanel({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="AIに聞く"
-          onPress={() =>
-            ask({
-              title: "AIコーチは準備中です",
-              text: "精密解析の結果は保存され、あとから読み返せます。",
-              ok: "閉じる",
-              single: true,
-            })
-          }
+          onPress={onCoach}
           style={{
             marginLeft: "auto",
             height: 25,
             marginBottom: 4,
             flexDirection: "row",
             alignItems: "center",
-            gap: 3,
-            paddingHorizontal: 8,
+            gap: 4,
+            paddingLeft: 7,
+            paddingRight: 10,
             borderWidth: line.ol,
             borderColor: colors.ink,
             borderRadius: radius.pill,
@@ -402,9 +398,9 @@ export function AnalysisPanel({
             boxShadow: shadow.small,
           }}
         >
-          <Icon name="spark" size={12} />
-          <Text style={font(900, 10)}>AIに聞く</Text>
-          <Icon name="lock" size={10} />
+          <Icon name="spark" size={14} />
+          <Text style={font(900, 11)}>AIに聞く</Text>
+          {!quota?.paid && <Icon name="lock" size={12} />}
         </Pressable>
       </View>
       <View

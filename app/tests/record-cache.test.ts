@@ -96,6 +96,10 @@ for (const screen of ["info", "game/[id]"]) {
         [`${prefix}/components/icons`]: stub(["Icon"]),
         [`${prefix}/components/analysis-panel`]: stub(["AnalysisPanel"]),
         [`${prefix}/components/realtime-controls`]: stub(["RealtimeToggle"]),
+        [`${prefix}/coach/sheet`]: stub(["CoachSheet"]),
+        [`${prefix}/coach/provider`]: {
+          useCoach: () => ({ controller: {}, records: {} }),
+        },
         [`${prefix}/analysis/provider`]: {
           useRealtime: () => ({ controller: {}, quota: null }),
           useAnalysis: () => ({

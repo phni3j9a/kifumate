@@ -1,3 +1,5 @@
+import { CoachSheet } from "../../coach/sheet";
+import { useCoach } from "../../coach/provider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
@@ -117,10 +119,15 @@ function PlayerName({
 }
 
 export default function GameScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  return <GameView key={id} id={id} />;
+  const { id, coach } = useLocalSearchParams<{ id: string; coach?: string }>();
+  return <GameView key={id} id={id} openCoach={coach === "1"} />;
 }
-function GameView({ id }: { id: string }) {
+function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
+  const [coachOpen, setCoachOpen] = useState(openCoach);
+  const [coachFull, setCoachFull] = useState(false);
+  const [coachTop, setCoachTop] = useState(450);
+  const [coachFullTop, setCoachFullTop] = useState(46);
+  const coach = useCoach();
   const { game, error, db } = useGame(id);
   const kif = game?.kif;
   const record = useMemo(
@@ -240,16 +247,20 @@ function GameView({ id }: { id: string }) {
   // 戻る操作は、まず分岐を抜ける（モックの back()）。
   useFocusEffect(
     useCallback(() => {
-      if (base === undefined) return;
+      if (base === undefined && !coachOpen) return;
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        setPly(base);
+        if (coachOpen) {
+          setCoachOpen(false);
+          return true;
+        }
+        setPly(base!);
         setBranch(null);
         setSelected(null);
         setPromotion([]);
         return true;
       });
       return () => sub.remove();
-    }, [base]),
+    }, [base, coachOpen]),
   );
   if (!record || !game)
     return (
@@ -587,6 +598,15 @@ function GameView({ id }: { id: string }) {
               return;
             }
           }
+          if (coach.controller.snapshot.records[id]?.attempt) {
+            await coach.controller.cancel(id);
+            if (coach.controller.snapshot.records[id]?.attempt) {
+              toast(
+                "通信できないためAIコーチの中止を確認できません。つながってから削除してください",
+              );
+              return;
+            }
+          }
           await deleteGame(db, id);
           router.dismissTo("/");
           toast("削除しました");
@@ -601,7 +621,14 @@ function GameView({ id }: { id: string }) {
   return (
     <Screen bottom>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={[s.hd, { height: 42 + u * 0.4 }]}>
+        <View
+          onLayout={(e) =>
+            setCoachFullTop(
+              e.nativeEvent.layout.y + e.nativeEvent.layout.height + 2,
+            )
+          }
+          style={[s.hd, { height: 42 + u * 0.4 }]}
+        >
           <RoundButton
             icon="prev"
             label="戻る"
@@ -660,7 +687,12 @@ function GameView({ id }: { id: string }) {
           />
         </View>
         <View style={s.sp} />
-        <View style={[s.nmr, { height: 21 + u * 0.2 }]}>
+        <View
+          style={[
+            s.nmr,
+            { height: 21 + u * 0.2, opacity: coachOpen && coachFull ? 0 : 1 },
+          ]}
+        >
           <PlayerName
             name={nameOf(top)}
             color={top}
@@ -693,6 +725,11 @@ function GameView({ id }: { id: string }) {
           label={`${branch ? `分岐${at}手目` : plyLabel(ply)}の盤面`}
         />
         <View
+          onLayout={(e) =>
+            setCoachTop(
+              e.nativeEvent.layout.y + e.nativeEvent.layout.height + 3,
+            )
+          }
           style={[s.nmr, { height: 21 + u * 0.2, justifyContent: "flex-end" }]}
         >
           {branch && (
@@ -780,6 +817,11 @@ function GameView({ id }: { id: string }) {
         </View>
         <View style={s.sp} />
         <AnalysisPanel
+          onCoach={() => {
+            clear();
+            setCoachFull(false);
+            setCoachOpen(true);
+          }}
           analysis={analysis}
           branch={!!branch}
           branchRow={branchRow}
@@ -892,6 +934,36 @@ function GameView({ id }: { id: string }) {
         </View>
         <View style={s.spb} />
       </ScrollView>
+      {coachOpen && (
+        <CoachSheet
+          game={game}
+          onFullChange={setCoachFull}
+          halfTop={coachTop}
+          fullTop={coachFullTop}
+          onClose={() => setCoachOpen(false)}
+          ply={ply}
+          branch={!!branch}
+          start={() => start("precise")}
+          jump={(p) => {
+            setBranch(null);
+            setPly(p);
+            clear();
+          }}
+          tryLine={(p, pv) => {
+            record.goto(p);
+            const next = new Branch(p, record.position);
+            for (const usi of pv) {
+              const m = next.position.createMoveByUSI(usi);
+              if (!m || !next.position.isValidMove(m)) break;
+              next.play(m);
+            }
+            next.step(Math.min(1, next.moves.length));
+            setPly(p);
+            setBranch(next);
+            clear();
+          }}
+        />
+      )}
       <Sheet
         visible={sheet === "moves"}
         title={

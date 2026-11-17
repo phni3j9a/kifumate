@@ -1,3 +1,4 @@
+import { fakeCoach } from "./fake-coach";
 import type { Page } from "@playwright/test";
 import type {
   RealtimeInput,
@@ -202,7 +203,9 @@ export async function fakeAnalysis(page: Page) {
     }
     await send(job, req.method() === "POST" ? 202 : 200);
   });
-  return state;
+  return Object.assign(state, {
+    coach: await fakeCoach(page, () => state.paid),
+  });
 }
 export function makeResults(input: Input): AnalysisResult[] {
   const p = new Position();

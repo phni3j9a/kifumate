@@ -1,3 +1,4 @@
+import { useCoach } from "../../coach/provider";
 import { useCallback, useState } from "react";
 import { ScrollView, Text } from "react-native";
 import { router, useFocusEffect } from "expo-router";
@@ -21,6 +22,7 @@ import { font } from "../../components/theme";
 import { listAliases } from "../../storage/repository";
 export default function Settings() {
   const db = useSQLiteContext();
+  const { profile } = useCoach();
   const { controller } = useAnalysis();
   const [names, setNames] = useState("");
   const [hash, setHash] = useState("");
@@ -60,7 +62,7 @@ export default function Settings() {
         }}
       >
         <AnalysisQuota />
-        <SectionTitle>対局</SectionTitle>
+        <SectionTitle>対局と解説</SectionTitle>
         <Card>
           <Row
             first
@@ -68,6 +70,12 @@ export default function Settings() {
             title="自分の対局者名"
             sub={names || "未登録"}
             onPress={() => router.push("/names")}
+          />
+          <Row
+            icon="flag"
+            title="学習プロフィール"
+            sub={`練習中の戦法：${profile.practice.join("・") || "なし"}`}
+            onPress={() => router.push("/profile")}
           />
         </Card>
         <SectionTitle>データ</SectionTitle>

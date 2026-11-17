@@ -54,6 +54,13 @@ CREATE TABLE classifications (
   error TEXT
 );
 `,
+  String.raw`
+CREATE TABLE coaches (
+  game_id TEXT PRIMARY KEY NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  document TEXT NOT NULL
+);
+CREATE TABLE coach_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+`,
 ];
 
 export interface MigrationDatabase {
