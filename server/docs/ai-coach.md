@@ -65,7 +65,7 @@ python3 scripts/compare_coach.py --provider deepseek \
 
 2026-11-17、既存stagingへデプロイして以下を確認しました。
 
-- 最終コードのWorker Version：`dca66c55-689a-4369-b707-604ced413854`（後続のsecret更新でバージョンは変わります）。コンテナイメージは既存のまま、変更なし。
+- 最終コードのWorker Version：`da228ffe-0e92-4104-b123-92939f4744a2`（月またぎの同時実行拒否も反映済み）。コンテナイメージは既存のまま、変更なし。
 - サンプル先頭6手・全7局面を実エンジンで精密解析し、署名を端末ファイルへ保存。署名付きデータの再送で偽の解説・追加質問を取得。コーチPOSTは初回 **0.110秒**、再検証 **0.124秒**（ネットワーク込み）。これは実モデルの速度ではありません。
 - 改ざんを400 `invalid_proof`、同じIDと中止済みIDを409で拒否。偽の解説と質問はそれぞれ一回加算し、失敗・中止は加算せず予約0。
 - 提供元secret削除後は503 `provider_unavailable`、**0.097秒**、使用数据え置き。キーなし状態の動作確認完了。
@@ -74,5 +74,7 @@ python3 scripts/compare_coach.py --provider deepseek \
 - Vitest **43件成功**（うちAIコーチ15件）、TypeScript型検査成功。比較スクリプトの自己検査とPythonスクリプトの構文検査成功。Python中継・pytestは変更していません。
 - 測定専用 `COACH_PROVIDER` と `DEV_PAID_HASHES` は削除済み。永続 `COACH_SIGNING_KEY` だけを維持。LLMキー・モデル・URLは未設定で、偽提供元は現在無効です。
 - **06:59:17 UTC（15:59:17 JST）**の確認で全三つのContainer applicationが `active=0 / assigned=0`、使用slotはすべて `inactive`。ローカルにkifumateの実行中Dockerなし。新規のContainer application・外部診断口は作っていません。
+
+最終デプロイ後も無料端末のGET 200 / POST 403、使用数不変・予約0を確認しました。
 
 実モデルの品質・速度・費用、未知固有名の検出精度、応答の検査通過率は未比較です。

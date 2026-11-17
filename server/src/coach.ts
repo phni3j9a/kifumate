@@ -194,7 +194,7 @@ export class Coach {
         if (this.status(input.requestId)) throw new ApiError(409, 'request_exists');
         const quota = this.quota(accepted);
         if (!quota.remaining) throw new ApiError(429, 'monthly_limit');
-        if (quota.reserved) throw new ApiError(409, 'coach_busy');
+        if (this.storage.sql.exec("SELECT id FROM coach_requests WHERE status='pending' AND deadline>? LIMIT 1", accepted).toArray().length) throw new ApiError(409, 'coach_busy');
         this.storage.sql.exec("INSERT INTO coach_requests VALUES (?,?,'pending',?)", input.requestId, quota.monthStart, accepted + timeout);
         this.active.set(input.requestId, controller);
       });

@@ -231,6 +231,11 @@ describe('権利・回数・中止', () => {
       state.storage.sql.exec('INSERT INTO coach_usage VALUES (?,100)', monthStart(before));
       state.storage.sql.exec("INSERT INTO coach_requests VALUES ('pending',?,'pending',?)", monthStart(before), before + 45000);
       expect(c.quota(before).remaining).toBe(0); expect(c.quota(after).remaining).toBe(100);
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(after);
+      try {
+        expect((await c.fetch(req(await payload('device', after)))).status).toBe(409);
+        expect(c.quota(after).used).toBe(0);
+      } finally {clock.mockRestore();}
       state.storage.sql.exec("INSERT INTO coach_requests VALUES ('expired',?,'pending',?)", monthStart(Date.now()), Date.now() - 1);
       await c.fetch(new Request('https://device/v1/coach'));
       expect(state.storage.sql.exec("SELECT status FROM coach_requests WHERE id='expired'").one().status).toBe('failed');
