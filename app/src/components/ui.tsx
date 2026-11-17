@@ -36,7 +36,7 @@ export const mascots = {
     source: require("../assets/chat-explaining.webp"),
     ratio: 1,
   },
-  "onb-5": { source: require("../assets/onb-5.webp"), ratio: 320 / 300 },
+  "onb-5": { source: require("../assets/onb-5.webp"), ratio: 459 / 600 },
   "sys-offline": {
     source: require("../assets/sys-offline.webp"),
     ratio: 193 / 300,

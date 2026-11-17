@@ -232,7 +232,7 @@ async function run(width: number, height: number) {
     await m.evaluate(
       ({ paid, message }) =>
         (window as any).__compare(
-          `push({t:'names'}); R.vpage.querySelector('.ph h2').textContent='招待コード'; R.vpage.querySelector('.pgc').innerHTML=${JSON.stringify(`<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900">${paid ? "有料プランを利用中" : "無料プラン"}</b>${paid ? '<p class="hint">期限なし</p>' : ""}<button class="bt sm" style="margin-top:10px">今の権利を確認</button></div><h3 class="st">コードを入力</h3><p class="hint" style="margin-top:0">招待コードで、精密解析・分岐中の解析・AIコーチが使えます。この端末で有効になります。</p><input class="inp" placeholder="ABCD-EFGH-JKMN-PQRS" aria-label="招待コード"><p class="hint">大文字・小文字や全角・半角は、どちらでも入力できます。区切りは自動で入ります。</p><button class="bt pri wide">コードを使う</button>${message ? `<p style="font-size:13px;font-weight:700;line-height:1.6">${message}</p>` : ""}<p class="hint">機種変更やアプリの削除で、別の端末に権利を引き継ぐことはできません。コードには期限や使える端末数の上限があります。</p>`)};`,
+          `push({t:'names'}); R.vpage.querySelector('.ph h2').textContent='招待コード'; R.vpage.querySelector('.pgc').innerHTML=${JSON.stringify(`<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900;line-height:1">${paid ? "有料プランを利用中" : "無料プラン"}</b>${paid ? '<p class="hint">期限なし</p>' : ""}<button class="bt sm" style="margin-top:10px">今の権利を確認</button></div><h3 class="st">コードを入力</h3><p class="hint" style="margin-top:0">招待コードで、精密解析・分岐中の解析・AIコーチが使えます。この端末で有効になります。</p><input class="inp" placeholder="ABCD-EFGH-JKMN-PQRS" aria-label="招待コード"><p class="hint">大文字・小文字や全角・半角は、どちらでも入力できます。区切りは自動で入ります。</p><button class="bt pri wide">コードを使う</button>${message ? `<p style="font-size:13px;font-weight:700;line-height:1.6">${message}</p>` : ""}<p class="hint">機種変更やアプリの削除で、別の端末に権利を引き継ぐことはできません。コードには期限や使える端末数の上限があります。</p>`)};`,
         ),
       { paid, message },
     );
@@ -270,7 +270,7 @@ async function run(width: number, height: number) {
     .click();
   await m.evaluate(() =>
     (window as any).__compare(
-      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove(); R.vpage.querySelector('.pgc').insertAdjacentHTML('afterbegin','<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900">有料プランを利用中</b><p class="hint">期限なし</p><button class="bt sm" style="margin-top:10px">今の権利を確認</button></div>');`,
+      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove(); R.vpage.querySelector('.pgc').insertAdjacentHTML('afterbegin','<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900;line-height:1">有料プランを利用中</b><p class="hint">期限なし</p><button class="bt sm" style="margin-top:10px">今の権利を確認</button></div>');`,
     ),
   );
   await shot("plan-invite-paid");

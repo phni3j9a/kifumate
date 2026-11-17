@@ -140,11 +140,14 @@ export class AnalysisClient {
   get = (id: string, from: number): Promise<Reply> =>
     this.request(`/v1/jobs/${encodeURIComponent(id)}?from=${from}`);
   realtime = async (): Promise<RealtimeReply> => {
-    const [reply, entitlement] = await Promise.all([
-      this.request("/v1/realtime"),
-      this.access.refresh(),
-    ]);
-    return { ...reply, paid: entitlement.paid };
+    const reply = await this.request("/v1/realtime");
+    // 350msの進捗取得ごとに権利GETを重ねず、変更の兆候があるときだけ再確認する。
+    if (
+      !this.access.snapshot.checked ||
+      reply.paid !== this.access.snapshot.entitlement.paid
+    )
+      await this.access.refresh();
+    return { ...reply, paid: this.access.snapshot.entitlement.paid };
   };
   startRealtime = (input: RealtimeInput): Promise<RealtimeReply> =>
     this.requirePaid().then(() =>

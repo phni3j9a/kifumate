@@ -200,3 +200,31 @@ test("ネイティブの実ストアは接続先ごとのトークンとKeychain
     { keychainAccessible: "端末限定" },
   ]);
 });
+
+test("分岐の進捗取得に権利GETを重ねず、変更の兆候は権利APIで確定する", async () => {
+  let paid = true,
+    gets = 0;
+  const client = new AnalysisClient(
+    PRODUCTION_URL,
+    { get: async () => "a".repeat(64), set: async () => {} },
+    async (url) => {
+      if (String(url).endsWith("/entitlements")) {
+        gets++;
+        return Response.json({
+          paid,
+          source: paid ? "invite" : null,
+          expiresAt: null,
+        });
+      }
+      return Response.json({ paid });
+    },
+  );
+  await client.access.refresh();
+  await client.realtime();
+  await client.realtime();
+  assert.equal(gets, 1);
+  paid = false;
+  assert.equal((await client.realtime()).paid, false);
+  assert.equal(gets, 2);
+  assert.equal(client.access.snapshot.entitlement.paid, false);
+});
