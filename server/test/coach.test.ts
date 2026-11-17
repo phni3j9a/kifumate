@@ -159,6 +159,35 @@ describe('提供元', () => {
     await expect(complete({...config, ENVIRONMENT: 'production'}, p, refs, new AbortController().signal)).rejects.toThrow('provider_unavailable');
     await expect(complete({...config, COACH_PROVIDER: 'openai-compatible'}, p, refs, new AbortController().signal)).rejects.toThrow('provider_unavailable');
   });
+  it('WorkersのネイティブRequestで提供元の送信オプションを受理でき、リダイレクトを追わない', async () => {
+    const p = parseCoach(await payload('device'));
+    const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'test'};
+    let calls = 0;
+    const transport: typeof fetch = async (url, init) => {
+      const request = new Request(url, init);
+      expect(request.redirect).toBe('manual');
+      calls++;
+      return calls === 1 ? Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe), reasoning_content: '非公開の推論'}}]})
+        : new Response(null, {status: 302, headers: {Location: 'https://other-provider.test'}});
+    };
+    await expect(complete(e, p, refs, new AbortController().signal, transport)).resolves.toEqual(safe);
+    await expect(complete(e, p, refs, new AbortController().signal, transport)).rejects.toThrow('provider_failed');
+    expect(calls).toBe(2);
+  });
+  it('提供元の診断はHTTPステータス・固定種別・所要時間だけを残す', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const p = parseCoach(await payload('device'));
+    const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'private-key'};
+    try {
+      await expect(complete(e, p, refs, new AbortController().signal, async () => new Response('private-body', {status: 429}))).rejects.toThrow('provider_failed');
+      expect(JSON.parse(logs.mock.calls[0][0])).toEqual({event: 'coach_provider_failed', stage: 'provider_http', errorType: 'ApiError', httpStatus: 429, elapsedMs: expect.any(Number)});
+      const failure = new TypeError('private-key private-question');
+      failure.name = 'private-name';
+      await expect(complete(e, p, refs, new AbortController().signal, async () => {throw failure;})).rejects.toThrow();
+      expect(JSON.parse(logs.mock.calls[1][0])).toEqual({event: 'coach_provider_failed', stage: 'provider_fetch', errorType: 'TypeError', elapsedMs: expect.any(Number)});
+      expect(JSON.stringify(logs.mock.calls)).not.toMatch(/private-|四間飛車|終盤に強くなる/);
+    } finally { logs.mockRestore(); }
+  });
   it('提供元エラー・不正JSON・途中打切り・過大応答は失敗する', async () => {
     const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model', COACH_API_KEY: 'secret'};
     const p = parseCoach(await payload('device'));
@@ -176,20 +205,20 @@ describe('権利・回数・中止', () => {
     const blocked = await SELF.fetch('https://api/v1/coach', {method: 'POST', headers: {Authorization: `Bearer ${token}`, 'X-Dev-Paid': '1'}});
     expect(blocked.status).toBe(403);
   });
-  it('Workerが設定ヘッダーを上書きし、既存DOでも提供元secret削除を反映する', async () => {
+  it('設定ヘッダーを無視し、署名鍵・提供元はDO自身のenvから読む', async () => {
     const reg = await SELF.fetch('https://api/v1/devices', {method: 'POST'}); const {token} = await reg.json() as any;
     await SELF.fetch('https://api/v1/coach', {headers: {Authorization: `Bearer ${token}`, 'X-Coach-Config': JSON.stringify({ENVIRONMENT: 'attacker', COACH_API_KEY: 'injected'})}});
     await runInDurableObject(devices.getByName(await sha256(token)), async (instance: any) => {
-      expect(instance.coachConfig.ENVIRONMENT).toBe('staging'); expect(instance.coachConfig.COACH_API_KEY).toBeUndefined();
+      expect(instance.env.ENVIRONMENT).toBe('staging'); expect(instance.env.COACH_API_KEY).toBeUndefined();
       instance.env.COACH_SIGNING_KEY = 'test-key'; instance.env.COACH_PROVIDER = 'fake';
       const p = await payload(instance.ctx.id.toString());
       const initial = req(p); initial.headers.set('X-Dev-Paid', '1');
       expect((await instance.fetch(initial)).status).toBe(200);
-      // envの古いfakeはそのままでも、最新の入口設定で未設定へ戻す。
+      instance.env.COACH_PROVIDER = 'openai-compatible';
       const next = req({...p, requestId: crypto.randomUUID()}); next.headers.set('X-Dev-Paid', '1');
-      next.headers.set('X-Coach-Config', JSON.stringify({ENVIRONMENT: 'staging', COACH_SIGNING_KEY: 'test-key'}));
+      next.headers.set('X-Coach-Config', JSON.stringify({COACH_PROVIDER: 'fake', COACH_API_KEY: 'injected'}));
       expect((await instance.fetch(next)).status).toBe(503);
-      expect(instance.coachConfig.COACH_PROVIDER).toBeUndefined(); expect(instance.coach.quota().used).toBe(1);
+      expect(instance.env.COACH_API_KEY).toBeUndefined(); expect(instance.coach.quota().used).toBe(1);
     });
   });
   it('成功した解説と質問だけ各一回、重複と失敗と中止は数えない', async () => {
@@ -212,6 +241,34 @@ describe('権利・回数・中止', () => {
       expect(coach.quota().low).toBe(true);
       expect((await coach.fetch(req({...p, requestId: crypto.randomUUID()}))).status).toBe(429);
       expect(new Coach(state.storage, {...config, COACH_MONTHLY_LIMIT: '3'}, 'device', () => true).quota().used).toBe(3);
+    });
+  });
+  it('実行期限で提供元を中断し、タイマーを後始末して回数を返す', async () => {
+    await runInDurableObject(await fixture(), async (_instance, state) => {
+      const clear = vi.spyOn(globalThis, 'clearTimeout');
+      const transport = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        const signal = init!.signal!;
+        const abort = () => reject(new DOMException('', 'AbortError'));
+        if (signal.aborted) abort(); else signal.addEventListener('abort', abort, {once: true});
+      }));
+      const c = new Coach(state.storage, {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'test', COACH_TIMEOUT_MS: '20'}, 'device', () => true);
+      try {
+        expect((await c.fetch(req(await payload('device')))).status).toBe(504);
+        expect(clear).toHaveBeenCalled();
+        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+      } finally { transport.mockRestore(); clear.mockRestore(); }
+    });
+  });
+  it('事実生成の想定外例外も箇所と型だけを記録し、回数を消費しない', async () => {
+    await runInDurableObject(await fixture(), async (_instance, state) => {
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const c = new Coach(state.storage, config, 'device', () => true, async () => {throw new TypeError('private-facts');});
+      try {
+        expect((await c.fetch(req(await payload('device')))).status).toBe(502);
+        expect(JSON.parse(logs.mock.calls[0][0])).toEqual({event: 'coach_failed', error: 'provider_failed', stage: 'load_facts', errorType: 'TypeError', elapsedMs: expect.any(Number)});
+        expect(JSON.stringify(logs.mock.calls)).not.toContain('private-facts');
+        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+      } finally { logs.mockRestore(); }
     });
   });
   it('提供元の実行中に中止し、遅延結果を捨てる。別要求の同時実行も拒否', async () => {

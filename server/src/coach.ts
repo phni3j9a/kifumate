@@ -14,11 +14,6 @@ export interface CoachEnv {
   COACH_TOKEN_PARAMETER?: string;
   COACH_TIMEOUT_MS?: string;
 }
-const CONFIG_KEYS = ['ENVIRONMENT', 'COACH_SIGNING_KEY', 'COACH_API_KEY', 'COACH_BASE_URL', 'COACH_MODEL', 'COACH_PROVIDER',
-  'COACH_MONTHLY_LIMIT', 'COACH_MAX_TOKENS', 'COACH_TOKEN_PARAMETER', 'COACH_TIMEOUT_MS'] as const;
-export function coachConfiguration(env: CoachEnv): CoachEnv {
-  return Object.fromEntries(CONFIG_KEYS.map(k => [k, env[k]])) as unknown as CoachEnv;
-}
 export interface Proof {
   version: 1; device: string; jobId: string; mode: 'precise';
   issuedAt: number; expiresAt: number; digest: string; mac: string;
@@ -119,6 +114,11 @@ function setting(value: string | undefined, fallback: number, max: number) {
   const n = Number(value ?? fallback); return Number.isSafeInteger(n) && n > 0 && n <= max ? n : fallback;
 }
 export function timeoutMs(env: CoachEnv) { return setting(env.COACH_TIMEOUT_MS, 240_000, 600_000); }
+function errorType(error: unknown) {
+  // 例外のmessage・stack・任意のnameには入力やキーが混ざり得る。
+  return error instanceof ApiError ? 'ApiError' : error instanceof TypeError ? 'TypeError' : error instanceof SyntaxError ? 'SyntaxError'
+    : error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name) ? error.name : 'Error';
+}
 export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch, facts?: CoachFacts): Promise<unknown> {
   if (env.COACH_PROVIDER === 'fake') {
     if (!['local', 'staging'].includes(env.ENVIRONMENT)) throw new ApiError(503, 'provider_unavailable');
@@ -129,14 +129,26 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
   if (!env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
   const url = new URL((env.COACH_BASE_URL ?? 'https://api.deepseek.com').replace(/\/$/, '') + '/chat/completions');
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new ApiError(503, 'provider_unavailable');
-  const response = await transport(url.toString(), {method: 'POST', signal, redirect: 'error', headers: {'Authorization': `Bearer ${env.COACH_API_KEY}`, 'Content-Type': 'application/json'},
-    body: JSON.stringify({model: env.COACH_MODEL ?? 'deepseek-flash', messages: messages(input, refs, facts), stream: false,
-      response_format: {type: 'json_object'}, reasoning_effort: 'max',
-      [env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: setting(env.COACH_MAX_TOKENS, 32768, 65536)})});
-  if (!response.ok) { await response.body?.cancel(); throw new ApiError(502, 'provider_failed'); }
-  const data = record(await readJson(new Request('https://provider', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: response.body, duplex: 'half'} as RequestInit), 1_048_576));
-  if (data.choices?.[0]?.finish_reason !== 'stop' || typeof data.choices[0].message?.content !== 'string') throw new ApiError(502, 'invalid_output');
-  try { return JSON.parse(data.choices[0].message.content); } catch { throw new ApiError(502, 'invalid_output'); }
+  const started = Date.now();
+  let stage = 'provider_fetch', httpStatus: number | undefined;
+  try {
+    // Workersはredirect:errorを受理しない。manualで追従せず、非2xxとして拒否する。
+    const response = await transport(url.toString(), {method: 'POST', signal, redirect: 'manual', headers: {'Authorization': `Bearer ${env.COACH_API_KEY}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({model: env.COACH_MODEL ?? 'deepseek-flash', messages: messages(input, refs, facts), stream: false,
+        response_format: {type: 'json_object'}, reasoning_effort: 'max',
+        [env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: setting(env.COACH_MAX_TOKENS, 32768, 65536)})});
+    httpStatus = response.status;
+    stage = 'provider_http';
+    if (!response.ok) { await response.body?.cancel(); throw new ApiError(502, 'provider_failed'); }
+    stage = 'provider_read';
+    const data = record(await readJson(new Request('https://provider', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: response.body, duplex: 'half'} as RequestInit), 1_048_576));
+    stage = 'provider_output';
+    if (data.choices?.[0]?.finish_reason !== 'stop' || typeof data.choices[0].message?.content !== 'string') throw new ApiError(502, 'invalid_output');
+    try { return JSON.parse(data.choices[0].message.content); } catch { throw new ApiError(502, 'invalid_output'); }
+  } catch (error) {
+    console.log(JSON.stringify({event: 'coach_provider_failed', stage, errorType: errorType(error), httpStatus, elapsedMs: Date.now() - started}));
+    throw error;
+  }
 }
 export function validateOutput(value: unknown, refs: Reference[], facts?: CoachFacts) {
   try {
@@ -210,14 +222,23 @@ export class Coach {
     const refs = references(input.results), controller = new AbortController();
     this.active.set(input.requestId, controller);
     const deadline = this.status(input.requestId)!.deadline;
-    const signal = AbortSignal.any([controller.signal, ...(request ? [request.signal] : []), AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), Math.max(1, deadline - Date.now()));
+    const signal = AbortSignal.any([controller.signal, ...(request ? [request.signal] : []), timeout.signal]);
+    const started = Date.now();
+    let stage = 'entitlement';
     try {
       await this.refreshPaid?.();
       if (!this.paid()) throw new ApiError(403, 'paid_required');
       if (this.env.COACH_PROVIDER !== 'fake' && !this.env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
+      stage = 'load_facts';
       const facts = this.loadFacts ? await this.loadFacts(input, signal) : undefined;
       if (!facts && this.env.COACH_PROVIDER !== 'fake' && this.loadFacts) throw new ApiError(502, 'facts_unavailable');
-      const output = validateOutput(await complete(this.env, input, refs, signal, fetch, facts), refs, facts);
+      stage = 'complete';
+      const value = await complete(this.env, input, refs, signal, fetch, facts);
+      stage = 'validate_output';
+      const output = validateOutput(value, refs, facts);
+      stage = 'commit';
       await this.refreshPaid?.();
       return this.storage.transactionSync(() => {
         const current = this.status(input.requestId);
@@ -227,17 +248,18 @@ export class Coach {
         this.storage.sql.exec("UPDATE coach_requests SET status='completed',deadline=? WHERE id=?", Date.now() + 7 * 86400_000, input.requestId);
         this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
         this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,output=? WHERE id=?', JSON.stringify(output), input.requestId);
-        console.log(JSON.stringify({event: 'coach_completed'}));
+        console.log(JSON.stringify({event: 'coach_completed', elapsedMs: Date.now() - started}));
         return json({requestId: input.requestId, ...output, quota: this.quota()});
       });
     } catch (error) {
       const cancelled = controller.signal.aborted || request?.signal.aborted || this.status(input.requestId)?.status === 'cancelled';
       const failure = cancelled ? new ApiError(409, 'cancelled') : Date.now() >= deadline || signal.aborted ? new ApiError(504, 'coach_timeout') : error instanceof ApiError ? error : new ApiError(502, 'provider_failed');
-      console.warn(JSON.stringify({event: 'coach_failed', error: failure.code}));
+      console.log(JSON.stringify({event: 'coach_failed', error: failure.code, stage, errorType: errorType(error), elapsedMs: Date.now() - started}));
       this.storage.sql.exec("UPDATE coach_requests SET status=?,deadline=? WHERE id=? AND status='pending'", cancelled ? 'cancelled' : 'failed', Date.now() + 7 * 86400_000, input.requestId);
       this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,error=? WHERE id=?', failure.code, input.requestId);
       return json({error: failure.code, quota: this.quota()}, failure.status);
     } finally {
+      clearTimeout(timer);
       this.active.delete(input.requestId);
       const next = this.nextAlarm();
       if (next !== null) await this.wake(next);

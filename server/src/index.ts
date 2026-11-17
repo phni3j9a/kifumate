@@ -1,7 +1,7 @@
 import { normalizeInviteCode } from './invite-code.mjs';
 import { Invitations, limit, type Entitlement } from './invitations';
 export { Invitations } from './invitations';
-import { Coach, coachConfiguration, signAnalysis, type CoachEnv } from './coach';
+import { Coach, signAnalysis, type CoachEnv } from './coach';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions } from './realtime';
 import { Container } from '@cloudflare/containers';
@@ -88,13 +88,11 @@ interface Job {
 export class Device extends DurableObject<Env> {
   private busy = false;
   private coach: Coach;
-  private coachConfig: CoachEnv;
   private entitlement: Entitlement = {paid: false, source: null, expiresAt: null};
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.coachConfig = coachConfiguration(env);
-    this.coach = new Coach(ctx.storage, this.coachConfig, ctx.id.toString(), () => this.paid(), async (input, signal) => {
-      if (this.coachConfig.COACH_PROVIDER === 'fake') return undefined;
+    this.coach = new Coach(ctx.storage, env, ctx.id.toString(), () => this.paid(), async (input, signal) => {
+      if (this.env.COACH_PROVIDER === 'fake') return undefined;
       const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
       const response = await this.env.PRECISE.getByName('slot-' + slot).fetch('http://container/coach-facts', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, signal,
@@ -162,9 +160,6 @@ export class Device extends DurableObject<Env> {
     try {
       this.prune(Date.now());
       const url = new URL(request.url);
-      // secret変更後も既存DOのenvは古いことがある。入口の最新設定で全キーを上書きする。
-      const config = request.headers.get('X-Coach-Config');
-      Object.assign(this.coachConfig, coachConfiguration(config ? JSON.parse(config) : this.env));
       if (url.pathname === '/register' && request.method === 'POST') {
         const hash = url.searchParams.get('hash');
         if (!hash || !/^[a-f0-9]{64}$/.test(hash)) throw new ApiError(400, 'invalid_device');
@@ -274,8 +269,8 @@ export class Device extends DurableObject<Env> {
         const result = await response.json() as {ply?: number};
         if (result.ply !== job.cursor) throw new Error('invalid_result');
         const completedAt = Date.now();
-        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.coachConfig.COACH_SIGNING_KEY
-          ? await signAnalysis(this.coachConfig.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
+        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.env.COACH_SIGNING_KEY
+          ? await signAnalysis(this.env.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
             [...this.rows<{data: string}>('SELECT data FROM results WHERE job=? ORDER BY ply', job.id).map(x => JSON.parse(x.data)), result], completedAt)
           : null;
         this.ctx.storage.transactionSync(() => {
@@ -356,13 +351,17 @@ export default {
         await limit(env.INVITE_LIMITER, 'device:' + hash, env.ENVIRONMENT);
         await limit(env.INVITE_LIMITER, 'ip:' + ip, env.ENVIRONMENT);
       }
-      const headers = new Headers(request.headers); headers.delete('Authorization');
+      // 外部ヘッダーは必要なAPI指定だけ許可し、認証・内部設定・偽装した権利を転送しない。
+      const headers = new Headers();
+      for (const name of ['Content-Type', 'Prefer']) {
+        const value = request.headers.get(name);
+        if (value !== null) headers.set(name, value);
+      }
       headers.set('X-Invite-IP', ip);
-      // secret 更新時に既存 DO の env が残っても、入口の最新権利で上書きする。
+      // 権利判定の結果だけを渡す。secretの値・設定一式はDO自身のenvから読む。
       const paid = ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true'
         && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
       headers.set('X-Dev-Paid', paid ? '1' : '0');
-      headers.set('X-Coach-Config', JSON.stringify(coachConfiguration(env)));
       let response = await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
       if (response.status === 429 && family === 'invitations') {
         response = new Response(response.body, response);
