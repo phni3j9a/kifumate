@@ -18,8 +18,8 @@ cd app
 npm ci
 cp .env.example .env.local # 開発はstaging。実機確認で接続先を変えるときはこのファイルを編集
 npm run web       # Web。端末内DBはブラウザの同じオリジンに保存
-npm start         # QRコードから Expo Go で開く
-npm run android   # 接続したAndroid / 使用可能なエミュレータで開く
+npm start         # --goを指定済み。QRコードから Expo Go で開く
+npm run android   # 接続したAndroid / 使用可能なエミュレータのExpo Goで開く
 ```
 
 USB 接続の実機を使う場合：
@@ -27,9 +27,18 @@ USB 接続の実機を使う場合：
 ```sh
 adb devices
 adb reverse tcp:8081 tcp:8081
-npx expo start --localhost
+npm start -- --localhost
 # 別のターミナルで
 adb shell am start -a android.intent.action.VIEW -d exp://127.0.0.1:8081 host.exp.exponent
+```
+
+既定の `start`・`android`・`web` は `--go` を指定しています。`expo-dev-client` が依存にあっても、`npm start` は `Using Expo Go` と接続先の `exp://` を表示します。SDK 58ではQRからアプリ選択ページを経由する場合があるので、その場合はExpo Goを選んでください。
+
+EASの `development` プロファイルで作成・インストールした開発クライアントを使う場合だけ、次で起動します（今回は開発APKをビルドしません）。
+
+```sh
+npm run start:dev              # APP_VARIANT=development と --dev-client を指定済み
+npm run start:dev -- --android # 開発用の別IDのアプリを開く
 ```
 
 開発サーバーの停止は `Ctrl+C`。Web は動作確認用で、インストール可能なオフラインPWAではありません。Web を再読み込みするには開発サーバーまたは配信先への接続が必要です。Android / iOS の保存データの閲覧・操作には解析サーバーも外部通信も不要です。解析の依頼・進捗・回数の更新には通信が必要です。

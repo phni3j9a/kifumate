@@ -18,7 +18,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `EXPO_PUBLIC_ANALYSIS_URL=http://127.0.0.1:18090 npx expo start --web --port ${new URL(url).port}`,
+    command: `EXPO_PUBLIC_ANALYSIS_URL=http://127.0.0.1:18090 npm run web -- --port ${new URL(url).port}`,
     url,
     reuseExistingServer: true,
     timeout: 120000,

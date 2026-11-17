@@ -4,15 +4,16 @@
   "description": "将棋の棋譜を端末内で記録・再生するアプリ",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "web": "expo start --web",
+    "start": "expo start --go",
+    "android": "expo start --go --android",
+    "web": "expo start --go --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test": "tsx --test tests/*.test.ts && node scripts/check-product-names.mjs",
     "test:web": "playwright test",
     "check": "npm run test && npm run typecheck && npm run lint",
-    "compare": "tsx scripts/compare-mock.mts"
+    "compare": "tsx scripts/compare-mock.mts",
+    "start:dev": "APP_VARIANT=development expo start --dev-client"
   },
   "dependencies": {
     "@expo-google-fonts/zen-maru-gothic": "^0.4.2",

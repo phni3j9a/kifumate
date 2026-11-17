@@ -28,8 +28,8 @@ async function ensureServer() {
     );
   if (await up()) return null;
   const server = spawn(
-    "npx",
-    ["expo", "start", "--web", "--port", new URL(APP).port],
+    "npm",
+    ["run", "web", "--", "--port", new URL(APP).port],
     {
       stdio: "ignore",
       detached: true,

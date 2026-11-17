@@ -96,3 +96,17 @@ test("開発プロファイルだけ別IDにし、既定と配布版のID・名�
     else process.env.APP_VARIANT = previous;
   }
 });
+
+test("既定の起動はExpo Go・開発クライアントは明示した別コマンドだけ", () => {
+  const { scripts } = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  for (const name of ["start", "android", "web"]) {
+    assert.match(scripts[name], /\bexpo start\b.*--go\b/);
+    assert.doesNotMatch(scripts[name], /--dev-client\b/);
+  }
+  assert.match(
+    scripts["start:dev"],
+    /^APP_VARIANT=development expo start --dev-client$/,
+  );
+});
