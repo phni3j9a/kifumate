@@ -35,6 +35,9 @@ import {
   resultFor,
   type Side,
 } from "../core/kif";
+import { useAnalysis } from "../analysis/provider";
+import { analysisInput } from "../analysis/display";
+import type { Mode } from "../analysis/types";
 import { findDuplicate, importGame, listAliases } from "../storage/repository";
 
 // input は読み取った本文。今の入力と同じときだけ、この結果で保存できる。
@@ -75,6 +78,8 @@ function Line({
 const body = font(500, 11.5, 1.55, colors.ink2);
 
 export default function Import() {
+  const { quota, offline, controller } = useAnalysis();
+  const [mode, setMode] = useState<Mode>("precise");
   const db = useSQLiteContext();
   const [tab, setTab] = useState<"paste" | "file">("paste"),
     [text, setText] = useState(""),
@@ -175,7 +180,7 @@ export default function Import() {
   const fresh = view?.input === (tab === "paste" ? text : (file?.text ?? ""));
   const side = pick !== undefined ? pick : (ok?.auto ?? null);
   const decided = pick !== undefined || !!ok?.auto;
-  async function save() {
+  async function save(analyze = false) {
     if (!ok || !fresh || !decided || busy) return;
     setBusy(true);
     try {
@@ -192,6 +197,15 @@ export default function Import() {
       else {
         router.replace({ pathname: "/game/[id]", params: { id: saved.id } });
         toast("保存しました");
+        if (analyze)
+          void controller
+            .start(
+              saved.id,
+              analysisInput(ok.record, quota?.paid ? mode : "std"),
+            )
+            .catch(() =>
+              toast("棋譜は保存しましたが、解析を依頼できませんでした"),
+            );
       }
     } catch {
       toast("棋譜を保存できませんでした。もう一度お試しください");
@@ -217,6 +231,7 @@ export default function Import() {
   return (
     <Screen>
       <PageHeader close title="棋譜を取り込む" />
+
       <PageScroll>
         <Segmented
           options={[
@@ -398,14 +413,56 @@ export default function Import() {
                   保存済みの棋譜を開く
                 </Button>
               ) : (
-                <Button
-                  kind="pri"
-                  wide
-                  disabled={!fresh || !decided || busy}
-                  onPress={() => void save()}
-                >
-                  保存する
-                </Button>
+                <View style={{ gap: 10 }}>
+                  {quota?.paid && (
+                    <Segmented
+                      label="解析の種類"
+                      options={[
+                        [
+                          "precise",
+                          `精密解析（今週あと${Math.min(quota.totalRemaining, quota.preciseRemaining)}局）`,
+                        ],
+                        ["std", "ふつうの解析"],
+                      ]}
+                      value={mode}
+                      onChange={setMode}
+                    />
+                  )}
+                  {(!quota || quota.totalRemaining > 0) && (
+                    <>
+                      <Button
+                        kind="pri"
+                        wide
+                        disabled={
+                          !fresh ||
+                          !decided ||
+                          busy ||
+                          offline ||
+                          (mode === "precise" &&
+                            !!quota?.paid &&
+                            quota.preciseRemaining === 0)
+                        }
+                        onPress={() => void save(true)}
+                      >
+                        保存して解析する
+                      </Button>
+                      <Text style={font(500, 11, 1.5, colors.ink2)}>
+                        {offline
+                          ? "通信できません。解析はつながってから始められます"
+                          : quota?.paid && mode === "precise"
+                            ? "精密解析を1局分使います（候補3手・深い読み）"
+                            : "候補1手です"}
+                      </Text>
+                    </>
+                  )}
+                  <Button
+                    wide
+                    disabled={!fresh || !decided || busy}
+                    onPress={() => void save()}
+                  >
+                    保存だけする
+                  </Button>
+                </View>
               )}
             </View>
           </>

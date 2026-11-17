@@ -26,6 +26,10 @@ import {
   Underlined,
 } from "../../components/ui";
 import { dateParts, dateShort } from "../../core/format";
+import { useAnalysis } from "../../analysis/provider";
+import { needsRetryConfirmation } from "../../analysis/types";
+import { cp } from "../../analysis/display";
+import Svg, { Path } from "react-native-svg";
 import { listGames, toggleFavorite, type Game } from "../../storage/repository";
 
 const quicks = [
@@ -86,6 +90,7 @@ const monthOf = (g: Game) => {
 
 export default function Games() {
   const db = useSQLiteContext();
+  const { records, offline, quota } = useAnalysis();
   const [games, setGames] = useState<Game[] | null>(null),
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
@@ -170,6 +175,7 @@ export default function Games() {
         .includes(q)
     )
       return false;
+    if (quick === "none" && records[g.id]?.saved) return false;
     if (quick === "favorite" && !g.favorite) return false;
     if (
       (quick === "win" || quick === "loss") &&
@@ -201,6 +207,11 @@ export default function Games() {
   return (
     <Screen>
       <AppBar title="棋譜" note={`${games.length}局`}>
+        {quota && !quota.paid && (
+          <Text style={font(700, 10, 1.3, colors.ink2)}>
+            今週の解析 あと{quota.totalRemaining}局
+          </Text>
+        )}
         {!searching && (
           <RoundButton
             icon="search"
@@ -209,6 +220,16 @@ export default function Games() {
           />
         )}
       </AppBar>
+      {offline && (
+        <Text
+          style={[
+            font(700, 11, 1.5, colors.ink2),
+            { paddingHorizontal: 14, paddingVertical: 5 },
+          ]}
+        >
+          オフラインです。保存済みの棋譜と解析結果は見られます。
+        </Text>
+      )}
       {searching && (
         <View style={s.sf}>
           <Icon name="search" size={16} strokeWidth={2.2} />
@@ -399,12 +420,64 @@ export default function Games() {
                     </View>
                     <Text style={font(500, 11, 1.2, colors.ink2)}>
                       {dateShort(g.played_at)}・{g.plies}手
+                      {records[g.id]?.saved?.mode === "precise"
+                        ? "　精密解析"
+                        : ""}
                     </Text>
                   </View>
                   <View style={s.gx}>
-                    <View style={s.nopill}>
-                      <Text style={font(700, 11, 1, colors.ink2)}>未解析</Text>
-                    </View>
+                    {records[g.id]?.attempt ? (
+                      <View
+                        style={[
+                          s.nopill,
+                          {
+                            backgroundColor: colors.mintSoft,
+                            borderStyle: "solid",
+                          },
+                        ]}
+                      >
+                        <Text style={font(900, 10.5)}>
+                          {needsRetryConfirmation(records[g.id]?.attempt)
+                            ? "要確認"
+                            : offline
+                              ? "中断中"
+                              : records[g.id]!.attempt!.job?.status === "queued"
+                                ? "解析待ち"
+                                : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
+                        </Text>
+                      </View>
+                    ) : records[g.id]?.saved ? (
+                      <View
+                        accessibilityLabel={
+                          records[g.id]!.saved!.mode === "precise"
+                            ? "精密解析済み"
+                            : "解析済み"
+                        }
+                      >
+                        <Svg width={62} height={28}>
+                          <Path
+                            d={records[g.id]!.saved!.results.reduce(
+                              (d, r, i) => {
+                                const v = cp(r.score);
+                                return v === null
+                                  ? d
+                                  : `${d}${i ? "L" : "M"}${1 + (60 * i) / Math.max(1, g.plies)} ${14 - (12 * Math.max(-3000, Math.min(3000, v)) * (g.self_side === "white" ? -1 : 1)) / 3000}`;
+                              },
+                              "",
+                            )}
+                            stroke={colors.ink}
+                            strokeWidth={1.5}
+                            fill="none"
+                          />
+                        </Svg>
+                      </View>
+                    ) : (
+                      <View style={s.nopill}>
+                        <Text style={font(700, 11, 1, colors.ink2)}>
+                          未解析
+                        </Text>
+                      </View>
+                    )}
                     <View style={s.fv} />
                   </View>
                 </Pressable>

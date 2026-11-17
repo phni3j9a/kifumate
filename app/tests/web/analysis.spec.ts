@@ -1,0 +1,181 @@
+import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { analysisInput } from "../../src/analysis/display";
+import { readKif } from "../../src/core/kif";
+import { fakeAnalysis, makeResults } from "../helpers/fake-analysis";
+const kif = readFileSync("tests/fixtures/standard.kif", "utf8");
+const button = (p: Page, name: string) =>
+  p.getByRole("button", { name, exact: true });
+async function importOne(p: Page) {
+  await p.goto("/");
+  await button(p, "棋譜を取り込む").click();
+  await p.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
+  await p.getByRole("radio", { name: "自分ではない" }).click();
+  await button(p, "保存だけする").click();
+  await expect(p.getByText("開始局面", { exact: true })).toBeVisible();
+}
+test("解析依頼・進行・通信断・再起動・別画面の完了通知・オフライン保存済み精密候補", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await importOne(page);
+  await button(page, "解析する").click();
+  await expect(button(page, "中止")).toBeVisible();
+  await expect.poll(() => fake.requests[0]?.mode).toBe("precise");
+  expect(Object.keys(fake.requests[0]!).sort()).toEqual([
+    "initial",
+    "mode",
+    "moves",
+  ]);
+  fake.next = 3;
+  await expect(page.getByText("2 / 5手", { exact: true })).toBeVisible();
+  fake.online = false;
+  await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();
+  await button(page, "1手進む").click();
+  await expect(page.getByText("+25").first()).toBeVisible();
+  fake.online = true;
+  await page.reload();
+  await expect(button(page, "中止")).toBeVisible();
+  await expect(page.getByText("中断中", { exact: true })).toHaveCount(0);
+  await button(page, "戻る").click();
+  fake.complete = true;
+  await expect(
+    page.getByText("対局の解析が終わりました", { exact: true }),
+  ).toBeVisible();
+  await button(page, "開く").click();
+  await expect(button(page, "2位")).toBeVisible();
+  await button(page, "3位").click();
+  await expect(page.getByLabel(/勝率/).first()).toBeVisible();
+  fake.online = false;
+  await page.reload();
+  await expect(button(page, "3位")).toBeVisible();
+  await button(page, "3位").click();
+  await button(page, "この手を盤で試す").click();
+  await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
+  expect(fake.errors).toEqual([]);
+});
+test("中止の確認・解析待ちの取り消し・上限と設定・失敗後の再依頼", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await importOne(page);
+  await button(page, "解析する").click();
+  await button(page, "中止").click();
+  await expect(page.getByText("解析を中止しますか")).toBeVisible();
+  await button(page, "続ける").click();
+  expect(fake.cancel).toBe(0);
+  await button(page, "中止").click();
+  await button(page, "中止する").click();
+  await expect(button(page, "解析する")).toBeVisible();
+  expect(fake.cancel).toBe(1);
+  fake.status = "queued";
+  await button(page, "解析する").click();
+  await expect(
+    page.getByText("解析待ち", { exact: true }).first(),
+  ).toBeVisible();
+  await button(page, "やめる").click();
+  await expect(button(page, "解析する")).toBeVisible();
+  expect(fake.cancel).toBe(2);
+  fake.status = "failed";
+  await button(page, "解析する").click();
+  await expect(
+    page.getByText("解析を終えられませんでした", { exact: true }).first(),
+  ).toBeVisible();
+  fake.status = "running";
+  await button(page, "もう一度").click();
+  await expect(button(page, "中止")).toBeVisible();
+  await button(page, "中止").click();
+  await button(page, "中止する").click();
+  fake.remaining = 0;
+  fake.precise = 0;
+  await button(page, "戻る").click();
+  await page.getByRole("tab", { name: /設定/ }).click();
+  await expect(
+    page.getByLabel("解析の合計（今週） 残り0局", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/月曜の午前0時/)).toBeVisible();
+  expect(fake.errors).toEqual([]);
+});
+
+test("通信復帰後のダイアログから再試行すると古いoffline状態に戻らず依頼できる", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await importOne(page);
+  fake.online = false;
+  await page.reload();
+  await expect(
+    page.getByText("通信できません。つながると解析できます", { exact: true }),
+  ).toBeVisible();
+  await button(page, "解析する").click();
+  await expect(
+    page.getByRole("heading", { name: "通信できません" }),
+  ).toBeVisible();
+  fake.online = true;
+  await button(page, "もう一度試す").click();
+  await expect.poll(() => fake.requests.length).toBe(1);
+  await expect(button(page, "中止")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "通信できません" }),
+  ).toHaveCount(0);
+});
+
+test("観戦棋譜の反転でも先後と勝率・グラフ・候補の基準は変わらず矢印だけ盤に追従する", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await importOne(page);
+  fake.complete = true;
+  // 最初のPOST本文から合法な候補を作り、開始局面の評価だけをはっきりした先手有利にする。
+  fake.results = makeResults(analysisInput(readKif(kif), "precise"));
+  fake.results[0]!.score = { kind: "cp", value: 1200 };
+  await button(page, "解析する").click();
+  await expect(button(page, "3位")).toBeVisible();
+  await expect(page.getByText("先手 88%", { exact: true })).toBeVisible();
+  const graph = page.getByRole("slider", { name: /形勢グラフ/ });
+  const graphBefore = await graph.innerHTML();
+  const arrow = page
+    .getByRole("img", { name: "開始局面の盤面", exact: true })
+    .locator('line[stroke="#19C6A5"][stroke-width="15"]');
+  expect(Number(await arrow.getAttribute("y2"))).toBeLessThan(
+    Number(await arrow.getAttribute("y1")),
+  );
+  await button(page, "この対局のメニュー").click();
+  await button(page, "盤の向きを変える").click();
+  await expect(page.getByText("先手 88%", { exact: true })).toBeVisible();
+  await expect(page.getByText("12% 後手", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: "先手の勝率 88%", exact: true }),
+  ).toBeVisible();
+  expect(await graph.innerHTML()).toBe(graphBefore);
+  await expect(page.getByText("▲7六歩", { exact: true })).toBeVisible();
+  expect(Number(await arrow.getAttribute("y2"))).toBeGreaterThan(
+    Number(await arrow.getAttribute("y1")),
+  );
+});
+
+test("応答不明から7日経った依頼は自動再送せず、確認してからだけ新しく依頼する", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await importOne(page);
+  fake.loseCreateResponse = true;
+  await button(page, "解析する").click();
+  await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();
+  const sent = fake.requests.length;
+  await page.clock.setSystemTime(new Date(Date.now() + 7 * 86400000));
+  await page.reload();
+  await expect(button(page, "依頼を確認")).toBeVisible();
+  expect(fake.requests.length).toBe(sent);
+  await button(page, "依頼を確認").click();
+  await expect(
+    page.getByRole("heading", { name: "前回の依頼の結果が分かりません" }),
+  ).toBeVisible();
+  await button(page, "やめる").click();
+  expect(fake.requests.length).toBe(sent);
+  await button(page, "依頼を確認").click();
+  fake.loseCreateResponse = false;
+  await button(page, "もう一度解析する").click();
+  await expect.poll(() => fake.requests.length).toBe(sent + 1);
+  await expect(button(page, "中止")).toBeVisible();
+});

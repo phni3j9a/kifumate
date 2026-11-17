@@ -2,6 +2,12 @@ import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import Encoding from "encoding-japanese";
 import { identity, readKif } from "../../src/core/kif";
+import { fakeAnalysis } from "../helpers/fake-analysis";
+test.beforeEach(async ({ page }) => {
+  const fake = await fakeAnalysis(page);
+  fake.paid = false;
+  fake.remaining = 10;
+});
 const kif = readFileSync("tests/fixtures/standard.kif", "utf8");
 const button = (page: Page, name: string | RegExp) =>
   page.getByRole("button", { name, exact: typeof name === "string" });
@@ -43,9 +49,9 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
   await page.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
   await expect(page.getByText("あなたは先手")).toBeVisible();
   await expect(page.getByText("重複はありません")).toBeVisible();
-  await button(page, "保存する").scrollIntoViewIfNeeded();
+  await button(page, "保存だけする").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${shots}/01-import.png` });
-  await button(page, "保存する").click();
+  await button(page, "保存だけする").click();
   await expect(page.getByText("保存しました", { exact: true })).toBeVisible();
   await expect(page.getByText("開始局面", { exact: true })).toBeVisible();
 
@@ -142,7 +148,7 @@ test("名前登録→貼り付け→保存→再起動→再生→分岐→書�
   await expect(
     page.getByText("同じ棋譜がすでに保存されています"),
   ).toBeVisible();
-  await expect(button(page, "保存する")).toHaveCount(0);
+  await expect(button(page, "保存だけする")).toHaveCount(0);
   await button(page, "保存済みの棋譜を開く").click();
   await context.setOffline(true);
   await button(page, "1手進む").click();
@@ -177,7 +183,7 @@ test("取り込み：本文を書き換えた直後は、前の読み取り結�
   const box = page.getByRole("textbox", { name: "KIF形式の棋譜" });
   await box.fill(kif);
   await expect(page.getByText("重複はありません")).toBeVisible();
-  const save = button(page, "保存する");
+  const save = button(page, "保存だけする");
   await expect(save).toBeEnabled();
   // 読み直しの待ち（250ms）のあいだに押す
   await box.fill("これは棋譜ではありません");
@@ -190,7 +196,7 @@ test("対局画面：持ち駒は見た目より広い範囲で押せる", async
   await page.goto("/import");
   await page.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
   await page.getByRole("radio", { name: /☗/ }).click();
-  await button(page, "保存する").click();
+  await button(page, "保存だけする").click();
   for (let i = 0; i < 4; i++) await button(page, "1手進む").click(); // 角を交換した局面
   const hand = button(page, "先手の持ち駒 角 1枚");
   const box = (await hand.boundingBox())!;
