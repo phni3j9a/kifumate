@@ -22,8 +22,8 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
       schedule: async when => { due = when; },
     };
     let rt = new RealtimeSessions(state.storage, backend, idleMs, () => now);
-    const send = async (request: Request, owner = 'a', paid = true) => {
-      const response = await rt.fetch(request, owner, paid, work => tasks.push(work));
+    const send = async (request: Request, owner = 'a', paid = true, checkPaid?: () => Promise<boolean>) => {
+      const response = await rt.fetch(request, owner, paid, work => tasks.push(work), checkPaid);
       return {httpStatus: response.status, ...await response.json() as any};
     };
     const request = (method = 'GET', data?: unknown, owner = 'a', paid = true, id?: string) => send(
@@ -139,6 +139,37 @@ describe('分岐中の解析', () => {
     expect(f.sql.exec('SELECT owner FROM rt_sessions WHERE charged IS NOT NULL').toArray()).toEqual([]);
     f.advance(1000);
     expect((await f.request('GET', undefined, 'a', false)).quota.usedMs).toBe(revoked.quota.usedMs);
+  }));
+  it.each(['POST', 'PUT'])('%sの本文待機中の外部権利失効で所有セッションを停止してから拒否する', async method => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    let paid = true, controller!: ReadableStreamDefaultController<Uint8Array>, reading!: () => void;
+    const bodyRead = new Promise<void>(resolve => {reading = resolve;});
+    const body = new ReadableStream<Uint8Array>({
+      start(value) {controller = value;}, pull() {reading();},
+    }, {highWaterMark: 0});
+    const pending = f.send(new Request('https://device/v1/realtime' + (method === 'PUT' ? '/' + first.sessionId : ''), {
+      method, headers: {'Content-Type': 'application/json'}, body,
+    }), 'a', true, async () => paid);
+    await bodyRead;
+    // 入口のGETで停止させず、本文受信後の外部再照会だけで失効を検知する。
+    f.advance(1000); paid = false;
+    controller.enqueue(new TextEncoder().encode(JSON.stringify({...position, ...(method === 'PUT' ? {sequence: 1} : {})})));
+    controller.close();
+    const denied = await pending;
+    expect(denied.httpStatus).toBe(403); expect(denied.error).toBe('paid_required');
+    expect(denied.status).toBe('off'); expect(f.stops()).toBe(1); expect(f.calls.length).toBe(1);
+    expect(f.sql.exec('SELECT charged FROM rt_sessions WHERE owner=?', 'a').one().charged).toBeNull();
+    expect(denied.quota.usedMs).toBe(1005);
+    f.advance(1000);
+    expect((await f.request()).quota.usedMs).toBe(denied.quota.usedMs);
+  }));
+  it('本文受信後の再照会失効で別端末の稼働を停止しない', async () => fixture(async f => {
+    await f.request('POST', position); await f.drain();
+    const denied = await f.send(new Request('https://device/v1/realtime', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(position),
+    }), 'b', true, async () => false);
+    expect(denied.httpStatus).toBe(403); expect(f.stops()).toBe(0);
+    expect((await f.request()).status).toBe('ready');
   }));
   it('月300分で自動停止して戻る日時を返し、翌月の局面更新で再開する', async () => fixture(async f => {
     f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 500);

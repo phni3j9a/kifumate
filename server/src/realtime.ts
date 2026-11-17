@@ -134,7 +134,10 @@ export class RealtimeSessions {
       // readJson は await するため、ここでも最新の貸与・権利・期限を確認する。
       await this.expire();
       if (checkPaid && !await checkPaid()) entitlement.paid = false;
-      if (!entitlement.paid) throw new ApiError(403, 'paid_required');
+      if (!entitlement.paid) {
+        if (this.active()?.owner === owner) await this.halt('off', 'paid_required');
+        throw new ApiError(403, 'paid_required');
+      }
       const current = this.session(owner), active = this.active();
       if (active && active.owner !== owner) throw new ApiError(409, 'realtime_busy');
       if (!this.quota(owner).remainingMs) throw new ApiError(429, 'monthly_limit');

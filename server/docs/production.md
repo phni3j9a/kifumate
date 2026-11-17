@@ -13,18 +13,21 @@ Issue [#24](https://github.com/phni3j9a/kifumate/issues/24)。現在のAPI・上
 
 ## ローカル検証（2026-11-17）
 
-- `npm test`：**125件成功**。Crockford生成・大小文字／全角／ハイフン類／空白／O/I/Lの正規化・旧64桁形式の拒否と、招待成功・保存ハッシュ・並列上限・重複入力・期限・取消・複数招待・端末／IP試行制限・窓の回復・公開API連携・本文受信中の失効を確認。
-- 既存の分岐・コーチの競合テストに加え、外部権利照会で分岐を起動せず拒否し、コーチ生成中の失効では回答も使用数も保存しないテストを追加。
+- `npm test`：**128件成功**。Crockford生成・大小文字／全角／ハイフン類／空白／O/I/Lの正規化・旧64桁形式の拒否と、招待成功・保存ハッシュ・並列上限・重複入力・期限・取消・複数招待・端末／IP試行制限・窓の回復・公開API連携・本文受信中の失効を確認。
+- 既存の分岐・コーチの競合テストに加え、外部権利照会で分岐を起動せず拒否し、コーチ生成中の失効では回答も使用数も保存しないテストを追加。POST/PUTの本文待機中に外部照会の権利が失効した場合は、所有セッションを停止してから403にし、停止後の時間を加算しない回帰テストも確認。別端末の稼働は止めません。
 - 公式bindingの実ランタイムでキー別拒否を確認し、入口の端末発行・API全体・書き込み・招待入力のキーと拒否をテスト。
 - 本番設定の専用Worker／DO／Container／domain、開発判定を誤設定しても無効、有効な招待は本番でも利用可、Origin／OPTIONSの拒否、偽提供元の拒否を確認。
 - `npm run test:python`：**45件成功**。
 - `npm run typecheck`、`node scripts/test_invitations.mjs`、`npm audit`：成功、脆弱性0件。
+- レビュー修正では、READMEの初回登録・通常更新手順をbash/zshと偽のWranglerでオフライン実行し、0600/0700の権限・成功／失敗時の一時ファイル削除・キー更新後のsecretファイルなし再デプロイを確認。署名鍵は初回登録後Cloudflareだけに維持し、管理APIに必要な管理鍵だけを`~/.config/kifumate/invite-admin-production.key`へ0600で保持します。
 - `wrangler deploy --env production --dry-run`：Workerの構成検査・実Dockerビルド成功。**アップロード・production資源の作成はしていません**。
 - Cloudflare APIの読み取りで、同一accountのzone `quarterlambda.com`（`5cd90ea023a048c177bb1399fdc6a8f1`）がactiveと確認。
 
 ## staging検証（2026-11-17）
 
 最終Worker Version：`8c4261d5-e2b4-422c-b855-a326386db44e`。形式変更後はWorkerだけを反映し、新形式の発行・全角／小文字／空白を含む入力・同一コードの再入力・取消後の無料化を最小確認しました。確認コードは取消し、原文ファイルは削除済みです。
+
+レビュー指摘の停止処理・secret運用手順の修正はローカルで確認し、依頼どおりstagingへは再デプロイしていません。
 
 前回Version `3ca02056-995f-49d0-9888-4bbc307fa872`では`node scripts/smoke_invitations.mjs`が最後まで成功しました。レート制限・期限・権利判定は今回変更していません。
 

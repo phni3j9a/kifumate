@@ -120,7 +120,7 @@ node scripts/invitations.mjs issue --env staging --max-devices 3 \
 # 無期限なら --expires-at を省略。期限はISO 8601でタイムゾーンも明示する。
 HASH=$(node -p "JSON.parse(require('fs').readFileSync('.local/friends.txt.json','utf8')).hash")
 node scripts/invitations.mjs revoke --env staging --hash "$HASH"
-# productionも同じ操作の --env production（後述の専用管理鍵を使う）
+# productionは --env production と --key-file "$HOME/.config/kifumate/invite-admin-production.key" を指定（後述）
 ```
 
 コード原文は指定ファイル、ハッシュ・上限・期限は隣の`.json`へ0600・上書き不可で保存します。応答消失・途中失敗でも`.json`のハッシュで取消できます。管理鍵の保管先を変える場合は`--key-file <0600のファイル>`を指定してください。発行し直しても既存ハッシュの取消は復活しません。
@@ -203,7 +203,7 @@ POST/PUTには`mode`・対局者名など追加キーを渡せません。開始
 - 月300分（18,000,000ms）、**JST月初0時**で区切ります。月をまたぐ稼働は両月へ分割。残り時間までのalarmを設定し、使い切ると停止します。利用上限値で集計を丸めるため、alarmの遅延や停止処理の端数を超過請求しません。翌月に勝手に再起動はせず、次の局面更新で再開します。
 - `quota.low`がtrue（残り10%未満）のときだけ残りを知らせ、それ以外では上限・残りを画面に出さないでください。停止・失敗したセッションも実際の稼働時間は返却しません。全局解析の失敗時の回数返却とは別です。
 - 利用量と最新セッションは分岐用Container DOのSQLiteへ永続化し、DOの再生成でも集計を継続。停止済みの結果は最終操作から7日後のアクセス時に削除し、月利用量は当月・前月を保持します。月上限になったセッションID・sequenceだけは翌月の再開用に最大40日保持します。次のセッションで上書きされるため、必要な分岐結果は端末に保存してください。
-- 内部の権利・端末ヘッダーはDeviceが必ず上書きします。本文待機中の別要求での権利更新に加え、開始確定前にも招待DOを再照会します。稼働中の取消の能動通知は未実装（次の分岐APIか無操作休止で停止）です。
+- 内部の権利・端末ヘッダーはDeviceが必ず上書きします。本文待機中の別要求での権利更新に加え、開始確定前にも招待DOを再照会します。POST/PUTの再照会で失効が分かった場合も、所有中の稼働を停止してから403を返します。稼働中の取消の能動通知は未実装（次の分岐APIか無操作休止で停止）です。
 
 ## AIコーチ（有料限定）
 
@@ -413,7 +413,9 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 | `INVITE_ADMIN_KEY` | 招待発行・取消用。署名鍵／staging管理鍵とも別の新規乱数 |
 | `COACH_API_KEY` | `~/.config/kifumate/llm.env`の`DEEPSEEK_API_KEY` |
 
-初回準備（値を表示せず、git管理外の0600 JSONへ保存。以下は`server/`から）：
+### 初回登録の前提確認
+
+以下は`server/`から実行します。初回の一時secretファイルはまだ作りません。
 
 ```sh
 npm ci
@@ -423,35 +425,81 @@ npx wrangler whoami
 # 本番の既存secretがあれば、読めない値を上書きせずここで停止・確認する。
 npx wrangler secret list --env production
 # 初回でWorker未作成のエラーなら想定内。認証／権限エラーの場合は停止する。
+# ローカルだけの検査（Dockerビルドあり、リモートへのアップロードなし）
+npx wrangler deploy --env production --dry-run
+```
 
-set +x
-set -a
-. "$HOME/.config/kifumate/llm.env"
-set +a
-node --input-type=module <<'JS'
+### 初回登録・実デプロイ（承認後、一度だけ）
+
+**以下のブロック全体をまとめて実行**します。DeepSeekキーの原本は`~/.config/kifumate/llm.env`（0600）だけです。デプロイ直前にリポジトリ外の`~/.config/kifumate/production-deploy.XXXXXX/secrets.json`を0600で作り、登録後は削除します。trapにより途中失敗でも一時ファイルを残しません。`--secrets-file`はこの初回登録だけに使います。
+
+```sh
+(
+  set -eu
+  set +x
+  umask 077
+  CONFIG_DIR="$HOME/.config/kifumate"
+  mkdir -p "$CONFIG_DIR"
+  DEPLOY_DIR=$(mktemp -d "$CONFIG_DIR/production-deploy.XXXXXX")
+  trap 'rm -f "$DEPLOY_DIR/secrets.json"; rmdir "$DEPLOY_DIR"' EXIT
+  export KIFUMATE_DEPLOY_DIR="$DEPLOY_DIR"
+  set -a
+  . "$CONFIG_DIR/llm.env"
+  set +a
+  node --input-type=module <<'JS'
 import {randomBytes} from 'node:crypto';
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {writeFileSync} from 'node:fs';
+import {homedir} from 'node:os';
+import {join} from 'node:path';
 if (!process.env.DEEPSEEK_API_KEY) throw new Error('DeepSeekキーが未設定です');
-mkdirSync('.local', {recursive:true, mode:0o700});
 const secrets = {
   COACH_SIGNING_KEY: randomBytes(32).toString('hex'),
   INVITE_ADMIN_KEY: randomBytes(32).toString('hex'),
   COACH_API_KEY: process.env.DEEPSEEK_API_KEY,
 };
-writeFileSync('.local/production-secrets.json', JSON.stringify(secrets), {mode:0o600, flag:'wx'});
-writeFileSync('.local/invite-admin-production.key', secrets.INVITE_ADMIN_KEY+'\n', {mode:0o600, flag:'wx'});
+writeFileSync(join(process.env.KIFUMATE_DEPLOY_DIR, 'secrets.json'), JSON.stringify(secrets), {mode:0o600, flag:'wx'});
+// 管理APIのBearer認証に必要なため、この鍵だけはローカルに保持する。
+writeFileSync(join(homedir(), '.config/kifumate/invite-admin-production.key'), secrets.INVITE_ADMIN_KEY+'\n', {mode:0o600, flag:'wx'});
 JS
-unset DEEPSEEK_API_KEY OPENAI_API_KEY
-# ローカルだけの検査（Dockerビルドあり、リモートへのアップロードなし）
-npx wrangler deploy --env production --dry-run
+  unset DEEPSEEK_API_KEY OPENAI_API_KEY
+  npx wrangler deploy --env production --secrets-file "$DEPLOY_DIR/secrets.json"
+  npx wrangler secret list --env production
+)
 ```
 
-`.local/production-secrets.json`と管理鍵を安全な保管先にバックアップし、出力・git追加しないでください。途中で失敗した場合も生成済みの署名鍵を無断で再生成しません。既存本番の更新では初回生成を繰り返さず、同じ鍵を維持します。以後のDeepSeekキー更新だけなら`set +x; set -a; . "$HOME/.config/kifumate/llm.env"; set +a`の後、`printf '%s' "$DEEPSEEK_API_KEY" | npx wrangler secret put COACH_API_KEY --env production`で入れ、`unset DEEPSEEK_API_KEY OPENAI_API_KEY`します。
+- **署名鍵のローカル保存・バックアップはしません。** 初回登録後はCloudflareの`COACH_SIGNING_KEY`だけを維持し、通常のデプロイで再生成・上書きしません。Workerやsecretの削除で失うと既存の証明を復元できないため、削除前には必ず確認してください。
+- **管理鍵だけは保持が必要**です。Cloudflareから値を読み出せず、後の招待発行・取消で使うため、`~/.config/kifumate/invite-admin-production.key`（0600）へ保存します。管理スクリプトには`--key-file "$HOME/.config/kifumate/invite-admin-production.key"`を渡します。署名鍵・DeepSeekキーのコピーはこのファイルに入れません。
+- 失敗した場合も一時ファイルは削除されます。Cloudflareへ登録済みの可能性があるので**初回ブロックを無条件に再実行しない**でください。既存secretとデプロイ状態を確認し、登録済みなら次節の通常デプロイで再開します。残った管理鍵ファイルも勝手に上書き・削除しません。
+- 旧手順で`.local/production-secrets.json`などのコピーを作っていた場合は再利用せず削除し、キーの原本とCloudflareの登録値を正とします。
 
-**承認後の実デプロイ**（Wrangler 4.163.0の`--secrets-file`で初回から鍵込みでアップロード。既存の他secretは削除しません）：
+### 通常の更新・再デプロイ
+
+**署名鍵を生成し直さず、`--secrets-file`を付けません。** Wranglerは登録済みsecretを保持するため、古いローカルコピーでキーを戻すことはありません。
+
+DeepSeekキーを変更するときだけ、原本`~/.config/kifumate/llm.env`を更新し、次を実行します（既存の署名鍵・管理鍵は変更しません）：
 
 ```sh
-npx wrangler deploy --env production --secrets-file .local/production-secrets.json
+(
+  set -eu
+  set +x
+  set -a
+  . "$HOME/.config/kifumate/llm.env"
+  set +a
+  : "${DEEPSEEK_API_KEY:?DeepSeekキーが未設定です}"
+  printf '%s' "$DEEPSEEK_API_KEY" | npx wrangler secret put COACH_API_KEY --env production
+  unset DEEPSEEK_API_KEY OPENAI_API_KEY
+)
+```
+
+コード・設定の通常デプロイと、キー更新後にデプロイし直す場合は、どちらも次だけです：
+
+```sh
+npx wrangler deploy --env production
+```
+
+### デプロイ後の確認
+
+```sh
 npx wrangler secret list --env production
 curl --fail --silent --show-error -X POST https://kifumate-api.quarterlambda.com/v1/devices -o /dev/null
 # ブラウザ経由が403、Access-Control-Allow-Originがないこと
