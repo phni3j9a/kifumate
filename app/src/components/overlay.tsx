@@ -186,7 +186,11 @@ export function Sheet({
           ]}
         >
           <View style={s.shh}>
-            <Text accessibilityRole="header" style={font(900, 15)}>
+            <Text
+              accessibilityRole="header"
+              numberOfLines={1}
+              style={[font(900, 15), { flex: 1 }]}
+            >
               {title}
             </Text>
             <RoundButton icon="x" label="閉じる" onPress={onClose} />

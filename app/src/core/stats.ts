@@ -26,18 +26,31 @@ export interface GameFilter {
 }
 export const families: Family[] = ["居飛車", "振り飛車"];
 export const unclassified = "未分類";
+const tagCache = new WeakMap<Game, Record<PlayerSide, Tags>>();
 export function tagsOf(game: Game, side: PlayerSide): Tags {
-  const auto = game.classification_auto
-    ? (JSON.parse(game.classification_auto) as Classification).sides[side]
-    : undefined;
-  const manual = game.classification_manual
-    ? (JSON.parse(game.classification_manual) as ManualTags)[side]
-    : undefined;
-  return {
-    family: manual?.family ?? auto?.family ?? unclassified,
-    strategies: manual?.strategies ?? auto?.strategies.map((f) => f.id) ?? [],
-    castles: manual?.castles ?? auto?.castles.map((f) => f.id) ?? [],
-  };
+  let cached = tagCache.get(game);
+  if (!cached) {
+    const auto = game.classification_auto
+      ? (JSON.parse(game.classification_auto) as Classification)
+      : undefined;
+    const manual = game.classification_manual
+      ? (JSON.parse(game.classification_manual) as ManualTags)
+      : undefined;
+    const resolve = (key: PlayerSide): Tags => ({
+      family: manual?.[key]?.family ?? auto?.sides[key].family ?? unclassified,
+      strategies:
+        manual?.[key]?.strategies ??
+        auto?.sides[key].strategies.map((f) => f.id) ??
+        [],
+      castles:
+        manual?.[key]?.castles ??
+        auto?.sides[key].castles.map((f) => f.id) ??
+        [],
+    });
+    cached = { black: resolve("black"), white: resolve("white") };
+    tagCache.set(game, cached);
+  }
+  return cached[side];
 }
 export function edited(game: Game, side: PlayerSide) {
   return !!(
@@ -121,8 +134,8 @@ export function tally(games: readonly Game[]) {
     r: w + l ? Math.round((100 * w) / (w + l)) : 0,
   };
 }
-export const winLoss = (t: ReturnType<typeof tally>, space = "") =>
-  `${t.w}勝${space}${t.l}敗${t.d ? `${space}${t.d}分` : ""}`;
+export const winLoss = (t: ReturnType<typeof tally>) =>
+  `${t.w}勝${t.l}敗${t.d ? `${t.d}分` : ""}`;
 export function statRows(games: Game[], dimension: Dimension) {
   const kind = dimension === "mycs" ? "castles" : "strategies";
   const own = games.filter((g) => g.self_side);
@@ -132,7 +145,6 @@ export function statRows(games: Game[], dimension: Dimension) {
     id: string;
     name: string;
     depth: number;
-    games: Game[];
     total: ReturnType<typeof tally>;
   }[] = [];
   const add = (id: string, depth: number, list: Game[]) => {
@@ -141,7 +153,6 @@ export function statRows(games: Game[], dimension: Dimension) {
         id,
         name: tagName(kind, id),
         depth,
-        games: list,
         total: tally(list),
       });
   };

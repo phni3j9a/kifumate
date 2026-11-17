@@ -11,6 +11,7 @@ import { DialogHost, ToastHost } from "../components/overlay";
 import { colors } from "../components/theme";
 import { Button, Problem, Screen } from "../components/ui";
 import { AnalysisProvider } from "../analysis/provider";
+import { ClassificationsProvider } from "../components/classifications-provider";
 import { migrate } from "../storage/schema";
 export const unstable_settings = { anchor: "(tabs)" };
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
@@ -43,20 +44,22 @@ export default function Layout() {
         }
       >
         <SQLiteProvider databaseName="kifumate.db" onInit={migrate} useSuspense>
-          <AnalysisProvider>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.bg },
-              }}
-            >
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen
-                name="import"
-                options={{ animation: "slide_from_bottom" }}
-              />
-            </Stack>
-          </AnalysisProvider>
+          <ClassificationsProvider>
+            <AnalysisProvider>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.bg },
+                }}
+              >
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="import"
+                  options={{ animation: "slide_from_bottom" }}
+                />
+              </Stack>
+            </AnalysisProvider>
+          </ClassificationsProvider>
         </SQLiteProvider>
       </Suspense>
       <ToastHost />

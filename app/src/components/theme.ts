@@ -15,6 +15,7 @@ export const colors = {
   hair: "rgba(36,40,70,0.14)", // --hair
   dash: "rgba(36,40,70,0.45)", // 破線の枠
   scrim: "rgba(36,40,70,0.36)",
+  trend: "#FFE27A", // 戦績グラフの面
   sand: "#FFE9A8", // タグ・行アイコン・選ばれていないタブ
   sky: "#DCE6FF", // 相手側のタグ
   mintSoft: "#C9F3EA", // 分岐・進行中

@@ -49,6 +49,11 @@ export const listGames = (db: SQLiteDatabase) =>
   db.getAllAsync<Game>(
     `${classificationSelect} ORDER BY played_at DESC, created_at DESC`,
   );
+// 一覧・集計では大きなKIF本文を読まない。対局画面は getGame で本文も取得する。
+export const listGameSummaries = (db: SQLiteDatabase) =>
+  db.getAllAsync<Game>(
+    `${classificationSelect.replace("games.*", "games.id,games.black,games.white,games.played_at,games.plies,games.self_side,games.result,games.side_manual,games.result_manual,games.winner,games.favorite,'' AS kif")} ORDER BY played_at DESC, created_at DESC`,
+  );
 export const getGame = (db: SQLiteDatabase, id: string) =>
   db.getFirstAsync<Game>(`${classificationSelect} WHERE games.id=?`, id);
 export const listAliases = (db: SQLiteDatabase) =>

@@ -1,3 +1,4 @@
+import { seedGames, type MockGame } from "../tests/helpers/seed-games";
 // モックとアプリ（Web 表示）を、同じ画面・同じ状態・同じ大きさで撮り、左右に並べた画像を作る。
 //   npm run compare                     … 360×800 と 393×852 の全場面
 //   npm run compare -- 393x852 game     … 大きさと、名前に game を含む場面だけ
@@ -51,7 +52,10 @@ async function run(width: number, height: number) {
     a = await context.newPage(), // アプリ
     sheet = await browser.newPage(); // 並べる台紙
   const errors: string[] = [];
-  a.on("pageerror", (e) => errors.push(e.message));
+  a.on("pageerror", (e) => {
+    errors.push(e.message);
+    console.error("ページエラー:", e.message);
+  });
   const fake = await fakeAnalysis(a);
   fake.paid = false;
   fake.remaining = 10;
@@ -111,7 +115,14 @@ async function run(width: number, height: number) {
     await a.waitForTimeout(250);
   };
   const tab = async (name: string) => {
-    await a.getByRole("tab", { name }).click();
+    await a
+      .getByRole("tab", { name })
+      .click({ timeout: 15000 })
+      .catch(async (e) => {
+        await a.screenshot({ path: ".local/compare-failure.png" });
+        console.error(await a.locator("body").innerText());
+        throw e;
+      });
     await a.waitForTimeout(250);
   };
   const appSquare = async (f: number, r: number) => {
@@ -530,6 +541,93 @@ async function run(width: number, height: number) {
   await pause(700);
   await m.evaluate(() => (window as any).__compare("DB.usage.free=1; show();"));
   await shot("analysis-settings-free");
+  // 戦績はモックの架空24局を検証DBへ同じタグ・勝敗で入れる。製品の判定精度とは独立した見た目の比較。
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "GSEQ=0; seedData(); DB.games.forEach(g=>g.an='none'); NAV.length=0; UI.tab='stats'; UI.st={period:'',side:'',dim:'myst'}; show()",
+    ),
+  );
+  const statFixtures = (await m.evaluate(() =>
+    (window as any).__compare(
+      "DB.games.map(({id,date,sente,gote,self,win,plies,fav,tags})=>({id,date,sente,gote,self,win,plies,fav,tags}))",
+    ),
+  )) as MockGame[];
+  await a.clock.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+  await seedGames(a, statFixtures);
+  await tab("戦績");
+  await shot("stats-summary");
+  await bottom();
+  await shot("stats-strategies");
+  await act("stset", "dim:mycs");
+  await a.getByRole("radio", { name: "自分の囲い", exact: true }).click();
+  await bottom();
+  await shot("stats-castles");
+  await act("strow", "美濃囲い");
+  await a.getByRole("button", { name: /^美濃囲い .*の対局を表示$/ }).click();
+  await shot("stats-records");
+  await act("back");
+  await tap("戻る");
+  await m.evaluate(() =>
+    (window as any).__compare("UI.st.period='30'; UI.st.side='g'; show()"),
+  );
+  await a.getByRole("radio", { name: "30日", exact: true }).click();
+  await a.getByRole("radio", { name: "後手", exact: true }).click();
+  await a.mouse.wheel(0, -9999);
+  await shot("stats-filtered");
+  // 期間内に1局もない状態。
+  const oldFixtures = [{ ...statFixtures[0]!, date: "2026-08-01" }];
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "DB.games=[DB.games[0]]; DB.games[0].date='2026-08-01'; show()",
+    ),
+  );
+  await seedGames(a, oldFixtures);
+  await a.getByRole("radio", { name: "30日", exact: true }).click();
+  await a.getByRole("radio", { name: "後手", exact: true }).click();
+  await shot("stats-no-results");
+  // 関連する一覧のタグと絞り込み。
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "GSEQ=0; seedData(); DB.games.forEach(g=>g.an='none'); UI.tab='list'; UI.flt={...FL0}; UI.quick='all'; UI.q=''; show()",
+    ),
+  );
+  await seedGames(a, statFixtures);
+  await tab("棋譜");
+  await shot("stats-list-tags");
+  await act("filter");
+  await tap("絞り込み");
+  await m.locator("#scr .shc").evaluate((el) => (el.scrollTop = 9999));
+  await a
+    .getByRole("button", { name: "矢倉", exact: true })
+    .last()
+    .scrollIntoViewIfNeeded();
+  await shot("stats-list-filter");
+  await closeSheet();
+  await tap("閉じる");
+  // 手で直すシートは実際の操作で開く。モックで開けるサンプルへ。
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "NAV.length=0; GAME1.plies=5; GAME1.end='投了'; GAME1.an='none'; push({t:'info',id:GAME1.id})",
+    ),
+  );
+  const infoId = (await m.evaluate(() =>
+    (window as any).__compare("GAME1.id"),
+  )) as string;
+  await seedGames(
+    a,
+    statFixtures.map((g) => (g.id === infoId ? { ...g, plies: 5 } : g)),
+  );
+  await a.goto(`${APP}/info?id=${infoId}`);
+  await bottom();
+  await shot("stats-info-tags");
+  await act("tagedit", "s:st");
+  await tap("先手の戦法を修正");
+  await shot("stats-edit-strategy");
+  await closeSheet();
+  await tap("閉じる");
+  await act("tagedit", "s:cs");
+  await tap("先手の囲いを修正");
+  await shot("stats-edit-castle");
   await browser.close();
   console.log(`${width}x${height}: ${n}場面 → ${dir}`);
   if (errors.length)

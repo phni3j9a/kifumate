@@ -60,7 +60,9 @@ async function screen() {
         View: "View",
       },
       "expo-router": { useLocalSearchParams: () => ({ id }) },
-      "../analysis/provider": {useAnalysis: () => ({records:{},offline:false})},
+      "../analysis/provider": {
+        useAnalysis: () => ({ records: {}, offline: false }),
+      },
       "../components/overlay": {
         Sheet: "Sheet",
         toast: (t: string) => assert.fail(t),
@@ -72,6 +74,9 @@ async function screen() {
         radius: {},
       },
       "../components/ui": ui,
+      "../components/classification-editor": {
+        ClassificationEditor: "ClassificationEditor",
+      },
       "../components/use-game": {
         useGame: () => ({ game, error: "", db, reload: async () => {} }),
       },

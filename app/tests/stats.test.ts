@@ -268,3 +268,109 @@ test("分類不能な棋譜は消さず未分類とし、失敗を毎起動く�
     sql.close();
   }
 });
+
+test("分類の保存が失敗した取り込みでは、棋譜だけの行を残さない", async () => {
+  const { db, sql } = await database();
+  try {
+    sql.exec(
+      "CREATE TRIGGER fail_classification BEFORE INSERT ON classifications BEGIN SELECT RAISE(ABORT,'保存失敗'); END",
+    );
+    await assert.rejects(
+      repository.importGame(db, fixture(), "black", "win", true, false),
+      /保存失敗/,
+    );
+    assert.equal((await repository.listGames(db)).length, 0);
+  } finally {
+    sql.close();
+  }
+});
+test("v4移行の失敗はv3の棋譜・解析・版を保持してロールバック", async () => {
+  const { db, sql } = await database();
+  try {
+    const saved = await repository.importGame(
+      db,
+      fixture(),
+      "black",
+      "win",
+      true,
+      false,
+    );
+    sql.exec("DROP TABLE classifications; PRAGMA user_version=3");
+    const original = db.execAsync.bind(db);
+    db.execAsync = async (query) => {
+      await original(query);
+      if (query.includes("CREATE TABLE classifications"))
+        throw new Error("移行失敗");
+    };
+    await assert.rejects(migrate(db), /移行失敗/);
+    assert.equal(sql.prepare("PRAGMA user_version").get()?.user_version, 3);
+    assert.equal(
+      sql.prepare("SELECT COUNT(*) n FROM games WHERE id=?").get(saved.id)?.n,
+      1,
+    );
+    assert.equal(
+      sql
+        .prepare(
+          "SELECT COUNT(*) n FROM sqlite_master WHERE name='classifications'",
+        )
+        .get()?.n,
+      0,
+    );
+  } finally {
+    sql.close();
+  }
+});
+test("一覧用の読み出しは大きな棋譜本文を返さず、分類とIDは本体と同じ", async () => {
+  const { db, sql } = await database();
+  try {
+    const saved = await repository.importGame(
+      db,
+      fixture(),
+      "black",
+      "win",
+      true,
+      false,
+    );
+    const summary = (await repository.listGameSummaries(db))[0]!;
+    assert.equal(summary.kif, "");
+    assert.equal(summary.id, saved.id);
+    assert.deepEqual(
+      tagsOf(summary, "black"),
+      tagsOf((await repository.getGame(db, saved.id))!, "black"),
+    );
+  } finally {
+    sql.close();
+  }
+});
+test("再判定中の手動修正を保持し、途中で削除された棋譜は復活させない", async () => {
+  const { db, sql } = await database();
+  try {
+    const saved = await repository.importGame(
+      db,
+      fixture(),
+      "black",
+      "win",
+      true,
+      false,
+    );
+    sql.exec("UPDATE classifications SET rules_version=0");
+    const running = reclassifyGames(db);
+    await setTags(db, saved.id, "white", "castles", ["mino"]);
+    await running;
+    assert.deepEqual(
+      tagsOf((await repository.getGame(db, saved.id))!, "white").castles,
+      ["mino"],
+    );
+    sql.exec("UPDATE classifications SET rules_version=0");
+    const deleting = reclassifyGames(db);
+    await repository.deleteGame(db, saved.id);
+    await deleting;
+    assert.equal((await repository.listGames(db)).length, 0);
+    assert.equal(
+      sql.prepare("SELECT COUNT(*) n FROM classifications").get()?.n,
+      0,
+    );
+  } finally {
+    sql.close();
+  }
+});

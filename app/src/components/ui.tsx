@@ -105,9 +105,11 @@ export function AppBar({
 export function PageHeader({
   title,
   close = false,
+  subtitle,
 }: {
   title: string;
   close?: boolean;
+  subtitle?: string;
 }) {
   return (
     <View style={s.ph}>
@@ -118,9 +120,24 @@ export function PageHeader({
           router.canGoBack() ? router.back() : router.replace("/")
         }
       />
-      <Text accessibilityRole="header" numberOfLines={1} style={s.phTitle}>
-        {title}
-      </Text>
+      {subtitle ? (
+        <View style={{ flex: 1 }}>
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            style={[s.phTitle, { flex: undefined }]}
+          >
+            {title}
+          </Text>
+          <Text style={[font(700, 10.5, 1, colors.ink2), { marginTop: 3 }]}>
+            {subtitle}
+          </Text>
+        </View>
+      ) : (
+        <Text accessibilityRole="header" numberOfLines={1} style={s.phTitle}>
+          {title}
+        </Text>
+      )}
     </View>
   );
 }
@@ -280,6 +297,7 @@ export function Chip({
   count = 0,
   raised = false,
   block = false,
+  multiple = false,
 }: {
   label: string;
   selected?: boolean;
@@ -288,6 +306,7 @@ export function Chip({
   count?: number;
   raised?: boolean;
   block?: boolean;
+  multiple?: boolean;
 }) {
   return (
     <Pressable
@@ -302,6 +321,9 @@ export function Chip({
         block && { height: 44, justifyContent: "center" },
       ]}
     >
+      {multiple && selected && (
+        <Icon name="check" size={11} strokeWidth={2.4} color={colors.white} />
+      )}
       {icon && <Icon name={icon} size={13} strokeWidth={2.2} />}
       <Text
         numberOfLines={1}
@@ -330,11 +352,13 @@ export function Segmented<T extends string>({
   value,
   onChange,
   label,
+  small = false,
 }: {
   options: readonly (readonly [T, string])[];
   value: T | null;
   onChange: (value: T) => void;
   label?: string;
+  small?: boolean;
 }) {
   return (
     <View
@@ -349,11 +373,20 @@ export function Segmented<T extends string>({
           aria-checked={value === v}
           onPress={() => onChange(v)}
           hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
-          style={[s.sgItem, value === v && { backgroundColor: colors.ink }]}
+          style={[
+            s.sgItem,
+            small && { height: 30 },
+            value === v && { backgroundColor: colors.ink },
+          ]}
         >
           <Text
             numberOfLines={1}
-            style={font(900, 12, 1, value === v ? colors.white : colors.ink2)}
+            style={font(
+              900,
+              small ? 11.5 : 12,
+              1,
+              value === v ? colors.white : colors.ink2,
+            )}
           >
             {text}
           </Text>

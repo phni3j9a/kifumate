@@ -1,4 +1,21 @@
-import { useCallback, useState } from "react";
+import {
+  GameTags,
+  TagFilterGroups,
+  dimensionLabels,
+} from "../../components/classification-tags";
+import { useClassifications } from "../../components/classifications-provider";
+import {
+  matchesGame,
+  strategyNames,
+  tagsOf,
+  tagName,
+  winLoss,
+  tally as tallyStats,
+  type Dimension,
+  type GameFilter,
+  type PlayerSide,
+} from "../../core/stats";
+import { useCallback, useEffect, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -8,7 +25,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { Icon } from "../../components/icons";
 import { KifHelpLink } from "../../components/kif-help";
@@ -20,6 +37,7 @@ import {
   Chip,
   EmptyState,
   Problem,
+  PageHeader,
   RoundButton,
   Screen,
   TextButton,
@@ -30,7 +48,11 @@ import { useAnalysis } from "../../analysis/provider";
 import { needsRetryConfirmation } from "../../analysis/types";
 import { cp } from "../../analysis/display";
 import Svg, { Path } from "react-native-svg";
-import { listGames, toggleFavorite, type Game } from "../../storage/repository";
+import {
+  listGameSummaries,
+  toggleFavorite,
+  type Game,
+} from "../../storage/repository";
 
 const quicks = [
   ["all", "すべて"],
@@ -40,7 +62,7 @@ const quicks = [
   ["none", "未解析"],
 ] as const;
 type Quick = (typeof quicks)[number][0];
-const noFilter = { scope: "", side: "", period: "" };
+const noFilter: GameFilter = { scope: "", side: "", period: "" };
 const groups = [
   [
     "scope",
@@ -88,7 +110,19 @@ const monthOf = (g: Game) => {
   return p ? `${p.y}年${p.m}月` : "日付なし";
 };
 
-export default function Games() {
+export default function Games({ drilldown = false }: { drilldown?: boolean }) {
+  const params = useLocalSearchParams<{
+    dim?: Dimension;
+    value?: string;
+    period?: string;
+    side?: string;
+    result?: string;
+    myst?: string;
+    mycs?: string;
+    opst?: string;
+    title?: string;
+  }>();
+  const { revision } = useClassifications();
   const db = useSQLiteContext();
   const { records, offline, quota } = useAnalysis();
   const [games, setGames] = useState<Game[] | null>(null),
@@ -96,12 +130,25 @@ export default function Games() {
   const [query, setQuery] = useState(""),
     [searching, setSearching] = useState(false),
     [quick, setQuick] = useState<Quick>("all"),
-    [filter, setFilter] = useState(noFilter),
+    [filter, setFilter] = useState<GameFilter>(
+      drilldown
+        ? {
+            scope: "self",
+            period: params.period,
+            side: params.side,
+            result: params.result,
+            myst: params.myst,
+            mycs: params.mycs,
+            opst: params.opst,
+            ...(params.dim ? { [params.dim]: params.value } : {}),
+          }
+        : noFilter,
+    ),
     [sheet, setSheet] = useState(false),
     [today, setToday] = useState(0); // 期間の絞り込みの基準（読み込んだ時点）
   const load = useCallback(async () => {
     try {
-      setGames(await listGames(db));
+      setGames(await listGameSummaries(db));
       setToday(Date.now());
       setError("");
     } catch {
@@ -113,6 +160,11 @@ export default function Games() {
       void load();
     }, [load]),
   );
+  useEffect(() => {
+    if (!revision) return;
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [load, revision]);
   async function favorite(g: Game) {
     try {
       await toggleFavorite(db, g);
@@ -169,7 +221,15 @@ export default function Games() {
   const visible = games.filter((g) => {
     if (
       q &&
-      !`${g.black} ${g.white} ${g.played_at}`
+      !`${g.black} ${g.white} ${g.played_at} ${["black", "white"]
+        .flatMap((side) => {
+          const t = tagsOf(g, side as PlayerSide);
+          return [
+            ...strategyNames(t),
+            ...t.castles.map((id) => tagName("castles", id)),
+          ];
+        })
+        .join(" ")}`
         .normalize("NFKC")
         .toLowerCase()
         .includes(q)
@@ -182,21 +242,19 @@ export default function Games() {
       !(g.self_side && g.result === quick)
     )
       return false;
-    if (filter.scope === "self" && !g.self_side) return false;
-    if (filter.scope === "other" && g.self_side) return false;
-    if (filter.side && g.self_side !== filter.side) return false;
-    if (filter.period) {
-      const p = dateParts(g.played_at);
-      if (!p || (today - p.time) / 86400000 > Number(filter.period))
-        return false;
-    }
+    if (!matchesGame(g, filter, today)) return false;
     return true;
   });
-  const active = groups.filter(([key]) => filter[key]).length;
+  const active = Object.values(filter).filter(Boolean).length;
   const parts = [
     filter.scope && (filter.scope === "self" ? "自分の対局" : "自分以外"),
     filter.side && (filter.side === "black" ? "先手" : "後手"),
     filter.period && `直近${filter.period}日`,
+    ...(["myst", "mycs", "opst"] as const).map(
+      (dim) =>
+        filter[dim] &&
+        `${dim === "myst" ? "自分" : dim === "mycs" ? "囲い" : "相手"}：${tagName(dim === "mycs" ? "castles" : "strategies", filter[dim]!)}`,
+    ),
     query.trim() && `「${query.trim()}」`,
   ].filter(Boolean);
   const own = visible.filter((g) => g.self_side);
@@ -206,20 +264,29 @@ export default function Games() {
     : "";
   return (
     <Screen>
-      <AppBar title="棋譜" note={`${games.length}局`}>
-        {quota && !quota.paid && (
-          <Text style={font(700, 10, 1.3, colors.ink2)}>
-            今週の解析 あと{quota.totalRemaining}局
-          </Text>
-        )}
-        {!searching && (
-          <RoundButton
-            icon="search"
-            label="検索"
-            onPress={() => setSearching(true)}
+      {drilldown ? (
+        <>
+          <PageHeader
+            title={params.title || "対局の一覧"}
+            subtitle={`${params.dim ? dimensionLabels[params.dim] : "自分の対局"}・${visible.length}局 ${winLoss(tallyStats(visible))}`}
           />
-        )}
-      </AppBar>
+        </>
+      ) : (
+        <AppBar title="棋譜" note={`${games.length}局`}>
+          {quota && !quota.paid && (
+            <Text style={font(700, 10, 1.3, colors.ink2)}>
+              今週の解析 あと{quota.totalRemaining}局
+            </Text>
+          )}
+          {!searching && (
+            <RoundButton
+              icon="search"
+              label="検索"
+              onPress={() => setSearching(true)}
+            />
+          )}
+        </AppBar>
+      )}
       {offline && (
         <Text
           style={[
@@ -236,7 +303,7 @@ export default function Games() {
           <TextInput
             autoFocus
             accessibilityLabel="棋譜を検索"
-            placeholder="対局者名・日付"
+            placeholder="対局者名・戦法・囲い・日付"
             placeholderTextColor="rgba(86,91,133,0.65)"
             value={query}
             onChangeText={setQuery}
@@ -259,32 +326,34 @@ export default function Games() {
           </Pressable>
         </View>
       )}
-      <View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          accessibilityLabel="絞り込み"
-          contentContainerStyle={s.chs}
-        >
-          <Chip
-            raised
-            icon="filter"
-            label="絞り込み"
-            count={active}
-            onPress={() => setSheet(true)}
-          />
-          {quicks.map(([value, label]) => (
+      {!drilldown && (
+        <View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            accessibilityLabel="絞り込み"
+            contentContainerStyle={s.chs}
+          >
             <Chip
-              key={value}
-              label={label}
-              selected={quick === value}
-              onPress={() => setQuick(value)}
+              raised
+              icon="filter"
+              label="絞り込み"
+              count={active}
+              onPress={() => setSheet(true)}
             />
-          ))}
-        </ScrollView>
-      </View>
-      {parts.length > 0 && (
+            {quicks.map(([value, label]) => (
+              <Chip
+                key={value}
+                label={label}
+                selected={quick === value}
+                onPress={() => setQuick(value)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+      {!drilldown && parts.length > 0 && (
         <View style={s.fsum}>
           <Text style={[font(700, 11, 1.4), { flex: 1 }]}>
             {parts.join("・")}　{visible.length}局{tally}
@@ -316,9 +385,11 @@ export default function Games() {
                   : emptyQuick[quick]
             }
           >
-            <Button size="sm" style={{ marginTop: 10 }} onPress={clear}>
-              すべての棋譜を表示
-            </Button>
+            {!drilldown && (
+              <Button size="sm" style={{ marginTop: 10 }} onPress={clear}>
+                すべての棋譜を表示
+              </Button>
+            )}
           </EmptyState>
         }
         renderItem={({ item: g, index }) => {
@@ -393,30 +464,7 @@ export default function Games() {
                       </Text>
                     </View>
                     <View style={s.tg}>
-                      {g.self_side ? (
-                        <View style={[s.t, s.tUn]}>
-                          <Text style={font(700, 11, 1, colors.ink2)}>
-                            未分類
-                          </Text>
-                        </View>
-                      ) : (
-                        ["☗", "☖"].map((mark) => (
-                          <View
-                            key={mark}
-                            style={[s.t, { backgroundColor: colors.sky }]}
-                          >
-                            <Text
-                              style={[
-                                font(700, 9.5, 1, colors.ink2),
-                                { marginRight: 3 },
-                              ]}
-                            >
-                              {mark}
-                            </Text>
-                            <Text style={font(700, 11)}>未分類</Text>
-                          </View>
-                        ))
-                      )}
+                      <GameTags game={g} />
                     </View>
                     <Text style={font(500, 11, 1.2, colors.ink2)}>
                       {dateShort(g.played_at)}・{g.plies}手
@@ -504,20 +552,22 @@ export default function Games() {
           );
         }}
       />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="取り込む"
-        onPress={() => router.push("/import")}
-        style={({ pressed }) => [
-          s.fab,
-          pressed && { transform: [{ translateY: 3 }], boxShadow: "none" },
-        ]}
-      >
-        <Icon name="plus" size={18} strokeWidth={2.8} />
-        <Text style={font(900, 14)}>取り込む</Text>
-      </Pressable>
+      {!drilldown && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="取り込む"
+          onPress={() => router.push("/import")}
+          style={({ pressed }) => [
+            s.fab,
+            pressed && { transform: [{ translateY: 3 }], boxShadow: "none" },
+          ]}
+        >
+          <Icon name="plus" size={18} strokeWidth={2.8} />
+          <Text style={font(900, 14)}>取り込む</Text>
+        </Pressable>
+      )}
       <Sheet
-        auto
+        height="70%"
         visible={sheet}
         title="絞り込み"
         onClose={() => setSheet(false)}
@@ -554,6 +604,7 @@ export default function Games() {
             </View>
           </View>
         ))}
+        <TagFilterGroups games={games} filter={filter} onChange={setFilter} />
       </Sheet>
     </Screen>
   );
@@ -609,7 +660,7 @@ const s = StyleSheet.create({
   mh: {
     ...font(900, 11, 1, colors.ink2),
     letterSpacing: 0.66,
-    marginTop: 10,
+    marginTop: 1, // 直前のカードの下余白9と合わせ、モックの段落間10にする
     marginHorizontal: 4,
     marginBottom: 6,
   },
@@ -642,20 +693,6 @@ const s = StyleSheet.create({
     columnGap: 4,
     rowGap: 3,
     marginVertical: 4,
-  },
-  t: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 20,
-    paddingHorizontal: 7,
-    borderRadius: 6,
-    backgroundColor: colors.sand,
-  },
-  tUn: {
-    backgroundColor: "transparent",
-    borderWidth: line.thin,
-    borderStyle: "dashed",
-    borderColor: "rgba(36,40,70,0.4)",
   },
   gx: {
     alignSelf: "stretch",

@@ -1,3 +1,4 @@
+import { ClassificationEditor } from "../components/classification-editor";
 import { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -136,6 +137,7 @@ export default function Info() {
         <Hint>
           登録した対局者名から自動で見分けています。ちがうときはここで直せます。「自分ではない」にすると、戦績には数えません。
         </Hint>
+        <ClassificationEditor game={game} db={db} save={save} />
       </PageScroll>
       <Sheet
         auto
