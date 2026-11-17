@@ -276,7 +276,7 @@ test("平手開始・短い棋譜・駒不足は未分類。入力の局面を�
   const p = new Position(),
     sfen = p.sfen;
   const output = classifyMoves(p, []);
-  assert.equal(output.rulesVersion, 2);
+  assert.equal(output.rulesVersion, 3);
   assert.equal(p.sfen, sfen);
   for (const s of Object.values(output.sides)) {
     assert.equal(s.family, "未分類");
@@ -473,6 +473,58 @@ test("角交換振り飛車と角換わりは同じ角交換だけで混同し�
   assert(!names(mirror, "white").includes("角換わり"));
 });
 
+test("飛車が9筋へ往復して大分類が一時不明になっても美濃の継続を重複記録しない", () => {
+  const prefix = build(mino)
+    .moves.map((node) => node.move)
+    .filter((move): move is Move => move instanceof Move)
+    .map((move) => move.usi);
+  const moves = [...prefix, "6h9h", "5b5a", "9h6h"];
+  for (const [r, side, ply] of [
+    [record(moves), "black", 17],
+    [record(["9g9f", ...moves.map(rotate)]), "white", 18],
+  ] as const) {
+    assert.deepEqual(
+      classifyRecord(r).sides[side].castles.map((castle) => [
+        castle.name,
+        castle.ply,
+      ]),
+      [["美濃囲い", ply]],
+    );
+  }
+});
+
+test("大分類が不明な間に囲いを実際に崩して戻した場合は再建を記録する", () => {
+  const prefix = build(mino)
+    .moves.map((node) => node.move)
+    .filter((move): move is Move => move instanceof Move)
+    .map((move) => move.usi);
+  // 飛車98で大分類が不明な間にも、玉28→18→28による崩し・復元を追跡する。
+  const moves = [
+    ...prefix,
+    "6h9h",
+    "5b5a",
+    "2h1h",
+    "5a5b",
+    "1h2h",
+    "5b5a",
+    "9h6h",
+  ];
+  for (const [r, side, plies] of [
+    [record(moves), "black", [17, 25]],
+    [record(["9g9f", ...moves.map(rotate)]), "white", [18, 26]],
+  ] as const) {
+    const castles = classifyRecord(r).sides[side].castles;
+    assert.deepEqual(
+      castles.map((castle) => castle.name),
+      ["美濃囲い", "美濃囲い"],
+    );
+    assert.deepEqual(
+      castles.map((castle) => castle.ply),
+      plies,
+    );
+  }
+});
+
 test("途中の飛車の転換と、囲いを一度崩して築き直した履歴を残す", () => {
   const changed = build([...mino, "6h7h"]);
   assert.deepEqual(
@@ -480,7 +532,16 @@ test("途中の飛車の転換と、囲いを一度崩して築き直した履�
     ["四間飛車", "三間飛車"],
   );
   const rebuilt = build([...mino, "2h1h", "1h2h"]);
-  assert.deepEqual(castleNames(rebuilt), ["美濃囲い", "美濃囲い"]);
+  assert.deepEqual(
+    classifyRecord(rebuilt).sides.black.castles.map((castle) => [
+      castle.name,
+      castle.ply,
+    ]),
+    [
+      ["美濃囲い", 17],
+      ["美濃囲い", 21],
+    ],
+  );
 });
 
 test("Recordの選択中の分岐・現在手数・コメントを変えず、主変化だけを走査する", () => {

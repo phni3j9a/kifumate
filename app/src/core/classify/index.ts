@@ -45,7 +45,7 @@ export interface SideClassification {
   castleStatus: "判定済み" | "未分類";
 }
 export interface Classification {
-  rulesVersion: 2;
+  rulesVersion: 3;
   processedPlies: number;
   sides: { black: SideClassification; white: SideClassification };
   relationships: Finding[];
@@ -168,7 +168,7 @@ export function classifyMoves(
     throw new Error("分類には両玉のある開始局面が必要です。");
   }
   const result: Classification = {
-    rulesVersion: 2,
+    rulesVersion: 3,
     processedPlies: moves.length,
     sides: { black: emptySide(), white: emptySide() },
     relationships: [],
@@ -235,29 +235,28 @@ export function classifyMoves(
         });
       }
       for (const rule of castleRules) {
-        if (
-          !observed ||
-          rule.family !== observed.family ||
-          !matches(p!, side, rule)
-        )
+        if (!matches(p!, side, rule)) continue;
+        // 成立済みの囲いの継続は、大分類でなく囲いの駒配置だけで確認する。
+        if (previousCastles[key(side)].has(rule.id)) {
+          currentCastles[key(side)].add(rule.id);
           continue;
-        currentCastles[key(side)].add(rule.id);
-        if (!previousCastles[key(side)].has(rule.id)) {
-          const parent = output.castles
-            .filter(({ id }) => id === rule.parentId)
-            .at(-1);
-          output.castles.push({
-            id: rule.id,
-            name: rule.name,
-            ...evidence([
-              ...observed.conditions,
-              ...shapeConditions(p!, side, rule),
-            ]),
-            ...(rule.parentId ? { parentId: rule.parentId } : {}),
-            ...(parent ? { evolvesFromPly: parent.ply } : {}),
-          });
-          output.castleStatus = "判定済み";
         }
+        if (!observed || rule.family !== observed.family) continue;
+        currentCastles[key(side)].add(rule.id);
+        const parent = output.castles
+          .filter(({ id }) => id === rule.parentId)
+          .at(-1);
+        output.castles.push({
+          id: rule.id,
+          name: rule.name,
+          ...evidence([
+            ...observed.conditions,
+            ...shapeConditions(p!, side, rule),
+          ]),
+          ...(rule.parentId ? { parentId: rule.parentId } : {}),
+          ...(parent ? { evolvesFromPly: parent.ply } : {}),
+        });
+        output.castleStatus = "判定済み";
       }
       for (const rule of strategyRules) {
         if (
