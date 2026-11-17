@@ -6,3 +6,5 @@ ios/
 coverage/
 test-results/
 playwright-report/
+
+.env.local

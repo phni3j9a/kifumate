@@ -12,7 +12,8 @@
       "expo-sqlite",
       "expo-document-picker",
       "expo-sharing",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ],
     "android": {
       "package": "jp.kifumate.app"
