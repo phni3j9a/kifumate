@@ -1,0 +1,25 @@
+{
+  "name": "kifumate-analysis-server",
+  "version": "1.0.0",
+  "description": "棋譜解析サーバー",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --env staging",
+    "test:python": "container/.venv/bin/python -m pytest container/tests -q"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.163.0",
+    "@cloudflare/vitest-plugin": "^1.8.3"
+  },
+  "private": true,
+  "type": "module"
+}
