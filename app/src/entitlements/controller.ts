@@ -58,6 +58,8 @@ export class EntitlementController {
   async redeem(code: string) {
     await this.pending?.catch(() => {});
     await this.source.redeem(code);
+    // 登録中に始まった古い照会を使い回さず、登録後の照会を必ず新しく送る。
+    await this.pending?.catch(() => {});
     return this.refresh();
   }
 }

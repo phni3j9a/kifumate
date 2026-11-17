@@ -128,14 +128,17 @@ export class AnalysisClient {
     return this.getCoach(id);
   };
   quota = (): Promise<Quota> => this.request("/v1/quota");
-  create = (input: Input): Promise<Reply> =>
-    (input.mode === "precise" ? this.requirePaid() : Promise.resolve()).then(
-      () =>
-        this.request("/v1/jobs", "POST", {
-          initial: input.initial,
-          moves: input.moves,
-          mode: input.mode,
-        }),
+  // 応答不明の回収は事前照会をせず、サーバーの重複判定を権利検査より先に行う。
+  create = (input: Input, recovering = false): Promise<Reply> =>
+    (input.mode === "precise" && !recovering
+      ? this.requirePaid()
+      : Promise.resolve()
+    ).then(() =>
+      this.request("/v1/jobs", "POST", {
+        initial: input.initial,
+        moves: input.moves,
+        mode: input.mode,
+      }),
     );
   get = (id: string, from: number): Promise<Reply> =>
     this.request(`/v1/jobs/${encodeURIComponent(id)}?from=${from}`);

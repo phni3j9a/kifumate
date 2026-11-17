@@ -179,3 +179,25 @@ test("応答不明から7日経った依頼は自動再送せず、確認して�
   await expect.poll(() => fake.requests.length).toBe(sent + 1);
   await expect(button(page, "中止")).toBeVisible();
 });
+
+test("精密依頼の応答喪失後に失効しても、再起動で結果を回収して無料で読める", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  fake.loseCreateResponse = true;
+  await importOne(page);
+  await button(page, "解析する").click();
+  await expect.poll(() => fake.requests.length).toBe(1);
+  await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();
+  fake.paid = false;
+  fake.loseCreateResponse = false;
+  fake.complete = true;
+  await page.reload();
+  await expect(button(page, "3位")).toBeVisible();
+  expect(fake.requests).toHaveLength(2);
+  expect(fake.requests[1]).toEqual(fake.requests[0]);
+  await button(page, "戻る").click();
+  await page.getByRole("tab", { name: /設定/ }).click();
+  await expect(page.getByText("無料プラン", { exact: true })).toBeVisible();
+  expect(fake.errors).toEqual([]);
+});

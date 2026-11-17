@@ -228,3 +228,35 @@ test("分岐の進捗取得に権利GETを重ねず、変更の兆候は権利AP
   assert.equal(gets, 2);
   assert.equal(client.access.snapshot.entitlement.paid, false);
 });
+
+test("招待登録中に始まった古いGETを待ち、登録後に新しいGETで有料化を確定する", async () => {
+  for (const failOldGet of [false, true]) {
+    const oldGet = Promise.withResolvers<Entitlement>();
+    const post = Promise.withResolvers<Entitlement>();
+    const postStarted = Promise.withResolvers<void>();
+    let gets = 0;
+    const paid: Entitlement = { paid: true, source: "invite", expiresAt: null };
+    const access = new EntitlementController({
+      entitlements: async () => (++gets === 1 ? oldGet.promise : paid),
+      redeem: async () => {
+        postStarted.resolve();
+        return post.promise;
+      },
+    });
+    const redeeming = access.redeem("ABCDEFGHJKMNPQRS");
+    await postStarted.promise;
+    const stale = access.refresh();
+    const staleSettled = stale.catch(() => {});
+    post.resolve(paid);
+    if (failOldGet) oldGet.reject(new TypeError("登録中の通信失敗"));
+    else oldGet.resolve({ paid: false, source: null, expiresAt: null });
+    await staleSettled;
+    assert.equal(
+      (await redeeming).paid,
+      true,
+      "POST開始前の無料状態を登録結果にしない",
+    );
+    assert.equal(gets, 2, "POST後に必ず新しい権利GETを行う");
+    assert.equal(access.snapshot.entitlement.paid, true);
+  }
+});

@@ -179,13 +179,14 @@ export class AnalysisController {
           if (!a.attempt || needsRetryConfirmation(a.attempt)) continue;
           try {
             let t = a.attempt;
+            const recovering = !t.job && t.firstSentAt !== null;
             if (!t.job && t.firstSentAt === null) {
               t = { ...t, firstSentAt: Date.now() };
               a = { ...a, attempt: t };
               await this.save(a);
             }
             const reply = !t.job
-              ? await this.api.create(t)
+              ? await this.api.create(t, recovering)
               : t.cancel
                 ? await this.api.cancel(t.job.id)
                 : await this.api.get(t.job.id, t.job.next);
