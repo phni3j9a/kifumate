@@ -201,7 +201,8 @@ export class AnalysisController {
               e instanceof AnalysisConfigurationError ||
               (e instanceof ApiError && e.status >= 400 && e.status < 500)
             ) {
-              if (e instanceof ApiError && e.quota) await this.quota(e.quota);
+              if (e instanceof ApiError && e.quota && "paid" in e.quota)
+                await this.quota(e.quota);
               await this.save({ ...a, attempt: null, error: errorText(e) });
             } else throw e;
           }

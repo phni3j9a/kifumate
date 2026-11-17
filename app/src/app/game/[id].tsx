@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
   Platform,
@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Line } from "react-native-svg";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Color, formatMove, Move, Square, type PieceType } from "tsshogi";
 import { Board } from "../../components/board";
 import ExportSheet from "../../components/export-sheet";
@@ -29,7 +29,9 @@ import { useGame } from "../../components/use-game";
 import { dateParts, moveText } from "../../core/format";
 import { Branch, gameOutcome, legalMoves, readStoredKif } from "../../core/kif";
 import { AnalysisPanel } from "../../components/analysis-panel";
-import { useAnalysis } from "../../analysis/provider";
+import { useAnalysis, useRealtime } from "../../analysis/provider";
+import { positionKey } from "../../analysis/realtime-types";
+import { RealtimeToggle } from "../../components/realtime-controls";
 import {
   candidateRows,
   readingText,
@@ -138,6 +140,59 @@ function GameView({ id }: { id: string }) {
   const [initialized, setInitialized] = useState(false);
   const { records, offline, controller, ready } = useAnalysis();
   const analysis = records[id];
+  const rt = useRealtime();
+  const rtController = rt.controller;
+  const branchInput =
+    record && branch
+      ? {
+          initial: record.initialPosition.sfen,
+          moves: [
+            ...record.moves
+              .filter((n) => n.move instanceof Move)
+              .slice(0, branch.base)
+              .map((n) => (n.move as Move).usi),
+            ...branch.moves.slice(0, branch.at).map((m) => m.usi),
+          ],
+        }
+      : null;
+  const branchKey = branchInput ? positionKey(branchInput) : null;
+  const inputRef = useRef(branchInput);
+  inputRef.current = branchInput;
+  useFocusEffect(
+    useCallback(() => {
+      rtController.setVisible(true);
+      if (inputRef.current) rtController.move(inputRef.current);
+      return () => rtController.setVisible(false);
+    }, [rtController]),
+  );
+  const previousBranchKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (inputRef.current) rtController.move(inputRef.current);
+    else if (previousBranchKey.current) rtController.leaveBranch();
+    previousBranchKey.current = branchKey;
+  }, [branchKey, rtController]);
+  const lowTold = useRef(false);
+  useEffect(() => {
+    if (
+      branchKey &&
+      rt.quota?.low &&
+      rt.quota.remainingMs > 0 &&
+      !lowTold.current
+    ) {
+      lowTold.current = true;
+      toast(
+        `分岐中の解析は、今月あと${Math.ceil(rt.quota.remainingMs / 60000)}分使えます`,
+      );
+    }
+  }, [branchKey, rt.quota]);
+  const rtResult = branchKey === rt.positionKey ? rt.result : null;
+  const rtBusy =
+    !!branch &&
+    rt.enabled &&
+    rt.paid === true &&
+    (branchKey !== rt.positionKey ||
+      rt.status === "preparing" ||
+      rt.status === "analyzing");
   const [candidateState, setCandidateState] = useState({ key: "", index: 0 });
   const candidateKey = `${ply}:${branch?.at}`;
   const candidate =
@@ -350,6 +405,20 @@ function GameView({ id }: { id: string }) {
       };
     }
   }
+  if (branch && rtResult) {
+    branchRow = candidateRows(position, rtResult, undefined, self, own)[0];
+    if (branchRow) branchRow.reading = readingText(position, branchRow.pv);
+    else
+      branchRow = {
+        label: "分岐",
+        text: "読み筋はここまで",
+        move: null,
+        pv: [],
+        score: rtResult.score,
+        game: false,
+      };
+  }
+  if (rtBusy) branchRow = undefined;
   const shownScore = branch ? branchRow?.score : shown?.score;
   const value = cp(shownScore);
   const previousResult = results.find((r) => r.ply === ply - 1);
@@ -550,7 +619,11 @@ function GameView({ id }: { id: string }) {
               </Text>
               <View style={s.jg}>
                 <Text style={font(900, 10.5)}>
-                  {branch ? "分岐中" : advantage}
+                  {branch && rtBusy
+                    ? "解析中"
+                    : branch && value === null
+                      ? "分岐中"
+                      : advantage}
                 </Text>
               </View>
               <Text style={font(700, 10.5)}>
@@ -592,6 +665,9 @@ function GameView({ id }: { id: string }) {
             turn={!over && position.color === top}
             bottom={false}
           />
+          {branch && (
+            <RealtimeToggle state={rt} toggle={() => rtController.toggle()} />
+          )}
         </View>
         <Board
           position={position}
@@ -705,6 +781,9 @@ function GameView({ id }: { id: string }) {
           analysis={analysis}
           branch={!!branch}
           branchRow={branchRow}
+          realtime={rt}
+          retryRealtime={rtController.retry}
+          toggleRealtime={() => rtController.toggle()}
           rows={rows}
           selected={candidate}
           onSelect={(i) => {
@@ -730,8 +809,30 @@ function GameView({ id }: { id: string }) {
                 <View style={s.bk}>
                   <Text style={font(900, 10.5)}>分岐 {at}手目</Text>
                 </View>
-                <Text style={font(700, 10.5, 1, colors.ink2)}>
-                  {scoreText(shownScore, self)}
+                {branchRow && (
+                  <Text style={font(700, 10.5, 1, colors.ink2)}>評価値</Text>
+                )}
+                <Text
+                  style={font(
+                    branchRow ? 900 : 700,
+                    branchRow ? 12.5 : 10.5,
+                    1,
+                    branchRow ? colors.ink : colors.ink2,
+                  )}
+                >
+                  {branchRow
+                    ? scoreText(shownScore, self)
+                    : rtBusy
+                      ? "解析中…"
+                      : rt.paid === false
+                        ? "評価値は出ません"
+                        : !rt.enabled
+                          ? "分岐中の解析はオフ"
+                          : rt.status === "offline"
+                            ? "通信できないため、評価値は出ません"
+                            : rt.status === "limit"
+                              ? "今月の分岐中の解析は残り0分"
+                              : "評価値 —"}
                 </Text>
               </>
             ) : (

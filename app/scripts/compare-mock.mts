@@ -138,7 +138,9 @@ async function run(width: number, height: number) {
   const shot = async (name: string) => {
     const file = `${String(++n).padStart(2, "0")}-${name}.png`;
     if (only.length && !only.some((o) => name.includes(o))) return;
-    await pause(name.startsWith("analysis-") ? 2800 : 350);
+    await pause(
+      name.startsWith("analysis-") || name.startsWith("realtime-") ? 2800 : 350,
+    );
     await m.screenshot({ path: `${dir}/mock/${file}` });
     await a.screenshot({ path: `${dir}/app/${file}` });
     const android = `${OUT}/android/${name}.png`;
@@ -306,6 +308,118 @@ async function run(width: number, height: number) {
   await both(3, 3);
   await both(3, 4);
   await shot("branch");
+  // 分岐中の解析。モックの休止はオンのまま、結果と盤を保つ（次の手で準備し直す）。
+  await shot("realtime-free");
+  const rtMock = (code: string) =>
+    m.evaluate((code) => (window as any).__compare(code), code);
+  fake.paid = true;
+  fake.rt.status = "preparing";
+  await plan("paid");
+  await a.reload();
+  await button("解析する").waitFor();
+  await appSquare(2, 7);
+  await appSquare(2, 6);
+  await appSquare(3, 3);
+  await appSquare(3, 4);
+  await button("分岐中の解析 オン").click();
+  await rtMock("S.rtOn=false; stopRt(); renderPly()");
+  await shot("realtime-off");
+  await button("オンにする").click();
+  await tap("1手戻る");
+  await tap("1手進む");
+  await rtMock(
+    "S.rtOn=true; S.rtWarm=false; S.rtUntil=performance.now()+60000; renderPly()",
+  );
+  await a.getByText("準備中", { exact: true }).waitFor();
+  await shot("realtime-preparing");
+  fake.rt.status = "analyzing";
+  await rtMock("S.rtWarm=true; renderPly()");
+  await a.getByText("この局面の評価値と最善手を調べています").waitFor();
+  await shot("realtime-analyzing");
+  fake.rt.result = {
+    ply: 2,
+    score: { kind: "cp", value: 50 },
+    candidates: [
+      {
+        rank: 1,
+        depth: 10,
+        move: "7g7f",
+        score: { kind: "cp", value: 50 },
+        pv: ["7g7f", "8c8d"],
+      },
+    ],
+    mate: null,
+  };
+  fake.rt.status = "ready";
+  fake.rt.idleMs = 10;
+  await rtMock(
+    "S.rtUntil=0; brNow().an={known:true,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
+  );
+  await button("この手を盤で試す").waitFor();
+  await shot("realtime-result");
+  fake.rt.status = "paused";
+  await rtMock("S.rtWarm=false; renderPly()");
+  await button("分岐中の解析 オン、休止中").waitFor();
+  await shot("realtime-paused");
+  // 通信なし・上限では、この局面に保存した結果がない場面を比べる。
+  fake.rt.result = null;
+  fake.online = false;
+  await tap("1手戻る");
+  await tap("1手進む");
+  await rtMock(
+    "brNow().an={known:false,lines:[]}; DB.online=false; renderPly()",
+  );
+  await button("分岐中の解析 通信なし").waitFor();
+  await shot("realtime-offline");
+  fake.online = true;
+  fake.rt.status = "ready";
+  fake.rt.result = {
+    ply: 2,
+    score: { kind: "cp", value: 50 },
+    candidates: [
+      {
+        rank: 1,
+        depth: 10,
+        move: "7g7f",
+        score: { kind: "cp", value: 50 },
+        pv: ["7g7f", "8c8d"],
+      },
+    ],
+    mate: null,
+  };
+  fake.rt.low = true;
+  fake.rt.remainingMs = 12 * 60000;
+  await tap("もう一度試す");
+  await rtMock(
+    "DB.online=true; DB.usage.rt=DB.usage.rtMax-12; brNow().an={known:true,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
+  );
+  await button("分岐中の解析 オン・残り12分").waitFor();
+  await pause(2800);
+  await shot("realtime-low");
+  fake.rt.status = "limit";
+  fake.rt.remainingMs = 0;
+  fake.rt.result = null;
+  await tap("1手戻る");
+  await tap("1手進む");
+  await rtMock(
+    "DB.usage.rt=DB.usage.rtMax; brNow().an={known:false,lines:[]}; renderPly()",
+  );
+  await button("分岐中の解析 残り0分").waitFor();
+  await shot("realtime-limit");
+  // 後続の既存場面へ、同じ無料・2手の分岐を戻す。
+  fake.paid = false;
+  fake.rt.low = false;
+  fake.rt.remainingMs = 18000000;
+  fake.rt.idleMs = 30000;
+  fake.rt.status = "ready";
+  fake.rt.result = undefined;
+  await plan("free");
+  await a.reload();
+  await button("解析する").waitFor();
+  await appSquare(2, 7);
+  await appSquare(2, 6);
+  await appSquare(3, 3);
+  await appSquare(3, 4);
   await act("kf");
   await tap("棋譜を開く");
   await shot("sheet-branch-moves");

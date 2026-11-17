@@ -1,4 +1,9 @@
 import type { Input, Quota, Reply } from "./types";
+import type {
+  RealtimeInput,
+  RealtimeReply,
+  RealtimeQuota,
+} from "./realtime-types";
 export interface TokenStore {
   get(): Promise<string | null>;
   set(token: string): Promise<void>;
@@ -7,7 +12,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
-    public quota?: Quota,
+    public quota?: Quota | RealtimeQuota,
   ) {
     super(code);
   }
@@ -24,7 +29,7 @@ export class AnalysisClient {
   private async request(
     path: string,
     method = "GET",
-    body?: Input,
+    body?: object,
     auth = true,
   ): Promise<any> {
     if (!this.base)
@@ -47,11 +52,7 @@ export class AnalysisClient {
         },
         ...(body
           ? {
-              body: JSON.stringify({
-                initial: body.initial,
-                moves: body.moves,
-                mode: body.mode,
-              }),
+              body: JSON.stringify(body),
             }
           : {}),
       });
@@ -83,9 +84,31 @@ export class AnalysisClient {
   }
   quota = (): Promise<Quota> => this.request("/v1/quota");
   create = (input: Input): Promise<Reply> =>
-    this.request("/v1/jobs", "POST", input);
+    this.request("/v1/jobs", "POST", {
+      initial: input.initial,
+      moves: input.moves,
+      mode: input.mode,
+    });
   get = (id: string, from: number): Promise<Reply> =>
     this.request(`/v1/jobs/${encodeURIComponent(id)}?from=${from}`);
+  realtime = (): Promise<RealtimeReply> => this.request("/v1/realtime");
+  startRealtime = (input: RealtimeInput): Promise<RealtimeReply> =>
+    this.request("/v1/realtime", "POST", {
+      initial: input.initial,
+      moves: input.moves,
+    });
+  updateRealtime = (
+    id: string,
+    input: RealtimeInput,
+    sequence: number,
+  ): Promise<RealtimeReply> =>
+    this.request(`/v1/realtime/${encodeURIComponent(id)}`, "PUT", {
+      initial: input.initial,
+      moves: input.moves,
+      sequence,
+    });
+  stopRealtime = (id: string): Promise<RealtimeReply> =>
+    this.request(`/v1/realtime/${encodeURIComponent(id)}`, "DELETE");
   cancel = (id: string): Promise<Reply> =>
     this.request(`/v1/jobs/${encodeURIComponent(id)}`, "DELETE");
 }
