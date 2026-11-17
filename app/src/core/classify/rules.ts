@@ -49,7 +49,7 @@ export const castleRules: readonly ShapeRule[] = [
       [G, 49],
       [G, 47],
       [P, 27],
-      [P, 37],
+      [P, 37, 36],
       [P, 46],
     ],
   },
@@ -64,7 +64,7 @@ export const castleRules: readonly ShapeRule[] = [
       [G, 38],
       [G, 47],
       [P, 26],
-      [P, 37],
+      [P, 37, 36],
       [P, 46],
     ],
   },
@@ -87,7 +87,7 @@ export const castleRules: readonly ShapeRule[] = [
       [K, 78],
       [S, 68],
       [G, 79],
-      [G, 59],
+      [G, 49, 59],
     ],
   },
   {
@@ -110,8 +110,8 @@ export const castleRules: readonly ShapeRule[] = [
     family: "居飛車",
     pieces: [
       [K, 69, 79],
-      [S, 77],
       [S, 67],
+      [S, 57],
       [G, 78],
       [G, 58],
       [P, 76],
@@ -140,7 +140,7 @@ export const castleRules: readonly ShapeRule[] = [
       [N, 89],
       [S, 88],
       [G, 78],
-      [G, 68],
+      [G, 79, 68],
     ],
   },
   {
@@ -153,7 +153,7 @@ export const castleRules: readonly ShapeRule[] = [
       [N, 29],
       [S, 28],
       [G, 39],
-      [G, 49],
+      [G, 38, 49],
     ],
   },
   {
@@ -164,8 +164,8 @@ export const castleRules: readonly ShapeRule[] = [
       [K, 58],
       [G, 78],
       [G, 38],
-      [S, 79],
-      [S, 39],
+      [S, 79, 68],
+      [S, 39, 48],
     ],
   },
 ];
@@ -204,7 +204,7 @@ export const strategyRules: readonly ShapeRule[] = [
     family: "振り飛車",
     pieces: [
       [R, 88],
-      [P, 86],
+      [P, 87, 86],
     ],
   },
   {
@@ -247,7 +247,7 @@ export const mutualStaticRules: readonly ShapeRule[] = [
     pieces: [
       [R, 28],
       [S, 46],
-      [S, 79],
+      [S, 79, 88, 77],
       [P, 36],
       [P, 25],
     ],

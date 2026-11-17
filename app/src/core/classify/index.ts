@@ -45,7 +45,7 @@ export interface SideClassification {
   castleStatus: "判定済み" | "未分類";
 }
 export interface Classification {
-  rulesVersion: 1;
+  rulesVersion: 2;
   processedPlies: number;
   sides: { black: SideClassification; white: SideClassification };
   relationships: Finding[];
@@ -168,7 +168,7 @@ export function classifyMoves(
     throw new Error("分類には両玉のある開始局面が必要です。");
   }
   const result: Classification = {
-    rulesVersion: 1,
+    rulesVersion: 2,
     processedPlies: moves.length,
     sides: { black: emptySide(), white: emptySide() },
     relationships: [],
@@ -180,6 +180,7 @@ export function classifyMoves(
   };
   const rookPawnExchange = { black: false, white: false };
   let bishopExchangePly: number | null = null;
+  let bishopExchangeBeforeRookPawns = false;
   let sidePawnPly: number | null = null;
   let pendingBishopCapture: Move | null = null;
 
@@ -321,14 +322,13 @@ export function classifyMoves(
                 ...shapeConditions(p!, side, rule),
               ]);
           }
-          if (bishopExchangePly !== null)
+          if (bishopExchangePly !== null && bishopExchangeBeforeRookPawns)
             context(side, "bishop-exchange", [
               ...relationConditions,
-              `${bishopExchangePly}手目までに初期角位置で角を交換`,
+              `${bishopExchangePly}手目までに22/33/77/88で角を交換`,
             ]);
           if (
-            rookPawnExchange.black &&
-            rookPawnExchange.white &&
+            (rookPawnExchange.black || rookPawnExchange.white) &&
             has(p!, Color.BLACK, PieceType.BISHOP, 88) &&
             has(p!, Color.WHITE, PieceType.BISHOP, 88)
           ) {
@@ -339,11 +339,13 @@ export function classifyMoves(
               ]);
             else if (
               has(p!, Color.BLACK, PieceType.PAWN, 77) &&
-              has(p!, Color.WHITE, PieceType.PAWN, 77)
+              has(p!, Color.WHITE, PieceType.PAWN, 77) &&
+              has(p!, Color.BLACK, PieceType.GOLD, 78) &&
+              has(p!, Color.WHITE, PieceType.GOLD, 78)
             ) {
               context(side, "double-wing", [
                 ...relationConditions,
-                "双方飛車先の歩を飛車で交換、双方角道を未開通",
+                "飛車先の歩交換を確認、双方金上がり・角道を未開通",
               ]);
             }
           }
@@ -351,7 +353,7 @@ export function classifyMoves(
         if (own.family === "振り飛車" && bishopExchangePly !== null) {
           context(side, "bishop-exchange-ranging", [
             ...relationConditions,
-            `${bishopExchangePly}手目までに初期角位置で角を交換`,
+            `${bishopExchangePly}手目までに22/33/77/88で角を交換`,
           ]);
         }
         if (own.family === "居飛車" && opponent.family === "振り飛車") {
@@ -417,12 +419,16 @@ export function classifyMoves(
         move.to.equals(pendingBishopCapture.to) &&
         (move.capturedPieceType === PieceType.BISHOP ||
           move.capturedPieceType === PieceType.HORSE)
-      )
+      ) {
         bishopExchangePly = ply;
+        // 横歩取り等で飛車先交換後に角を交換しても、角換わりにはならない。
+        bishopExchangeBeforeRookPawns =
+          !rookPawnExchange.black && !rookPawnExchange.white;
+      }
       pendingBishopCapture =
         move.pieceType === PieceType.BISHOP &&
         move.capturedPieceType === PieceType.BISHOP &&
-        (destination === 22 || destination === 88)
+        [22, 33, 77, 88].includes(destination)
           ? move
           : null;
     }
