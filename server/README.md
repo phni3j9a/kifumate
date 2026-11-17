@@ -128,8 +128,8 @@ POST/PUTには`mode`・対局者名など追加キーを渡せません。開始
 - 数えるのは**コンテナ起動要求から停止完了までの壁時計時間**。準備・探索・結果が出た後の待機・停止処理を含み、局面数やCPU使用時間では数えません。初回要求／手動起動から料金が始まる[公式の説明](https://developers.cloudflare.com/containers/platform/pricing/)に合わせたサーバー時計による集計で、Cloudflare請求メーターとの完全一致を保証するものではありません。
 - 月300分（18,000,000ms）、**JST月初0時**で区切ります。月をまたぐ稼働は両月へ分割。残り時間までのalarmを設定し、使い切ると停止します。利用上限値で集計を丸めるため、alarmの遅延や停止処理の端数を超過請求しません。翌月に勝手に再起動はせず、次の局面更新で再開します。
 - `quota.low`がtrue（残り10%未満）のときだけ残りを知らせ、それ以外では上限・残りを画面に出さないでください。停止・失敗したセッションも実際の稼働時間は返却しません。全局解析の失敗時の回数返却とは別です。
-- 利用量と最新セッションは分岐用Container DOのSQLiteへ永続化し、DOの再生成でも集計を継続。停止済みの局面・結果は最終操作から7日後のアクセス時に削除し、月利用量は当月・前月を保持します。次のセッションで上書きされるため、必要な分岐結果は端末に保存してください。
-- 権利判定はWorkerで最新secretを評価し、Deviceが内部ヘッダーを必ず上書きします。RevenueCat連携時は既存のWorker有料判定とDeviceの`paid()`を差し替え、分岐の時間集計・Pythonには変更不要です。公開前には権利失効の能動通知も必要です（現状は当該端末の次のAPI呼び出し、遅くとも無操作休止で停止）。
+- 利用量と最新セッションは分岐用Container DOのSQLiteへ永続化し、DOの再生成でも集計を継続。停止済みの結果は最終操作から7日後のアクセス時に削除し、月利用量は当月・前月を保持します。月上限になったセッションID・sequenceだけは翌月の再開用に最大40日保持します。次のセッションで上書きされるため、必要な分岐結果は端末に保存してください。
+- 権利判定はWorkerで最新secretを評価し、Deviceが内部ヘッダーを必ず上書きします。RevenueCat連携時は既存のWorker有料判定とDeviceの`paid()`を差し替え、分岐の時間集計・Pythonには変更不要です。公開前には権利失効の能動通知も必要です（現状は当該端末の次の分岐API呼び出し、遅くとも無操作休止で停止）。
 
 ## ローカル開発
 
@@ -208,6 +208,12 @@ HASH=$(python3 scripts/measure.py --url "$URL" --register)
 printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
 python3 scripts/measure.py --url "$URL"   # 85手、両モード
 # 必要に応じ --modes precise / --plies 6 / --token-file .local/another-device.json
+npx wrangler secret delete DEV_PAID_HASHES --env staging
+
+# 分岐中の解析（新規の計測端末を有料にした後で実行）
+HASH=$(python3 scripts/measure.py --url "$URL" --register --token-file .local/realtime-device.json)
+printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
+python3 scripts/measure_realtime.py --url "$URL"
 npx wrangler secret delete DEV_PAID_HASHES --env staging
 ```
 
