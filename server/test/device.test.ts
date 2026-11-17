@@ -2,16 +2,18 @@ import { env } from 'cloudflare:workers';
 import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import { parseInput, sha256, weekStart, RETENTION_MS } from '../src/model';
-import type { Device } from '../src/index';
+import { Device } from '../src/index';
 
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const base = {initial: 'startpos', moves: ['7g7f'], mode: 'std'};
+const paidStubs = new Set<unknown>();
 async function setup(paid = false) {
   const name = await sha256(crypto.randomUUID());
   const stub = devices.getByName(name);
-  await stub.fetch('https://device/register', {method: 'POST'});
+  await stub.fetch('https://device/register?hash=' + name, {method: 'POST'});
+  if (paid) paidStubs.add(stub);
   await runInDurableObject(stub, (instance: any) => {
-    instance.env.DEV_PAID_HASHES = paid ? name : '';
+    instance.env.ENVIRONMENT = 'staging';
     const mock = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
       const data = JSON.parse(init.body as string);
       return Response.json({ply: data.ply, score: {kind: 'cp', value: 10}, candidates: [], mate: null});
@@ -22,7 +24,8 @@ async function setup(paid = false) {
 }
 async function request(stub: any, path: string, method = 'GET', data?: unknown) {
   const response = await stub.fetch('https://device' + path, {method,
-    ...(data === undefined ? {} : {headers: {'content-type': 'application/json'}, body: JSON.stringify(data)})});
+    headers: {'X-Dev-Paid': paidStubs.has(stub) ? '1' : '0', 'content-type': 'application/json'},
+    ...(data === undefined ? {} : {body: JSON.stringify(data)})});
   return {status: response.status, data: await response.json() as any};
 }
 async function tick(stub: any) { await runInDurableObject(stub, (instance: any) => instance.alarm()); }
@@ -53,8 +56,9 @@ describe('匿名認証', () => {
     const {token} = await reg.json() as any;
     expect(reg.status).toBe(201); expect(token).toMatch(/^[a-f0-9]{64}$/);
     const hash = await sha256(token);
-    expect(await sql(devices.getByName(hash), 'SELECT * FROM meta')).toEqual([{key: 'registered', value: '1'}]);
-    expect((await SELF.fetch('https://api/v1/quota', {headers: {Authorization: `Bearer ${token}`}})).status).toBe(200);
+    expect(await sql(devices.getByName(hash), 'SELECT * FROM meta ORDER BY key')).toEqual([{key: 'hash', value: hash}, {key: 'registered', value: '1'}]);
+    const quota = await SELF.fetch('https://api/v1/quota', {headers: {Authorization: `Bearer ${token}`, 'X-Dev-Paid': '1'}});
+    expect(quota.status).toBe(200); expect((await quota.json() as any).paid).toBe(false);
     expect((await SELF.fetch('https://api/v1/quota', {headers: {Authorization: `Bearer ${'a'.repeat(64)}`}})).status).toBe(401);
     expect((await SELF.fetch('https://api/v1/quota')).status).toBe(401);
     expect((await SELF.fetch('https://api/register', {method: 'POST'})).status).toBe(404);
@@ -137,6 +141,39 @@ describe('永続ジョブと回数', () => {
     expect((await request(stub, `/v1/jobs/${a.data.id}`)).status).toBe(404);
     expect(await sql(stub, 'SELECT * FROM results')).toEqual([]);
     expect((await request(stub, '/v1/quota')).data.completed.total).toBe(1);
+  });
+  it('同時重複要求を一つにし、モードが異なれば別ジョブにする', async () => {
+    const stub = await setup(true);
+    const [a, b] = await Promise.all([request(stub, '/v1/jobs', 'POST', base), request(stub, '/v1/jobs', 'POST', base)]);
+    expect(a.data.id).toBe(b.data.id);
+    const precise = await request(stub, '/v1/jobs', 'POST', {...base, mode: 'precise'});
+    expect(precise.data.id).not.toBe(a.data.id);
+    expect(precise.data.quota.reserved).toEqual({total: 2, precise: 1});
+  });
+  it('新しいDOインスタンスでもSQLiteのcursorから再開する', async () => {
+    const stub = await setup();
+    const a = await request(stub, '/v1/jobs', 'POST', base);
+    await tick(stub);
+    await runInDurableObject(stub, (instance: any, state) => {
+      const restarted = new Device(state, instance.env);
+      return restarted.alarm();
+    });
+    const done = await request(stub, `/v1/jobs/${a.data.id}`);
+    expect(done.data.status).toBe('completed'); expect(done.data.next).toBe(2);
+    expect(done.data.results.map((r: any) => r.ply)).toEqual([0, 1]);
+  });
+  it('不正な合法手列の失敗で枠を返し、差分カーソルの不正値を拒否する', async () => {
+    const stub = await setup();
+    const a = await request(stub, '/v1/jobs', 'POST', {...base, moves: ['7g7e']});
+    await runInDurableObject(stub, (instance: any) => {
+      instance.env.STD = {getByName: () => ({fetch: async () => new Response('', {status: 422})})};
+    });
+    await tick(stub);
+    const failed = await request(stub, `/v1/jobs/${a.data.id}`);
+    expect(failed.data.error).toBe('invalid_position_or_move');
+    expect(failed.data.quota.totalRemaining).toBe(10);
+    expect((await request(stub, `/v1/jobs/${a.data.id}?from=-1`)).status).toBe(400);
+    expect((await request(stub, '/v1/jobs', 'POST', {...base, moves: [], sente: '名前'})).status).toBe(400);
   });
   it('後週へは予約と回数を持ち越さない', async () => {
     const stub = await setup();

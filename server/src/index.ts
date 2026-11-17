@@ -42,7 +42,7 @@ export class Device extends DurableObject<Env> {
   private paid(): boolean {
     // shortcut: ストア検証は未実装。公開前に購入権利検証へ置き換える。production では常に無効。
     return ['local', 'staging'].includes(this.env.ENVIRONMENT) && this.env.ALLOW_DEV_PAID === 'true'
-      && (this.env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(this.ctx.id.name ?? '');
+      && this.rows<{value: string}>("SELECT value FROM meta WHERE key='paid'")[0]?.value === '1';
   }
   private quota(week = weekStart(Date.now())) {
     const paid = this.paid();
@@ -77,10 +77,16 @@ export class Device extends DurableObject<Env> {
       this.prune(Date.now());
       const url = new URL(request.url);
       if (url.pathname === '/register' && request.method === 'POST') {
-        this.ctx.storage.sql.exec("INSERT OR IGNORE INTO meta VALUES ('registered','1')");
+        const hash = url.searchParams.get('hash');
+        if (!hash || !/^[a-f0-9]{64}$/.test(hash)) throw new ApiError(400, 'invalid_device');
+        this.ctx.storage.transactionSync(() => {
+          this.ctx.storage.sql.exec("INSERT OR IGNORE INTO meta VALUES ('registered','1')");
+          this.ctx.storage.sql.exec("INSERT OR IGNORE INTO meta VALUES ('hash',?)", hash);
+        });
         return json({ok: true}, 201);
       }
       if (!this.rows('SELECT key FROM meta WHERE key=?', 'registered').length) throw new ApiError(401, 'unauthorized');
+      this.ctx.storage.sql.exec("INSERT INTO meta VALUES ('paid',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", request.headers.get('X-Dev-Paid') === '1' ? '1' : '0');
       if (url.pathname === '/v1/quota' && request.method === 'GET') return json(this.quota());
       if (url.pathname === '/v1/jobs' && request.method === 'GET') {
         return json({jobs: this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs ORDER BY created,id').map(j => ({...this.view(j, j.cursor), results: undefined})), quota: this.quota()});
@@ -136,7 +142,9 @@ export class Device extends DurableObject<Env> {
       const input = JSON.parse(job.payload) as Input;
       try {
         const namespace = job.mode === 'std' ? this.env.STD : this.env.PRECISE;
-        const response = await namespace.getByName(this.ctx.id.toString()).fetch('http://container/analyze', {
+        // shortcut: 中継はモード別2枠。公開時に負荷計測して枠数と max_instances を同時調整する。
+        const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
+        const response = await namespace.getByName('slot-' + slot).fetch('http://container/analyze', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({...input, ply: job.cursor}), signal: AbortSignal.timeout(45_000),
         });
@@ -144,7 +152,7 @@ export class Device extends DurableObject<Env> {
           this.ctx.storage.sql.exec("UPDATE jobs SET status='failed',terminal=?,error='invalid_position_or_move' WHERE id=? AND status='running'", Date.now(), job.id);
           return;
         }
-        if (!response.ok) throw new Error('analysis_unavailable');
+        if (!response.ok) throw new Error('container_http_' + response.status);
         const result = await response.json() as {ply?: number};
         if (result.ply !== job.cursor) throw new Error('invalid_result');
         this.ctx.storage.transactionSync(() => {
@@ -155,7 +163,8 @@ export class Device extends DurableObject<Env> {
           this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,status=?,terminal=? WHERE id=?', completed ? 'completed' : 'running', completed ? Date.now() : null, job.id);
           if (completed) this.ctx.storage.sql.exec('INSERT INTO usage VALUES (?,1,?) ON CONFLICT(week) DO UPDATE SET total=total+1,precise=precise+excluded.precise', job.week, job.mode === 'precise' ? 1 : 0);
         });
-      } catch {
+      } catch (error) {
+        console.warn('解析の再試行', {jobId: job.id, ply: job.cursor, reason: error instanceof Error ? error.message : 'unknown'});
         const attempts = job.attempts + 1;
         this.ctx.storage.sql.exec("UPDATE jobs SET attempts=?,status=?,terminal=?,error=? WHERE id=? AND status='running' AND cursor=?", attempts, attempts >= 5 ? 'failed' : 'running', attempts >= 5 ? Date.now() : null, attempts >= 5 ? 'analysis_unavailable' : null, job.id, job.cursor);
       }
@@ -174,12 +183,19 @@ export default {
     try {
       const url = new URL(request.url);
       if (url.pathname === '/v1/devices' && request.method === 'POST') {
-        if (request.body) { await request.body.cancel(); throw new ApiError(400, 'body_not_allowed'); }
+        if (request.body) {
+          const reader = request.body.getReader();
+          while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            if (value.byteLength) { await reader.cancel(); throw new ApiError(400, 'body_not_allowed'); }
+          }
+        }
         // shortcut: 端末実在性・発行数制限は未実装。公開前に App Attest / Play Integrity と入口のレート制限を追加する。
         const bytes = crypto.getRandomValues(new Uint8Array(32));
         const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
         const hash = await sha256(token);
-        const registered = await env.DEVICES.getByName(hash).fetch('https://device/register', {method: 'POST'});
+        const registered = await env.DEVICES.getByName(hash).fetch('https://device/register?hash=' + hash, {method: 'POST'});
         if (!registered.ok) throw new ApiError(503, 'registration_unavailable');
         return json({token}, 201);
       }
@@ -188,6 +204,10 @@ export default {
       if (!auth) throw new ApiError(401, 'unauthorized');
       const hash = await sha256(auth[1]);
       const headers = new Headers(request.headers); headers.delete('Authorization');
+      // secret 更新時に既存 DO の env が残っても、入口の最新権利で上書きする。
+      const paid = ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true'
+        && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
+      headers.set('X-Dev-Paid', paid ? '1' : '0');
       return await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
     } catch (error) {
       return json({error: error instanceof ApiError ? error.code : 'internal_error'}, error instanceof ApiError ? error.status : 500);

@@ -4,7 +4,9 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -232,6 +234,7 @@ class Engine:
     def close(self):
         self.process.kill()
         self.process.wait(timeout=5)
+        self.reader.join(timeout=1)
         self.process.stdin.close()
         self.process.stdout.close()
 
@@ -283,4 +286,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+    # PID 1 でも SIGTERM で終了し、プラットフォームの強制停止待ちを避ける。
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    server = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        if engine is not None:
+            engine.close()
