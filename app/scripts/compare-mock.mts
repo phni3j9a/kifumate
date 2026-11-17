@@ -780,6 +780,8 @@ async function run(width: number, height: number) {
     await db.runAsync("DELETE FROM coaches");
   });
   await a.reload();
+  await tap("最初へ");
+  await pause(2800);
   await act("ai");
   await tap("AIに聞く");
   await shot("coach-limit");

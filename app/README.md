@@ -236,4 +236,4 @@ Web はブラウザのサイトデータ削除・プライベートブラウズ�
 - Android Pixel 3 `8AFX0S69E` / Android 11 / Expo Go 58.0.5 → staging：既存の精密5手・署名付き結果を使い、依頼→考え中→Home/force-stop→再起動→同じIDの失敗結果受信、別UUIDによる再試行を確認。2依頼ともサーバーが `failed/provider_failed`、使用0/予約0。無料の鍵への復帰、学習プロフィールの戦法選択・目標入力・キーボード・force-stop後の保持も確認し、プロフィールを元の空欄へ戻した。追加の全局解析は0局。
 - **stagingでの実際のAIの解説/追加質問の成功確認は、サーバー側の不具合で保留**。Mainが別のサーバーPRで切り分け・修正し、実機成功確認を改めて行う。キーは `/models` と最小の直接生成1回（93token）で利用できることだけ確認した。失敗2依頼の提供元での課金有無は不明。ここでは生成成功や #27 全体の完了を主張しない。
 - 確認用 `COACH_API_KEY / DEV_PAID_HASHES / COACH_PROVIDER / COACH_BASE_URL / COACH_MODEL / COACH_TOKEN_PARAMETER` はすべて削除し、既存 `COACH_SIGNING_KEY / INVITE_ADMIN_KEY` だけを保持。12:28頃UTCに全3 Containerの全slot inactive、`active=0 / assigned=0` を確認。serverソース・wrangler設定は変更していない。検証画像/動画は `.local/screenshots/android/coach-*`、一時的な診断ログのコードとローカル識別子ファイルは除去した。
-- iPhone、ストア用リリースビルド、60fpsの実測、実際の購入/招待コード、バックアップは未検証。端末データの削除やアンインストールでは、棋譜と同様に解説・履歴も失われる。
+- `npx expo export --platform all`（Web/Android/iOS）と配布バンドル172件の禁止名称検査も通過。iPhoneの実行、ストア用リリースビルド、60fpsの実測、実際の購入/招待コード、バックアップは未検証。端末データの削除やアンインストールでは、棋譜と同様に解説・履歴も失われる。

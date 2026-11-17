@@ -49,6 +49,7 @@ export function CoachSheet({
   start,
   jump,
   tryLine,
+  onFullChange,
 }: {
   game: Game;
   onClose: () => void;
@@ -59,6 +60,7 @@ export function CoachSheet({
   start: () => void;
   jump: (p: number) => void;
   tryLine: (p: number, pv: string[]) => void;
+  onFullChange: (full: boolean) => void;
 }) {
   const db = useSQLiteContext(),
     insets = useSafeAreaInsets(),
@@ -213,7 +215,13 @@ export function CoachSheet({
       style={[
         s.sheet,
         {
-          top: Math.min(insets.top + (full ? fullTop : halfTop), height - 250),
+          top: Math.min(
+            Math.max(
+              insets.top + (full ? fullTop : halfTop),
+              full ? height * 0.08 : 0,
+            ),
+            height - 250,
+          ),
           paddingBottom: insets.bottom,
         },
       ]}
@@ -249,7 +257,10 @@ export function CoachSheet({
         <RoundButton
           icon={full ? "down" : "expand"}
           label={full ? "小さくする" : "大きくする"}
-          onPress={() => setFull(!full)}
+          onPress={() => {
+            setFull(!full);
+            onFullChange(!full);
+          }}
         />
         <RoundButton icon="x" label="AIコーチを閉じる" onPress={onClose} />
       </View>
@@ -297,7 +308,7 @@ export function CoachSheet({
         {stage === "gen" && pendingQuestion === undefined && (
           <>
             <Text
-              style={[font(900, 12, 1.3), { marginTop: 14, marginBottom: 7 }]}
+              style={[font(900, 12, 1.3), { marginTop: 2, marginBottom: 7 }]}
             >
               解説を作っています…
             </Text>
@@ -306,11 +317,12 @@ export function CoachSheet({
                 key={i}
                 style={{
                   height: 11,
-                  marginVertical: 9,
+                  marginTop: i === 4 ? 20 : 9,
                   marginHorizontal: 2,
                   borderRadius: 6,
                   backgroundColor: colors.skeleton,
                   width: `${w}%`,
+                  maxWidth: "99%",
                 }}
               />
             ))}
@@ -344,6 +356,7 @@ export function CoachSheet({
                         }
                         jump={(p) => {
                           setFull(false);
+                          onFullChange(false);
                           jump(p);
                         }}
                         tryLine={(p, pv) => {
@@ -383,30 +396,32 @@ export function CoachSheet({
                   "いまの局面について教えて",
                   "詰みがあった局面を教えて",
                   "次に何を練習するといい？",
-                ].map((t) => (
-                  <Pressable
-                    key={t}
-                    accessibilityRole="button"
-                    onPress={() => {
-                      if (branch && t.startsWith("いま")) {
-                        toast(
-                          "分岐の局面は解説できません。本譜に戻ってから質問してください",
+                ]
+                  .filter((t) => !answers.some((a) => a.question === t))
+                  .map((t) => (
+                    <Pressable
+                      key={t}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        if (branch && t.startsWith("いま")) {
+                          toast(
+                            "分岐の局面は解説できません。本譜に戻ってから質問してください",
+                          );
+                          return;
+                        }
+                        void send(
+                          t.startsWith("いま")
+                            ? ply
+                              ? `${ply}手目の局面について教えて`
+                              : "開始局面について教えて"
+                            : t,
                         );
-                        return;
-                      }
-                      void send(
-                        t.startsWith("いま")
-                          ? ply
-                            ? `${ply}手目の局面について教えて`
-                            : "開始局面について教えて"
-                          : t,
-                      );
-                    }}
-                    style={s.suggestion}
-                  >
-                    <Text style={font(700, 11.5, 1.3)}>{t}</Text>
-                  </Pressable>
-                ))}
+                      }}
+                      style={s.suggestion}
+                    >
+                      <Text style={font(700, 11.5, 1.3)}>{t}</Text>
+                    </Pressable>
+                  ))}
               </View>
             )}
           </>
@@ -573,13 +588,15 @@ function SectionView({
       <View
         style={{
           flexDirection: "row",
-          flexWrap: "wrap",
           alignItems: "center",
           gap: 6,
           marginBottom: 5,
         }}
       >
-        <Text accessibilityRole="header" style={font(900, 12.5, 1.3)}>
+        <Text
+          accessibilityRole="header"
+          style={[font(900, 12.5, 1.3), { flexShrink: 1 }]}
+        >
           {section.title}
         </Text>
         <Text
@@ -799,6 +816,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.white,
   },
   error: {
+    alignItems: "flex-start",
     padding: 10,
     gap: 4,
     backgroundColor: colors.warnCard,

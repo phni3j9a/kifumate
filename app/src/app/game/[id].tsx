@@ -124,6 +124,7 @@ export default function GameScreen() {
 }
 function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const [coachOpen, setCoachOpen] = useState(openCoach);
+  const [coachFull, setCoachFull] = useState(false);
   const [coachTop, setCoachTop] = useState(450);
   const [coachFullTop, setCoachFullTop] = useState(46);
   const coach = useCoach();
@@ -686,7 +687,12 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           />
         </View>
         <View style={s.sp} />
-        <View style={[s.nmr, { height: 21 + u * 0.2 }]}>
+        <View
+          style={[
+            s.nmr,
+            { height: 21 + u * 0.2, opacity: coachOpen && coachFull ? 0 : 1 },
+          ]}
+        >
           <PlayerName
             name={nameOf(top)}
             color={top}
@@ -813,6 +819,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         <AnalysisPanel
           onCoach={() => {
             clear();
+            setCoachFull(false);
             setCoachOpen(true);
           }}
           analysis={analysis}
@@ -930,6 +937,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
       {coachOpen && (
         <CoachSheet
           game={game}
+          onFullChange={setCoachFull}
           halfTop={coachTop}
           fullTop={coachFullTop}
           onClose={() => setCoachOpen(false)}
