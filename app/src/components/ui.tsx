@@ -23,6 +23,14 @@ import { colors, font, line, mono, radius, shadow } from "./theme";
 
 // マスコット（mock/assets/mascot）。RN は height だけでは幅が決まらないので縦横比を持つ。
 export const mascots = {
+  "sys-offline": {
+    source: require("../assets/sys-offline.webp"),
+    ratio: 193 / 300,
+  },
+  "sys-limit": {
+    source: require("../assets/sys-limit.webp"),
+    ratio: 302 / 320,
+  },
   "sys-empty": {
     source: require("../assets/sys-empty.webp"),
     ratio: 440 / 423,

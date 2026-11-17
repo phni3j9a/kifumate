@@ -26,7 +26,9 @@ import {
 } from "../core/kif";
 import { setSelfSide, setWinner } from "../storage/repository";
 
+import { useAnalysis } from "../analysis/provider";
 export default function Info() {
+  const { records, offline } = useAnalysis();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db, reload } = useGame(id);
   const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
@@ -76,7 +78,20 @@ export default function Info() {
           {[
             ["日付", dateLong(game.played_at)],
             ["結果", resultText],
-            ["解析", "まだ解析していません"],
+            [
+              "解析",
+              records[id]?.attempt
+                ? offline
+                  ? "中断中"
+                  : records[id]?.attempt?.job?.status === "queued"
+                    ? "解析待ち"
+                    : "解析中"
+                : records[id]?.saved?.mode === "precise"
+                  ? "精密解析ずみ"
+                  : records[id]?.saved
+                    ? "解析ずみ"
+                    : "まだ解析していません",
+            ],
           ].map(([label, value]) => (
             <View key={label} style={{ flexDirection: "row", gap: 12 }}>
               <Text style={font(900, 10.5, 1.8, colors.ink2)}>{label}</Text>

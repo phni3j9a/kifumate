@@ -102,6 +102,8 @@ export function Board({
   onPromote,
   label,
   over = false,
+  arrow,
+  mark,
 }: {
   position: ImmutablePosition;
   bottom: Color;
@@ -115,6 +117,8 @@ export function Board({
   label: string;
   /** 終局した局面では王手の印を出さない */
   over?: boolean;
+  arrow?: Move | null;
+  mark?: string;
 }) {
   const flip = bottom === Color.WHITE;
   const top = flip ? Color.BLACK : Color.WHITE;
@@ -128,6 +132,98 @@ export function Board({
       ? position.board.findKing(position.color)
       : undefined;
 
+  function arrowSVG() {
+    if (!arrow || selected || promotion.length) return null;
+    const [tx, ty] = xy(arrow.to),
+      ex = tx + 50,
+      ey = ty + 54;
+    if (!(arrow.from instanceof Square)) {
+      const mine = position.color === bottom;
+      return (
+        <G>
+          <G transform={`translate(${tx} ${ty})`} opacity={0.5}>
+            <G transform={mine ? undefined : "rotate(180 50 54)"}>
+              <Path
+                d={PIECE}
+                fill={mine ? colors.white : colors.oppPiece}
+                stroke={colors.ink}
+                strokeWidth={3.4}
+              />
+              <SvgText
+                x={50}
+                y={centered(64, 56)}
+                textAnchor="middle"
+                fontFamily={fonts[900]}
+                fontSize={56}
+                fill={colors.ink}
+              >
+                {faces[arrow.pieceType][0]}
+              </SvgText>
+            </G>
+          </G>
+          <Circle
+            cx={ex}
+            cy={ey}
+            r={47}
+            fill="none"
+            stroke={colors.mint}
+            strokeWidth={6}
+          />
+        </G>
+      );
+    }
+    const [fx, fy] = xy(arrow.from),
+      sx = fx + 50,
+      sy = fy + 54,
+      dx = ex - sx,
+      dy = ey - sy,
+      length = Math.hypot(dx, dy) || 1,
+      ux = dx / length,
+      uy = dy / length,
+      px = -uy,
+      py = ux;
+    const tipOff = position.board.at(arrow.to) ? 34 : 12,
+      head = Math.min(46, Math.max(26, length - tipOff - 44)),
+      start = Math.max(0, Math.min(44, length - tipOff - head - 2)),
+      hw = (30 * head) / 46;
+    const ax = sx + ux * start,
+      ay = sy + uy * start,
+      tipX = ex - ux * tipOff,
+      tipY = ey - uy * tipOff,
+      bx = tipX - ux * head,
+      by = tipY - uy * head;
+    const d = `M${tipX} ${tipY}L${bx + px * hw} ${by + py * hw}L${bx - px * hw} ${by - py * hw}Z`;
+    return (
+      <G>
+        <Line
+          x1={ax}
+          y1={ay}
+          x2={bx}
+          y2={by}
+          stroke={colors.ink}
+          strokeWidth={25}
+          strokeLinecap="round"
+        />
+        <Path
+          d={d}
+          fill={colors.ink}
+          stroke={colors.ink}
+          strokeWidth={10}
+          strokeLinejoin="round"
+        />
+        <Line
+          x1={ax}
+          y1={ay}
+          x2={bx}
+          y2={by}
+          stroke={colors.mint}
+          strokeWidth={15}
+          strokeLinecap="round"
+        />
+        <Path d={d} fill={colors.mint} />
+      </G>
+    );
+  }
   function piece(sq: Square, lift: boolean) {
     const p = position.board.at(sq)!;
     const [x, y] = xy(sq);
@@ -416,6 +512,34 @@ export function Board({
               />
             );
           })}
+          {arrowSVG()}
+          {mark && last && (
+            <G
+              transform={`translate(${xy(last.to)[0] + 85} ${xy(last.to)[1] + 17})`}
+            >
+              <Circle
+                r={21}
+                fill={
+                  mark === "悪手"
+                    ? colors.coral
+                    : mark === "好手"
+                      ? colors.mint
+                      : colors.orange
+                }
+                stroke={colors.ink}
+                strokeWidth={4}
+              />
+              <SvgText
+                textAnchor="middle"
+                y={9}
+                fontFamily={fonts[900]}
+                fontSize={28}
+                fill={colors.ink}
+              >
+                {mark === "悪手" ? "×" : mark === "好手" ? "◎" : "△"}
+              </SvgText>
+            </G>
+          )}
           {king &&
             (() => {
               const [x, y] = xy(king);

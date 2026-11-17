@@ -4,12 +4,14 @@
 // 出力は .local/compare/<幅x高さ>/NN-名前.png（左：モック、中：アプリ Web、右：あれば Android 実機）。
 // 実機の画面は `adb exec-out screencap -p > .local/compare/android/名前.png` で置くと、3列目に並ぶ。
 // モックにしかない入口（解析・有料プラン・AIコーチなど）は、そのまま差として写る。
+import { fakeAnalysis } from "../tests/helpers/fake-analysis";
+import type { AnalysisResult } from "../src/analysis/types";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium, type Page } from "@playwright/test";
 
-const APP = "http://localhost:8081";
+const APP = process.env.APP_URL || "http://localhost:8081";
 const MOCK = "file://" + path.resolve("../mock/dist/app-pop.standalone.html");
 const OUT = ".local/compare";
 const args = process.argv.slice(2);
@@ -24,10 +26,14 @@ async function ensureServer() {
       () => false,
     );
   if (await up()) return null;
-  const server = spawn("npx", ["expo", "start", "--web", "--port", "8081"], {
-    stdio: "ignore",
-    detached: true,
-  });
+  const server = spawn(
+    "npx",
+    ["expo", "start", "--web", "--port", new URL(APP).port],
+    {
+      stdio: "ignore",
+      detached: true,
+    },
+  );
   for (let i = 0; i < 120 && !(await up()); i++) await pause(1000);
   return server;
 }
@@ -46,7 +52,16 @@ async function run(width: number, height: number) {
     sheet = await browser.newPage(); // 並べる台紙
   const errors: string[] = [];
   a.on("pageerror", (e) => errors.push(e.message));
+  const fake = await fakeAnalysis(a);
+  fake.paid = false;
+  fake.remaining = 10;
   await m.goto(MOCK);
+  await m.setContent(
+    readFileSync(new URL(MOCK), "utf8").replace(
+      "\n})();\n</script>",
+      "\nwindow.__compare = code => eval(code);\n})();\n</script>",
+    ),
+  );
   await a.goto(APP);
   await m.waitForTimeout(1300);
   // モックの説明欄を消して、画面を左上にぴったり置く（半端な位置だと線がにじみ、差に出る）
@@ -112,7 +127,7 @@ async function run(width: number, height: number) {
   const shot = async (name: string) => {
     const file = `${String(++n).padStart(2, "0")}-${name}.png`;
     if (only.length && !only.some((o) => name.includes(o))) return;
-    await pause(350);
+    await pause(name.startsWith("analysis-") ? 2800 : 350);
     await m.screenshot({ path: `${dir}/mock/${file}` });
     await a.screenshot({ path: `${dir}/app/${file}` });
     const android = `${OUT}/android/${name}.png`;
@@ -236,8 +251,9 @@ async function run(width: number, height: number) {
   await bottom();
   await shot("import-ok-bottom");
   await act("impsave", "0");
-  await tap("保存する");
+  await tap("保存だけする");
   await a.getByText("開始局面").waitFor();
+  const gameUrl = a.url();
   await shot("game-saved-toast");
   await pause(2800);
   await shot("game-not-analysed");
@@ -332,9 +348,175 @@ async function run(width: number, height: number) {
   await a.getByText("同じ棋譜がすでに保存されています").waitFor();
   await shot("import-duplicate");
 
+  // 解析の全状態。モックの局面・値をAPI境界から渡し、製品コードに架空の結果を入れない。
+  await act("back");
+  await m.evaluate(() => {
+    const w = window as any;
+    w.__compare("A.open(DB.games[0].id)");
+  });
+  await a.goto(gameUrl);
+  const sample = JSON.parse(
+    readFileSync("../mock/data/sample-game-2.json", "utf8"),
+  );
+  const score = (p: any) =>
+    p.mate != null
+      ? { kind: "mate", value: p.mate, winner: p.mate < 0 ? "gote" : "sente" }
+      : { kind: "cp", value: p.cp };
+  fake.results = sample.positions.map((p: any) => ({
+    ply: p.ply,
+    score: score(p),
+    candidates: p.cands.map((c: any, i: number) => ({
+      rank: i + 1,
+      depth: 10,
+      score: score(c),
+      move: c.usi,
+      pv: c.pvUsi,
+    })),
+    mate: p.tsume
+      ? {
+          plies: p.tsume.len,
+          pv: p.tsume.line.map((m: any) => m.usi),
+          branches: [],
+        }
+      : null,
+  })) as AnalysisResult[];
+  await act("analyze");
+  await tap("解析する");
+  await a.getByRole("button", { name: "中止", exact: true }).waitFor();
+  await m.evaluate(() => {
+    (window as any).__compare(
+      "clearInterval(RUN.timer); RUN.done=30; renderGame();",
+    );
+  });
+  fake.next = 31;
+  await pause(2300);
+  await shot("analysis-running");
+  await m.evaluate(() => {
+    (window as any).__compare("RUN.paused=true; renderGame();");
+  });
+  fake.online = false;
+  await pause(2300);
+  await shot("analysis-paused");
+  fake.online = true;
+  await m.evaluate(() => {
+    (window as any).__compare("RUN.paused=false; renderGame();");
+  });
+  await act("stopan");
+  await tap("中止");
+  await shot("analysis-stop-confirm");
+  await act("dlgok");
+  await tap("中止する");
+  await pause(500);
+  await m.evaluate(() => {
+    (window as any).__compare(
+      "QUEUE.push({id:CUR.id,kind:'std'}); renderGame();",
+    );
+  });
+  fake.status = "queued";
+  fake.next = 0;
+  await tap("解析する");
+  await pause(400);
+  await shot("analysis-queued");
+  await act("unqueue");
+  await tap("やめる");
+  await pause(400);
+  await m.evaluate(() => {
+    (window as any).__compare("CUR.err=true; renderGame();");
+  });
+  fake.status = "failed";
+  fake.next = 0;
+  await tap("解析する");
+  await pause(500);
+  await shot("analysis-failed");
+  await m.evaluate(() => {
+    (window as any).__compare("CUR.err=false; DB.usage.free=10; renderGame();");
+  });
+  fake.remaining = 0;
+  fake.createStatus = 429;
+  await tap("もう一度");
+  await pause(500);
+  await shot("analysis-limit");
+  await m.evaluate(() => {
+    (window as any).__compare(
+      "DB.usage.free=0; DB.online=false; renderGame();",
+    );
+  });
+  fake.online = true;
+  fake.remaining = 10;
+  await a.goto(APP + "/settings");
+  await pause(500);
+  await a.goto(gameUrl);
+  // APIの上限エラー表示は、再依頼してから通信断にすることで通常の未解析表示へ戻す。
+  fake.createStatus = 202;
+  fake.status = "running";
+  await tap("もう一度");
+  await pause(400);
+  await tap("中止");
+  await tap("中止する");
+  await pause(300);
+  fake.online = false;
+  await a.goto(APP + "/settings");
+  await pause(600);
+  await a.goto(gameUrl);
+  await a.bringToFront();
+  await a
+    .getByText("通信できません。つながると解析できます", { exact: true })
+    .waitFor({ timeout: 15000 });
+  await shot("analysis-offline");
+  fake.online = true;
+  fake.remaining = 99;
+  fake.precise = 19;
+  fake.paid = true;
+  fake.createStatus = 202;
+  fake.status = "running";
+  await m.evaluate(() => {
+    (window as any).__compare(
+      "DB.online=true; DB.plan='paid'; syncPlan(); renderGame();",
+    );
+  });
+  // quotaの更新を明示的に待つ（画面の再読み込みでも永続outboxから復帰する）。
+  await a.goto(APP + "/settings");
+  await pause(700);
+  await a.goto(gameUrl);
+  await tap("解析する");
+  fake.complete = true;
+  await pause(5500);
+  await m.evaluate(() => {
+    (window as any).__compare("CUR.an='pre'; CUR.err=false; renderGame();");
+  });
+  await m.keyboard.press("Home");
+  await tap("最初へ");
+  await shot("analysis-completed");
+  await act("cand", "1");
+  await tap("2位");
+  await shot("analysis-candidate-2");
+  await act("cand", "2");
+  await tap("3位");
+  await shot("analysis-candidate-3");
+  // グラフは手数を直接指定せず、実際の手順操作で同じ詰み局面へ移動。
+  await m.evaluate(() => (window as any).__compare("setPly(92)"));
+  await tap("最初へ");
+  for (let i = 0; i < 92; i++) await button("1手進む").click();
+  await shot("analysis-proven-mate");
+  await act("back");
+  await tap("戻る");
+  await act("tab", "set");
+  await tab("設定");
+  await m.evaluate(() =>
+    (window as any).__compare("DB.usage.precise=1; DB.usage.total=1; show();"),
+  );
+  await shot("analysis-settings-paid");
+  await plan("free");
+  fake.paid = false;
+  fake.remaining = 9;
+  await a.reload();
+  await pause(700);
+  await m.evaluate(() => (window as any).__compare("DB.usage.free=1; show();"));
+  await shot("analysis-settings-free");
   await browser.close();
   console.log(`${width}x${height}: ${n}場面 → ${dir}`);
-  if (errors.length) console.log("アプリのページエラー:\n" + errors.join("\n"));
+  if (errors.length)
+    throw new Error("アプリのページエラー:\n" + errors.join("\n"));
 }
 
 const server = await ensureServer();

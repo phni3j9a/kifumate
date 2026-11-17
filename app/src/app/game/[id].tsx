@@ -27,7 +27,23 @@ import {
 } from "../../components/ui";
 import { useGame } from "../../components/use-game";
 import { dateParts, moveText } from "../../core/format";
-import { Branch, legalMoves, readStoredKif } from "../../core/kif";
+import { Branch, gameOutcome, legalMoves, readStoredKif } from "../../core/kif";
+import { AnalysisPanel } from "../../components/analysis-panel";
+import { useAnalysis } from "../../analysis/provider";
+import {
+  candidateRows,
+  readingText,
+  type CandidateRow,
+  analysisInput,
+  cp,
+  percent,
+  phaseRanges,
+  pointsFor,
+  scoreText,
+  startPly,
+  signed,
+} from "../../analysis/display";
+import type { Mode } from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
 
 /** まだ形勢が分からないときのバー（.bar.na）：白と砂色の斜めじま */
@@ -100,6 +116,9 @@ function PlayerName({
 
 export default function GameScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  return <GameView key={id} id={id} />;
+}
+function GameView({ id }: { id: string }) {
   const { game, error, db } = useGame(id);
   const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
   const [ply, setPly] = useState(0),
@@ -111,6 +130,52 @@ export default function GameScreen() {
     [sheet, setSheet] = useState<"moves" | "menu" | "export" | null>(null),
     [favorite, setFavorite] = useState<number | null>(null);
   const told = useRef(false);
+  const opened = useRef(false);
+  const [initialized, setInitialized] = useState(false);
+  const { records, quota, offline, controller, ready } = useAnalysis();
+  const analysis = records[id];
+  const [candidateState, setCandidateState] = useState({ key: "", index: 0 });
+  const candidateKey = `${ply}:${branch?.at}`;
+  const candidate =
+    candidateState.key === candidateKey ? candidateState.index : 0;
+  const setCandidate = (index: number) =>
+    setCandidateState({ key: candidateKey, index });
+  const results = useMemo(
+    () =>
+      analysis?.attempt
+        ? analysis.attempt.results
+        : analysis?.saved?.results || [],
+    [analysis],
+  );
+  const evaluated = useMemo(
+    () =>
+      record
+        ? pointsFor(
+            record,
+            results,
+            game?.self_side === "white" ? Color.WHITE : Color.BLACK,
+          )
+        : [],
+    [record, results, game?.self_side],
+  );
+  const phases = useMemo(() => (record ? phaseRanges(record) : []), [record]);
+  if (record && ready && !initialized) {
+    setInitialized(true);
+    if (analysis?.saved && !analysis.attempt) setPly(startPly(evaluated));
+  }
+  useEffect(() => {
+    if (!record || !ready || opened.current) return;
+    opened.current = true;
+    if (analysis?.saved && !analysis.attempt) {
+      const n = startPly(evaluated);
+      if (n)
+        toast(
+          game?.self_side
+            ? "あなたの最初の悪手から表示しています"
+            : "最初の悪手から表示しています",
+        );
+    }
+  }, [record, ready, analysis, evaluated, game?.self_side]);
   const { width: W, height: H } = useWindowDimensions();
   const base = branch?.base;
   // 戻る操作は、まず分岐を抜ける（モックの back()）。
@@ -242,6 +307,162 @@ export default function GameScreen() {
       redraw((v) => v + 1);
     }
   }
+  const point = evaluated[ply];
+  const shown = !branch ? results.find((r) => r.ply === ply) : undefined;
+  const rows = candidateRows(
+    position,
+    over ? undefined : shown,
+    mainMoves[ply]?.move instanceof Move
+      ? (mainMoves[ply]!.move as Move)
+      : undefined,
+    self,
+    own,
+  );
+  rows.forEach((r) => {
+    r.reading = readingText(position, r.pv);
+  });
+  let branchRow: CandidateRow | undefined;
+  if (branch) {
+    const atBase = results.find((r) => r.ply === branch.base);
+    const lines = [
+      ...(atBase?.mate ? [{ pv: atBase.mate.pv, score: atBase.score }] : []),
+      ...(atBase?.candidates || []),
+    ];
+    const matching = lines.find((l) =>
+      branch.moves.slice(0, branch.at).every((m, i) => l.pv[i] === m.usi),
+    );
+    if (matching) {
+      const pv = matching.pv.slice(branch.at),
+        move = pv[0] ? position.createMoveByUSI(pv[0]) : null;
+      branchRow = {
+        label: "おすすめ",
+        text: move ? moveText(formatMove(position, move)) : "読み筋はここまで",
+        pv,
+        reading: readingText(position, pv),
+        move,
+        score: matching.score,
+        game: false,
+      };
+    }
+  }
+  const shownScore = branch ? branchRow?.score : shown?.score;
+  const value = cp(shownScore);
+  const previousResult = results.find((r) => r.ply === ply - 1);
+  const textBefore = scoreText(previousResult?.score, self),
+    textAfter = scoreText(shownScore, self);
+  const deltaText =
+    previousResult?.score?.kind === "cp" && shownScore?.kind === "cp"
+      ? signed(
+          ((cp(shownScore) || 0) - (cp(previousResult.score) || 0)) *
+            (self === Color.BLACK ? 1 : -1),
+        )
+      : "";
+  let recommendation = "";
+  const best = previousResult?.candidates[0]?.move;
+  if (
+    !branch &&
+    !over &&
+    point?.mark &&
+    point.mark !== "好手" &&
+    best &&
+    last &&
+    best !== last.usi
+  ) {
+    const beforePosition = position.clone();
+    beforePosition.undoMove(last);
+    recommendation = previousResult?.mate
+      ? `${previousResult.mate.plies}手詰めあり`
+      : `${own && last.color === self ? "おすすめは" : "最善は"} ${readingText(beforePosition, [best])[0] || ""}`;
+  }
+  const winner = game.winner || gameOutcome(record);
+  const winnerColor =
+    winner === "black" ? Color.BLACK : winner === "white" ? Color.WHITE : null;
+  const resultLabel =
+    winnerColor !== null
+      ? `${own ? (winnerColor === self ? "あなた" : "相手") : winnerColor === Color.BLACK ? "先手" : "後手"}の勝ち`
+      : winner === "draw"
+        ? "引き分け"
+        : "結果は不明";
+  const evaluationLabel = over
+    ? `${total}手で${resultLabel}`
+    : ply > 0 && shown
+      ? textBefore === textAfter && textAfter.endsWith("以上")
+        ? textAfter
+        : `${textBefore} → ${textAfter}`
+      : textAfter;
+  const chance =
+    over && winnerColor !== null
+      ? winnerColor === self
+        ? 100
+        : 0
+      : value === null
+        ? null
+        : percent((self === Color.BLACK ? 1 : -1) * value);
+  const stateLabel = analysis?.attempt
+    ? offline
+      ? "中断中"
+      : analysis.attempt.job?.status === "queued"
+        ? "解析待ち"
+        : "解析中"
+    : analysis?.saved
+      ? "解析済み"
+      : "未解析";
+  const advantage = over
+    ? resultLabel
+    : value === null
+      ? stateLabel
+      : Math.abs(value) < 150
+        ? "ほぼ互角"
+        : `${value > 0 === (self === Color.BLACK) ? (own ? "あなた" : "先手") : own ? "相手" : "後手"}が${Math.abs(value) < 450 ? "やや有利" : Math.abs(value) < 1000 ? "有利" : Math.abs(value) < 2000 ? "優勢" : "勝勢"}`;
+  function start(mode: Mode) {
+    const run = () => {
+      if (offline) {
+        ask({
+          title: "通信できません",
+          image: "sys-offline",
+          text: "つながってから、もう一度お試しください。保存済みの棋譜と解析結果は見られます。",
+          ok: "もう一度試す",
+          onOk: () => {
+            void controller.sync().then(() => {
+              if (!controller.snapshot.offline) start(mode);
+              else toast("通信できません。つながってからお試しください");
+            });
+          },
+          no: "閉じる",
+        });
+        return;
+      }
+      if (
+        quota &&
+        (quota.totalRemaining === 0 ||
+          (mode === "precise" && quota.preciseRemaining === 0))
+      ) {
+        ask({
+          title:
+            mode === "precise" && quota.totalRemaining > 0
+              ? "今週の精密解析は使い切りました"
+              : "今週の解析は使い切りました",
+          image: "sys-limit",
+          text: `月曜の午前0時（日本時間）に、また使えます。次の更新：${new Date(quota.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}。${quota.totalRemaining > 0 ? "ふつうの解析は使えます。" : "保存済みの結果は見られます。"}`,
+          ok: quota.totalRemaining > 0 ? "ふつうで解析する" : "閉じる",
+          single: quota.totalRemaining === 0,
+          onOk: quota.totalRemaining > 0 ? () => start("std") : undefined,
+        });
+        return;
+      }
+      setBranch(null);
+      clear();
+      void controller
+        .start(id, analysisInput(record!, mode))
+        .catch((e) =>
+          toast(e instanceof Error ? e.message : "解析を依頼できませんでした"),
+        );
+    };
+    run();
+  }
+  function tryRow(row: CandidateRow) {
+    if (row.move) commit(row.move);
+  }
   const isFavorite = !!(favorite ?? game.favorite);
   async function fav() {
     setSheet(null);
@@ -262,6 +483,15 @@ export default function GameScreen() {
       danger: true,
       onOk: async () => {
         try {
+          if (controller.snapshot.records[id]?.attempt) {
+            await controller.cancel(id);
+            if (controller.snapshot.records[id]?.attempt) {
+              toast(
+                "通信できないため中止を確認できません。つながってから削除してください",
+              );
+              return;
+            }
+          }
           await deleteGame(db, id);
           router.dismissTo("/");
           toast("削除しました");
@@ -292,15 +522,35 @@ export default function GameScreen() {
             <View style={s.wl}>
               <Text style={font(700, 10.5)}>
                 {own ? "あなた" : sideOf(bottom)}
+                {chance !== null && !over ? ` ${chance}%` : ""}
               </Text>
               <View style={s.jg}>
                 <Text style={font(900, 10.5)}>
-                  {branch ? "分岐中" : "未解析"}
+                  {branch ? "分岐中" : advantage}
                 </Text>
               </View>
-              <Text style={font(700, 10.5)}>{own ? "相手" : sideOf(top)}</Text>
+              <Text style={font(700, 10.5)}>
+                {chance !== null && !over ? `${100 - chance}% ` : ""}
+                {own ? "相手" : sideOf(top)}
+              </Text>
             </View>
-            <StripedBar />
+            {chance === null ? (
+              <StripedBar />
+            ) : (
+              <View
+                accessibilityRole="image"
+                accessibilityLabel={`あなたの勝率 ${chance}%`}
+                style={[s.bar, { backgroundColor: colors.opp }]}
+              >
+                <View
+                  style={{
+                    width: `${Math.max(4, Math.min(96, chance))}%`,
+                    height: "100%",
+                    backgroundColor: colors.you,
+                  }}
+                />
+              </View>
+            )}
           </View>
           <RoundButton
             icon="more"
@@ -328,6 +578,14 @@ export default function GameScreen() {
           promotion={promotion}
           onPromote={commit}
           over={over}
+          arrow={
+            branch
+              ? branchRow?.move
+              : !over && analysis?.saved && !analysis.attempt
+                ? rows[candidate]?.move
+                : null
+          }
+          mark={!branch ? point?.mark : undefined}
           label={`${branch ? `分岐${at}手目` : plyLabel(ply)}の盤面`}
         />
         <View
@@ -417,49 +675,22 @@ export default function GameScreen() {
           />
         </View>
         <View style={s.sp} />
-        <View style={{ marginHorizontal: 12 }}>
-          <View style={[s.tbs, { minHeight: 29 + u * 0.25 }]}>
-            <View style={[s.tbx, { height: 27 + u * 0.25 }]}>
-              <Text style={font(900, 11)}>{branch ? "分岐" : "解析"}</Text>
-            </View>
-          </View>
-          <View
-            style={[
-              s.bc,
-              {
-                minHeight: 54 + u * 1.4,
-                paddingTop: 3 + u * 0.2,
-                paddingBottom: 5 + u * 0.2,
-              },
-            ]}
-          >
-            {/* モックは2行のグリッド：余った高さを2行に等しく分け、各行の中央に置く */}
-            <View
-              style={{
-                flex: 1,
-                alignSelf: "stretch",
-                justifyContent: "space-around",
-              }}
-            >
-              <Text numberOfLines={1} style={font(900, 15.5 + u * 0.15, 1.25)}>
-                {branch ? "自由に指して試せます" : "この対局を解析する"}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}
-              >
-                {branch
-                  ? "分岐は保存されません。本譜は変わりません"
-                  : "解析は準備中です"}
-              </Text>
-            </View>
-            {!branch && (
-              <Button kind="pri" size="sm" disabled onPress={() => {}}>
-                解析する
-              </Button>
-            )}
-          </View>
-        </View>
+        <AnalysisPanel
+          analysis={analysis}
+          branch={!!branch}
+          branchRow={branchRow}
+          rows={rows}
+          selected={candidate}
+          onSelect={(i) => {
+            setCandidate(i);
+            clear();
+          }}
+          onTry={tryRow}
+          self={self}
+          u={u}
+          start={start}
+          ending={over ? `${total}手で${resultLabel}` : undefined}
+        />
         <View style={s.sp} />
         <View
           style={[
@@ -474,20 +705,59 @@ export default function GameScreen() {
                   <Text style={font(900, 10.5)}>分岐 {at}手目</Text>
                 </View>
                 <Text style={font(700, 10.5, 1, colors.ink2)}>
-                  評価値は出ません
+                  {scoreText(shownScore, self)}
                 </Text>
               </>
             ) : (
               <>
-                <Text style={font(700, 10.5, 1, colors.ink2)}>評価値</Text>
-                <Text style={font(900, 12.5)}>—</Text>
                 <Text style={font(700, 10.5, 1, colors.ink2)}>
-                  まだ解析していません
+                  {over ? "終局" : shown && !ply ? "開始局面" : "評価値"}
                 </Text>
+                <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
+                <Text style={font(700, 10.5, 1, colors.ink2)}>
+                  {over
+                    ? ""
+                    : value === null
+                      ? analysis?.attempt
+                        ? analysis.attempt.job?.status === "queued"
+                          ? "順番が来たら解析します"
+                          : offline
+                            ? "通信が戻ると、続きから再開します"
+                            : "アプリを閉じても解析は続きます"
+                        : "まだ解析していません"
+                      : point?.mark === "好手"
+                        ? "好手！"
+                        : deltaText}
+                </Text>
+                {recommendation && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setPly(ply - 1);
+                      clear();
+                    }}
+                  >
+                    <Text style={font(900, 10.5, 1, colors.ink2)}>
+                      {recommendation} ›
+                    </Text>
+                  </Pressable>
+                )}
               </>
             )}
           </View>
-          <EvalGraph ply={ply} total={total} />
+          <EvalGraph
+            ply={ply}
+            total={total}
+            points={evaluated}
+            sign={self === Color.BLACK ? 1 : -1}
+            phases={phases}
+            labels={own ? ["あなた", "相手"] : ["先手", "後手"]}
+            onPly={(p) => {
+              setBranch(null);
+              setPly(p);
+              clear();
+            }}
+          />
         </View>
         <View style={s.spb} />
       </ScrollView>
@@ -547,6 +817,12 @@ export default function GameScreen() {
               <Text style={s.mn}>{i || ""}</Text>
               <Text style={font(700, 13.5, 1.2)}>
                 {n ? mainText(n) : "開始局面"}
+              </Text>
+              <Text style={[font(900, 10, 1.2), { marginLeft: "auto" }]}>
+                {evaluated[i]?.mark || (evaluated[i]?.mate ? "詰みあり" : "")}
+              </Text>
+              <Text style={font(700, 11, 1.2, colors.ink2)}>
+                {scoreText(results.find((r) => r.ply === i)?.score, self)}
               </Text>
             </Pressable>
           ))
@@ -696,37 +972,6 @@ const s = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: colors.white,
     boxShadow: shadow.small,
-  },
-  tbs: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 4,
-    paddingLeft: 16,
-    paddingRight: 1,
-    marginBottom: -2,
-    zIndex: 1,
-  },
-  tbx: {
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    borderWidth: line.ol,
-    borderColor: colors.ink,
-    borderBottomColor: colors.white,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    backgroundColor: colors.white,
-  },
-  bc: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingLeft: 12,
-    paddingRight: 9,
-    backgroundColor: colors.white,
-    borderWidth: line.ol,
-    borderColor: colors.ink,
-    borderRadius: radius.card,
-    boxShadow: shadow.card,
   },
   gc: {
     flexGrow: 1000,

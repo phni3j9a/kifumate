@@ -66,10 +66,7 @@ test("正規化後に読み直せない棋譜はINSERT前に拒否する", async
 test("削除は指定の棋譜だけを消し、games.id を参照する行も CASCADE で消える", async () => {
   const { sql, db } = await database();
   try {
-    // 将来の解析結果などのテーブルを模して、外部キーが効いていることを確かめる
-    sql.exec(
-      "CREATE TABLE analyses (game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE)",
-    );
+    // 解析結果の実テーブルで外部キーが効いていることを確かめる
     const save = (moves: string) =>
       repository.importGame(
         db,
@@ -82,7 +79,7 @@ test("削除は指定の棋譜だけを消し、games.id を参照する行も C
     const a = await save("1 ７六歩(77)\n"),
       b = await save("1 ２六歩(27)\n");
     for (const id of [a.id, b.id])
-      sql.prepare("INSERT INTO analyses VALUES (?)").run(id);
+      sql.prepare("INSERT INTO analyses VALUES (?, ?)").run(id, "{}");
     await repository.deleteGame(db, a.id);
     assert.deepEqual(
       (await repository.listGames(db)).map((g) => g.id),

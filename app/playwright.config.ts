@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+const url = process.env.APP_URL || "http://localhost:8081";
 export default defineConfig({
   testDir: "./tests/web",
   timeout: 90000,
@@ -10,15 +11,15 @@ export default defineConfig({
   })),
   outputDir: ".local/playwright",
   use: {
-    baseURL: "http://localhost:8081",
+    baseURL: url,
     viewport: { width: 393, height: 852 },
     screenshot: "only-on-failure",
     video: "on",
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npx expo start --web --port 8081",
-    url: "http://localhost:8081",
+    command: `EXPO_PUBLIC_ANALYSIS_URL=http://127.0.0.1:18090 npx expo start --web --port ${new URL(url).port}`,
+    url,
     reuseExistingServer: true,
     timeout: 120000,
   },

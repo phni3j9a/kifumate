@@ -60,6 +60,7 @@ async function screen() {
         View: "View",
       },
       "expo-router": { useLocalSearchParams: () => ({ id }) },
+      "../analysis/provider": {useAnalysis: () => ({records:{},offline:false})},
       "../components/overlay": {
         Sheet: "Sheet",
         toast: (t: string) => assert.fail(t),

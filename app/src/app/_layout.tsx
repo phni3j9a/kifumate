@@ -44,18 +44,18 @@ export default function Layout() {
       >
         <SQLiteProvider databaseName="kifumate.db" onInit={migrate} useSuspense>
           <AnalysisProvider>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.bg },
-            }}
-          >
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen
-              name="import"
-              options={{ animation: "slide_from_bottom" }}
-            />
-          </Stack>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.bg },
+              }}
+            >
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen
+                name="import"
+                options={{ animation: "slide_from_bottom" }}
+              />
+            </Stack>
           </AnalysisProvider>
         </SQLiteProvider>
       </Suspense>
