@@ -398,6 +398,11 @@ async function run(width: number, height: number) {
   await shot("realtime-low");
   fake.rt.status = "limit";
   fake.rt.remainingMs = 0;
+  await rtMock("DB.usage.rt=DB.usage.rtMax; renderPly()");
+  await button("分岐中の解析 残り0分").waitFor();
+  await button("更新日").waitFor();
+  // モックは結果優先で上限の説明を隠すため、アプリ側だけ同じ文言の案内を別に残す。
+  await shot("realtime-limit-result");
   fake.rt.result = null;
   await tap("1手戻る");
   await tap("1手進む");

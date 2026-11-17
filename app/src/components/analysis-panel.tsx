@@ -105,7 +105,22 @@ export function AnalysisPanel({
   const realtimeBusy =
     branch &&
     (realtime?.status === "preparing" || realtime?.status === "analyzing");
-  let showReset: (() => void) | undefined;
+  const monthlyLimit =
+    branch &&
+    realtime?.paid !== false &&
+    realtime?.enabled &&
+    realtime.status === "limit";
+  const limitTitle = "今月の分岐中の解析は残り0分";
+  const limitSub = "月が変わると、また300分使えます";
+  const showReset = monthlyLimit
+    ? () =>
+        ask({
+          title: limitTitle,
+          text: `${limitSub}。次の更新：${realtime.quota ? new Date(realtime.quota.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "月初の午前0時（日本時間）"}`,
+          ok: "閉じる",
+          single: true,
+        })
+    : undefined;
   const kind = quota?.paid ? mode : "std";
   const row = branch ? branchRow : rows[selected] || rows[0];
   const tab = (
@@ -203,15 +218,8 @@ export function AnalysisPanel({
           </Button>
         );
       } else if (realtime.status === "limit") {
-        title = "今月の分岐中の解析は残り0分";
-        sub = "月が変わると、また300分使えます";
-        showReset = () =>
-          ask({
-            title,
-            text: `月が変わると、また300分使えます。次の更新：${realtime.quota ? new Date(realtime.quota.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "月初の午前0時（日本時間）"}`,
-            ok: "閉じる",
-            single: true,
-          });
+        title = limitTitle;
+        sub = limitSub;
       } else if (realtime.status === "failed") {
         title =
           realtime.error === "realtime_busy"
@@ -529,6 +537,27 @@ export function AnalysisPanel({
           action
         )}
       </View>
+      {monthlyLimit && row && (
+        <View
+          style={[
+            s.card,
+            { marginTop: 8, minHeight: 54 + u * 1.4, paddingVertical: 6 },
+          ]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="更新日"
+            accessibilityLiveRegion="polite"
+            onPress={showReset}
+            style={{ flex: 1 }}
+          >
+            <Text style={font(900, 15.5 + u * 0.15, 1.25)}>{limitTitle}</Text>
+            <Text style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}>
+              {limitSub}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

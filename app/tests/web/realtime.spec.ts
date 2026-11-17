@@ -115,3 +115,30 @@ test("無料の鍵案内・通信なし再試行・残りわずか・月上限�
   await expect(page.getByText(/次の更新：2026/)).toBeVisible();
   expect(fake.errors).toEqual([]);
 });
+
+test("結果を保持したまま月上限になっても、再開時期と更新日を別に案内する", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  fake.rt.idleMs = 10;
+  await open(page);
+  await move(page, 2, 7, 6);
+  const candidate = button(page, "この手を盤で試す");
+  await expect(candidate).toBeVisible();
+  const requests = fake.rt.requests.length;
+  fake.rt.status = "limit";
+  fake.rt.remainingMs = 0;
+  fake.rt.low = true;
+  await expect(button(page, "分岐中の解析 残り0分")).toBeVisible();
+  await expect(candidate).toBeVisible();
+  await expect(
+    page.getByText("今月の分岐中の解析は残り0分", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("月が変わると、また300分使えます", { exact: true }),
+  ).toBeVisible();
+  await button(page, "更新日").click();
+  await expect(page.getByText(/次の更新：2026\/12\/1 0:00:00/)).toBeVisible();
+  expect(fake.rt.requests.length).toBe(requests);
+  expect(fake.errors).toEqual([]);
+});

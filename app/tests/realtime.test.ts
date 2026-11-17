@@ -399,3 +399,23 @@ test("オンへ戻すだけでは開始せず、停止503のIDは次の操作で
   assert.equal(calls.posts.length, 2);
   await c.stop();
 });
+
+for (const scene of ["画面離脱", "バックグラウンド"] as const) {
+  test(`初回GETを待つ間の${scene}でも、遅れて見つかったセッションを停止する`, async () => {
+    const { controller: c, api, calls } = setup();
+    const pending = deferred<RealtimeReply>();
+    api.realtime = async () => pending.promise;
+    c.setVisible(true);
+    await flush();
+    if (scene === "画面離脱") c.setVisible(false);
+    else c.setForeground(false);
+    await flush();
+    assert.deepEqual(calls.stops, []);
+    pending.resolve(reply({ sessionId: "orphan-session" }));
+    await flush();
+    assert.deepEqual(calls.stops, ["orphan-session"]);
+    assert.equal(c.snapshot.result, null);
+    assert.equal(calls.posts.length, 0);
+    await c.stop();
+  });
+}

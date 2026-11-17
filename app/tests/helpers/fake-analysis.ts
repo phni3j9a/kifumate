@@ -126,7 +126,7 @@ export async function fakeAnalysis(page: Page) {
           sequence: rt.sequence,
           status: rt.sessionId ? rt.status : "off",
           result:
-            rt.sessionId && ["ready", "paused"].includes(rt.status)
+            rt.sessionId && ["ready", "paused", "limit"].includes(rt.status)
               ? rt.result === undefined
                 ? generated
                 : rt.result

@@ -134,6 +134,14 @@ export class RealtimeController {
       for (const id of this.pendingStop) await this.remove(id);
       if (epoch !== this.epoch || !this.visible || !this.foreground) return;
       const reply = await this.api.realtime();
+      // 離脱後に届いたGETでも、残っているセッションは回収して止める。
+      if (
+        reply.sessionId &&
+        reply.sessionId !== this.session &&
+        reply.status !== "off" &&
+        reply.status !== "failed"
+      )
+        await this.remove(reply.sessionId);
       if (epoch !== this.epoch || !this.visible || !this.foreground) return;
       this.emit({
         paid: reply.paid ?? false,
@@ -142,14 +150,6 @@ export class RealtimeController {
         result: null,
         status: this.snapshot.enabled ? "idle" : "off",
       });
-      // アプリ終了・応答喪失で残ったセッションを、別の棋譜の結果として引き継がない。
-      if (
-        reply.sessionId &&
-        reply.sessionId !== this.session &&
-        reply.status !== "off" &&
-        reply.status !== "failed"
-      )
-        await this.remove(reply.sessionId);
       if (reply.status === "off" || reply.status === "failed")
         this.session = null;
       this.sequence = Math.max(this.sequence, reply.sequence);
