@@ -19,13 +19,26 @@ class ComparisonTest(unittest.TestCase):
             self.assertEqual(request["reasoning_effort"], "none")
             self.assertTrue(request["messages"][0]["content"])
             data = json.loads(request["messages"][1]["content"])
-            self.assertEqual(set(data), {"game", "analysis", "perspective", "profile", "style", "history", "question"})
-            self.assertEqual(data["analysis"], references(payload["analysis"]["results"]))
-            self.assertEqual(data["analysis"][0]["id"], "0:position")
+            self.assertEqual(set(data), {"facts", "perspective", "profile", "style", "history", "question"})
+            self.assertNotIn("score", json.dumps(data["facts"]))
+            self.assertNotIn("startpos", json.dumps(data["facts"]))
+            self.assertEqual(data["facts"]["参照"][0]["id"], "0:position")
         self.assertEqual(body(payload, "openai", "旧プロンプト")["messages"][0]["content"], "旧プロンプト")
 
+    def test_user_numbers_are_preserved_separately_from_analysis_facts(self):
+        numbers = '評価は＋６００、−300、+ 500、+600、-300です'
+        payload = {"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": {"kind": "cp", "value": -600}, "candidates": [], "mate": None}]},
+                   "perspective": "sente", "profile": {"practice": [numbers], "goal": numbers}, "style": {},
+                   "history": [{"role": "user", "content": numbers}], "question": '7g7f の ' + numbers}
+        sent = json.loads(body(payload, 'deepseek')["messages"][1]["content"])
+        self.assertEqual(sent["question"], '（指し手は参照で確認） の ' + numbers)
+        self.assertEqual(sent["profile"], payload["profile"])
+        self.assertEqual(sent["history"], payload["history"])
+        self.assertNotIn('-600', json.dumps(sent["facts"]))
+        self.assertNotIn('score', json.dumps(sent["facts"]))
+
     def test_max_reasoning_and_output_reservation(self):
-        payload = {"analysis": {"initial": "startpos", "moves": [], "results": []},
+        payload = {"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                    "perspective": "observer", "profile": {}, "style": {}, "history": []}
         prices = (0.1, 0.01, 0.5, 0.125)
         for provider, parameter in [("openai", "max_completion_tokens"), ("deepseek", "max_tokens")]:
@@ -42,7 +55,7 @@ class ComparisonTest(unittest.TestCase):
                                   "completion_tokens_details": {"reasoning_tokens": 900}}, prices), 0.0005)
 
     def test_responses_api_preserves_input_and_costs_reasoning(self):
-        payload = {"analysis": {"initial": "startpos", "moves": [], "results": []},
+        payload = {"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                    "perspective": "observer", "profile": {}, "style": {}, "history": []}
         request = body(payload, "openai", reasoning_effort="max", max_tokens=65536, api="responses")
         self.assertEqual(request["input"], body(payload, "openai")["messages"])
@@ -62,7 +75,7 @@ class ComparisonTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             request, output, ledger = root / "request.json", root / "result.json", root / "budget.jsonl"
-            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": []},
+            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                                            "perspective": "observer", "profile": {}, "style": {}, "history": []}))
             response = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
                         "usage": {"input_tokens": 100, "input_tokens_details": {"cache_write_tokens": 80},
@@ -126,7 +139,7 @@ class ComparisonTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             request = root / "request.json"
-            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": []},
+            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                                            "perspective": "observer", "profile": {}, "style": {}, "history": []}))
             ledger = root / "budget.jsonl"
             output = root / "result.json"
@@ -153,7 +166,7 @@ class ComparisonTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             request = root / "request.json"
-            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": []},
+            request.write_text(json.dumps({"analysis": {"initial": "startpos", "moves": [], "results": [{"ply": 0, "score": None, "candidates": [], "mate": None}]},
                                            "perspective": "observer", "profile": {}, "style": {}, "history": []}))
             output, ledger = root / "result.json", root / "budget.jsonl"
             usage = {"prompt_tokens": 100, "completion_tokens": 20, "completion_tokens_details": {"reasoning_tokens": 15}, "prompt_tokens_details": {"cache_write_tokens": 80}}

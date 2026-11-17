@@ -22,7 +22,7 @@ COPY --from=build /engine /app/engine-compatible
 COPY --from=build /engine-avx2 /app/engine-avx2
 COPY eval/nn.bin /app/eval/nn.bin
 RUN echo 'a78b7f889843037d344f482623b3febd124ead5c1f34f134d9f1c2c78cd0f829  /app/eval/nn.bin' | sha256sum -c -
-COPY bridge.py benchmark.py LICENSE /app/
+COPY bridge.py coach_facts.py benchmark.py LICENSE /app/
 RUN useradd --uid 10001 --no-create-home worker && chown -R worker:worker /app
 USER worker
 EXPOSE 8080

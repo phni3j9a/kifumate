@@ -230,3 +230,23 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
         assert send(2, ['7g7f'])[0] == 409
     finally:
         server.shutdown(); server.server_close(); serving.join(); first.join(timeout=1)
+
+
+def test_coach_facts_http_does_not_start_engine(monkeypatch):
+    def forbidden_start():
+        raise AssertionError('表記の生成にエンジン起動は不要')
+    monkeypatch.setattr(bridge, 'Engine', forbidden_start)
+    monkeypatch.setattr(bridge, 'engine', None)
+    server = bridge.ThreadingHTTPServer(('127.0.0.1', 0), bridge.Handler)
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    try:
+        data = {'initial': 'startpos', 'moves': ['7g7f'], 'perspective': 'gote', 'results': [
+            {'ply': i, 'score': None, 'candidates': [], 'mate': None} for i in range(2)]}
+        with urlopen(Request(f'http://127.0.0.1:{server.server_port}/coach-facts', json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
+            facts = json.load(response)
+        assert facts['実戦手'][0]['指した側'] == '相手'
+        assert facts['実戦手'][0]['表記'] == '▲7六歩(77)'
+        assert bridge.engine is None
+    finally:
+        server.shutdown(); server.server_close(); serving.join()

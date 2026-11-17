@@ -7,8 +7,10 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import statistics
+import sys
 import time
 import uuid
 from urllib.error import HTTPError
@@ -18,6 +20,9 @@ PROVIDERS = {
     "openai": ("https://api.openai.com/v1/chat/completions", "gpt-6-luna", "OPENAI_API_KEY", "max_completion_tokens"),
     "deepseek": ("https://api.deepseek.com/chat/completions", "deepseek-flash", "DEEPSEEK_API_KEY", "max_tokens"),
 }
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'container'))
+from coach_facts import build_facts
+
 PROMPT = Path(__file__).resolve().parents[1] / "src/coach-prompt.txt"
 
 
@@ -38,12 +43,16 @@ def references(results):
     return refs
 
 
+def prose(value):
+    return re.sub(r'(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])', '（指し手は参照で確認）', value)
+
+
 def body(payload, provider, prompt=None, reasoning_effort="none", max_tokens=2000, api="chat"):
     _, model, _, token_parameter = PROVIDERS[provider]
     a = payload["analysis"]
-    data = {"game": {"initial": a["initial"], "moves": a["moves"]}, "analysis": references(a["results"]),
-            "perspective": payload["perspective"], "profile": payload["profile"], "style": payload["style"],
-            "history": payload["history"], "question": payload.get("question", "対局を振り返ってください")}
+    data = {"facts": build_facts({"initial": a["initial"], "moves": a["moves"], "results": a["results"], "perspective": payload["perspective"]}),
+            "perspective": payload["perspective"], "profile": {"practice": [prose(p) for p in payload["profile"].get("practice", [])], "goal": prose(payload["profile"].get("goal", ""))}, "style": payload["style"],
+            "history": [{"role": h["role"], "content": prose(h["content"])} for h in payload["history"]], "question": prose(payload.get("question", "対局を振り返ってください"))}
     messages = [{"role": "system", "content": PROMPT.read_text() if prompt is None else prompt},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}]
     if api == "responses":

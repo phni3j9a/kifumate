@@ -1,6 +1,6 @@
 # 解析サーバー（開発者向け）
 
-Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8](https://github.com/phni3j9a/kifumate/issues/8) の分岐中の解析、Issue [#12](https://github.com/phni3j9a/kifumate/issues/12) のAIコーチを実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
+Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8](https://github.com/phni3j9a/kifumate/issues/8) の分岐中の解析、Issue [#12](https://github.com/phni3j9a/kifumate/issues/12)・[#20](https://github.com/phni3j9a/kifumate/issues/20) のAIコーチを実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
 
 ## 構成と仕様
 
@@ -141,8 +141,9 @@ POST/PUTには`mode`・対局者名など追加キーを渡せません。開始
 
 | API | 内容 |
 | --- | --- |
-| `GET /v1/coach` | `{paid, quota}`。無料でも残量を取得可能 |
-| `POST /v1/coach` | 解説または質問を一件生成。200で検査済みJSONを返す |
+| `GET /v1/coach` | `{paid, quota, latest}`。latestは最新要求の取得応答、なければnull。POST応答消失時にもIDを回収 |
+| `POST /v1/coach` | **推奨：`Prefer: respond-async` ヘッダー**で依頼し202。ヘッダーなしは従来どおり200まで待機 |
+| `GET /v1/coach/:requestId` | 状態と検査済み結果を再取得。読み直しでは回数を加算しない。有料権利失効後も取得可能 |
 | `DELETE /v1/coach/:requestId` | 中止。無料へ変更後も可能。既に成功した回答は取り消さない |
 
 POST本文（追加キー・人名フィールドは拒否）：
@@ -162,11 +163,21 @@ POST本文（追加キー・人名フィールドは拒否）：
 - `perspective`: `sente / gote / observer`。自分が後手なら `gote`、他者の対局なら `observer`。
 - `focus`: `総合 / 序盤の駒組み / 中盤の攻防 / 終盤 / 悪手・改善点`。`detail`: `かんたん / ふつう / くわしく`。
 - 追加質問は同じ棋譜・結果・証明に `question` を付け、`history: [{role:"user"|"assistant",content:"本文"}]` を送ります。systemロールは禁止。解説の作り直しではquestionを省略しhistoryを空にします。
-- **履歴・解説・プロフィールはアプリだけに保存**します。サーバーは月使用数と要求ID・状態・期限だけを当月と前月程度保持し、会話や応答本文は永続化しません。毎回署名で棋譜を特定できるのでサーバーの会話セッションは不要です。
-- `requestId` は新規の解説／質問ごとのUUID。同じIDは409 `request_exists`となり二重課金しません（応答再取得はできません）。応答を失った場合はGETで使用数を確認し、無条件に新しいIDで再送しないでください。
+- **アプリが履歴・解説・プロフィールの長期保存を担当**します。非同期実行のため入力を受理から実行期限までSQLiteへ一時保存し、成功・失敗・中止時に削除します。検査済み応答は完了から7日保存（端末トークンで保護）、以後削除。月使用数と要求ID・状態は当月・前月程度保持します。毎回署名を照合し、会話セッションは作りません。
+- `requestId` は新規の解説／質問ごとのUUID。送信前に端末へ棋譜との対応を保存してください。同じIDの再POSTは409 `request_exists`で二重課金しません。応答を失ったら**同じIDのGET**（IDも失ったらGET一覧のlatest）で回収し、無条件に新しいIDで再送しないでください。
 - 中止はHTTPのabortだけに頼らず**同じIDのDELETE**を送ります。本文受信より先のDELETEも墓標として保存し、遅延POSTを止めます。成功確定と中止が競合した場合は先に確定した状態を返します。DELETE自体が届かなかった場合、サーバーでは成功として数える可能性があります。
 
-200応答例：
+非同期の202・取得GETは次の形です（本文の契約は同期200と共通）：
+
+```json
+{"requestId":"...","status":"pending","expiresAt":1793459040000,"error":null,"quota":{}}
+```
+
+`status`は`pending / completed / failed / cancelled`。completedだけに`sections`が付きます。失敗理由は`error`（例：`coach_timeout / invalid_output / paid_required`）。時刻はUnixミリ秒、pendingのexpiresAtは実行期限、終了後は保存期限です。未知IDは404、結果保存期限後は410 `result_expired`。入力形式・署名・回数エラーはPOST時に従来のHTTPコードで返し、受理後の提供元エラーはGETのfailedで返します。
+
+アプリは**前面で待つ間だけ2〜5秒間隔でGET**し、画面を離れる／バックグラウンドへ移るとGETだけを停止します。DELETEは送りません。復帰・再起動時に保存したIDで取得し、completedなら端末に保存してください。新規解説・質問の送信中は同時に別の質問を作りません。明示的な中止だけDELETEを使います。期限切れや失敗後の再生成は、利用者の操作で新しいUUIDを使います。
+
+200同期応答例：
 
 ```json
 {
@@ -187,17 +198,19 @@ POST本文（追加キー・人名フィールドは拒否）：
 - **送信前の人名の伏せ字**：アプリが持つ登録名と棋譜内の対局者名を使い、自由文中の該当する名前を伏せ字（「あなた」「相手」など）にしてください。学習プロフィール・質問だけでなく、再送する履歴の利用者／AI双方の本文にも適用します。この処理はアプリ側で実装する必要があります。名前の一覧自体はサーバーへ送らず、APIに名前の欄も追加しません。
 - サーバーは人名を推測して検出しません。LLMへの指示では引き続き「あなた」「相手」（観戦では「先手」「後手」）と呼ばせますが、人名の出力検出は行いません。
 
-**非ストリーミングを採用**：本文の禁止製品名・参照を検査してから公開でき、失敗や中止時の回数確定も単純です。未検査の文を逐次表示しません。初期表示ではアプリで「考え中」を出してください。体感速度・生成時間はキー入手後の比較対象です。
+**非ストリーミング＋永続alarm**：入力と予約を保存して202を返し、DOのalarmで実行します。クライアントのHTTP接続に寿命を結びつけず、未検査の文は公開しません。待機中は「解説を作っています。画面を離れても続きます」と案内できます。従来クライアントの同期POSTだけはHTTP中止で取り消します。
+
+[Cloudflare公式のDO制限](https://developers.cloudflare.com/durable-objects/platform/limits/#wall-time-limits-by-invocation-type)を2026-11-17に確認：alarmの壁時計上限は**15分**、既定CPUは**30秒**（ネットワーク・ストレージ待機はCPUに含まない）。[waitUntil](https://developers.cloudflare.com/workers/platform/limits/#duration)は応答／切断後30秒までで、この用途には足りません。コーチの最大期限10分はalarm上限内です。同期・非同期とも、入力保存前に永続alarmを予約します（同期は実行期限のwatchdog、非同期は開始用alarmを予約して実行前に期限のwatchdogを設定）。外部API送信前に実行開始を永続化し、alarm再配送やDO再生成で**同じ要求を提供元に再送しません**。実行途中の基盤障害は結果を失う場合がありますが、期限で予約を返しfailedにします。提供元への費用が既に発生している可能性はあります。
 
 ### 回数・安全策
 
 - 月100回（`COACH_MONTHLY_LIMIT`、1〜10000。不正値は100）。**JST月初0時**でリセット。解説も追加質問も成功ごとに一回。受理月へ予約し、検査済み応答の確定時にその月だけへ加算します。月またぎでも二重集計しません。
 - 端末ごとに同時一件。予約中を除いた `remaining` と `reserved` を返します。失敗・明示中止・タイムアウトは加算しません。DO再生成で処理を失った予約も永続期限後に返却されます。`low` がtrue（残り10%未満）のときだけ残りを案内し、残り0では `resetsAt` を案内します。
 - 本文は実測1 MiB、棋譜512手、学習戦法10個×40文字、目標500文字、質問1000文字、履歴20件×4000文字。既存解析APIの16 KiB上限は変更しません。
-- `COACH_MAX_TOKENS` 既定2000（1〜8000）、`COACH_TIMEOUT_MS` 既定45000ms（1〜120000）。JSON応答は128 KiBまで。提供元へのリダイレクトは拒否。入力・応答・APIキーはログに出しません。
+- `COACH_MAX_TOKENS` 既定32768（1〜65536、推論込み）、`COACH_TIMEOUT_MS` 既定240000ms（1〜600000、受理から日本語化・生成・検査までの全体）。JSON応答は1 MiBまで。提供元へのリダイレクトは拒否。入力・応答・APIキーはログに出しません。
 - Workerの最新権利判定とDeviceの`paid()`を再利用し、本文受信・署名検証後と成功確定前に権利を再確認します。提供元・鍵・上限も入口から内部ヘッダーを上書きして渡し、既存DOの古いenv設定を使い続けません（Cloudflare側のsecret更新反映には猶予が必要です）。現在の開発用課金判定は本番で無効です。
-- LLMにはエンジン名・評価関数名・対局者名フィールドを渡しません。入力自由文と出力からUnicodeの書式文字（一般カテゴリ`Cf`）と既定で不可視の文字（`Default_Ignorable_Code_Point`、ゼロ幅文字等）を共通処理で除去し、NFKC正規化して既知の禁止製品名（エンジン・評価関数・他社サービス等）だけを照合します。LLMへ送る本文とアプリへ返す本文も不可視文字を除去したものです。禁止製品名を含む出力は502にして課金しません。**未知の製品名や説明の意味的な正確さまでは判定しません**。婉曲な手順・根拠に合わない形勢説明までの完全な意味検証はできず、実モデル評価が必要です。
-- 指し手はLLMに自由生成させず、署名済み参照IDのみを選択させます。候補PV・詰みPVは既存Python中継で各手の合法性を検査済み。出力後に参照の存在を照合し、数字・棋譜表記が本文に混ざる場合は失敗とします。このため任意の未解析分岐は解説できません（分岐中の解析とは独立）。
+- LLMにはエンジン名・評価関数名・対局者名フィールドを渡しません。入力自由文と出力からUnicodeの書式文字（一般カテゴリ`Cf`）と既定で不可視の文字（`Default_Ignorable_Code_Point`、ゼロ幅文字等）を共通処理で除去し、NFKC正規化して既知の禁止製品名（エンジン・評価関数・他社サービス等）だけを照合します。LLMへ送る本文とアプリへ返す本文も不可視文字を除去したものです。禁止製品名を含む出力は502にして課金しません。**未知の製品名や全ての意味の正確さまでは判定しません**。日本語事実と参照を照合し、明示的な勝敗・有利側・駒と指した側・詰まされる側・宣言側・観戦の呼称の矛盾を拒否します。正しい回答の過剰拒否を避けるため、否定・仮定・目的を含む文は許可し、主語ごとに確かな断定形だけを検査します。省略・比喩・複数局面をまとめた曖昧な説明まで完全に検証できず、実モデル評価が必要です。
+- 指し手はLLMに自由生成させず、署名済み参照IDのみを選択させます。候補PV・詰みPVは既存Python中継で各手の合法性を検査済み。出力後に参照の存在を照合し、数字・棋譜表記が本文に混ざる場合は失敗とします。「次の一手」「第一歩」などの通常表現は許可します。このため任意の未解析分岐は解説できません（分岐中の解析とは独立）。
 
 主なエラー：400 `invalid_proof / precise_required / invalid_input / unsafe_names`、403 `paid_required`、409 `coach_busy / request_exists / cancelled`、413、415、429 `monthly_limit`、502 `provider_failed / invalid_output`、503 `provider_unavailable / signing_unavailable`、504 `coach_timeout`。コーチのエラー応答には `quota` も付きます。
 
@@ -212,16 +225,36 @@ openssl rand -hex 32 | npx wrangler secret put COACH_SIGNING_KEY --env staging
 npx wrangler secret put COACH_API_KEY --env staging
 ```
 
-| 設定 | 第一候補 | 比較対象 |
-| --- | --- | --- |
-| `COACH_PROVIDER` | `openai-compatible`（省略時も同じ） | 同左 |
-| `COACH_BASE_URL` | `https://api.openai.com/v1` | `https://api.deepseek.com` |
-| `COACH_MODEL` | `gpt-6-luna` | `deepseek-flash` |
-| `COACH_TOKEN_PARAMETER` | `max_completion_tokens`（既定） | `max_tokens` |
+| 設定 | 既定 |
+| --- | --- |
+| `COACH_PROVIDER` | `openai-compatible` |
+| `COACH_BASE_URL` | `https://api.deepseek.com` |
+| `COACH_MODEL` | `deepseek-flash` |
+| `COACH_TOKEN_PARAMETER` | `max_tokens`（`max_completion_tokens`へ変更可能） |
 
-両者に `reasoning_effort:none`、`response_format:{type:json_object}` を送ります。2026-11-17に [OpenAIモデル公式](https://platform.openai.com/docs/models/gpt-6-luna)、[DeepSeek変更履歴](https://api-docs.deepseek.com/updates/)、[Chat Completions公式](https://api-docs.deepseek.com/api/create-chat-completion/) を確認しました。DeepSeekの仕様上の呼称はV4.1 Flash 1017、API IDは`deepseek-flash`です。2026-11-17の実キーによる直接比較では両APIの応答互換性を確認しました。ただし双方に意味の誤り・出力検査失敗が残り、どちらも本番採用は未決定です。次の検証候補は費用の低い `gpt-6-luna`。共有指示文は維持し、未採用の修正案・全64回の品質／速度／費用は [比較結果](docs/ai-coach.md#実モデルの比較結果2026-11-17) を参照してください。stagingの設定は今回変更していません。
+`reasoning_effort:max`、`response_format:{type:json_object}`を送ります。キー未設定は503で、既定が偽提供元になることはありません。DeepSeekのモデル・思考モード・料金は[公式仕様](https://api-docs.deepseek.com/api/create-chat-completion/)・[料金](https://api-docs.deepseek.com/quick_start/pricing)を2026-11-17に確認しました。**モデル変更と無関係に署名鍵は維持**してください。
 
-`COACH_PROVIDER=fake` は **local/stagingだけ**に許可し、production等では503にします。既定では偽物を使わず、キー・URL・モデル未設定なら503（使用数0増加）です。
+LLMへ送る根拠は`container/coach_facts.py`で決定的に作る日本語だけです。本譜・候補・読み筋を合法盤面からKIF表記へ変換し、先後記号・同・移動元・成／不成／打、駒名と捕獲駒、あなた／相手（観戦は先手／後手）、形勢・段階・変化・印・詰み確認・宣言可能な側を明示します。cshogiの省略字（杏・圭・全）は成香・成桂・成銀に補完します。形勢は絶対値150未満を互角、500未満をやや有利、1500未満を有利、3000未満を大きく有利、それ以上を勝勢とし、後手視点の不利も反転します。印は指した側の損失200以上を疑問手、500以上を悪手とする目安で、境界値や詰みスコアを数値比較しません。
+
+盤面の詰みは勝者・敗者・終局理由を確定できますが、**既存の署名入力には投了・実際の宣言などの終局記録がありません**。その場合は勝敗・終局理由を不明とし、宣言可能という探索結果から実戦の宣言勝ちを作りません。**サーバーが解析から作る事実**には生USI・SFEN・符号付き評価を含めず、日本語化してLLMへ渡します。利用者が質問・プロフィール・履歴に書いた数値（「評価が＋600なのはなぜ？」など）は、全角・半角や符号を変えずに保持します。これは解析で確認した事実ではなく参考文です。自由文のUSIの既存伏字と、出力本文の数値禁止は維持します。アプリへ返す署名済み`references`のUSI・評価は従来どおりです。
+
+再比較の誤り・偽陽性・速度・費用は[検証記録](docs/ai-coach.md)を参照してください。今回は**stagingへデプロイしていません**。Mainが他作業との統合後に実施する手順：
+
+```sh
+# 既存の署名鍵は変更しない。キー値を引数・ログへ出さず対話入力する。
+npx wrangler secret put COACH_API_KEY --env staging
+# 古いOpenAI設定がsecretに残っていれば、この三項目を更新する。
+printf 'https://api.deepseek.com\n' | npx wrangler secret put COACH_BASE_URL --env staging
+printf 'deepseek-flash\n' | npx wrangler secret put COACH_MODEL --env staging
+printf 'max_tokens\n' | npx wrangler secret put COACH_TOKEN_PARAMETER --env staging
+# 古いCOACH_TIMEOUT_MS / COACH_MAX_TOKENSがsecretなら、削除してvarsの240000 / 32768を使う。
+# 偽提供元を無効化（未設定なら不要）
+npx wrangler secret delete COACH_PROVIDER --env staging
+npm run deploy
+# 反映後に非同期のPOST→画面離脱→GET、中止、回数、権利失効を確認する。
+```
+
+`COACH_PROVIDER=fake` は **local/stagingだけ**に許可し、production等では503にします。既定では偽物を使わず、キー未設定なら503（使用数0増加）です。
 
 staging検証と実モデルの比較手順・実測は [ai-coach.md](docs/ai-coach.md) を参照してください。
 

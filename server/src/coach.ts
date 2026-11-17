@@ -1,4 +1,5 @@
 import prompt from './coach-prompt.txt';
+import { contradicts, type CoachFacts } from './coach-facts';
 import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
@@ -103,38 +104,41 @@ export function references(results: any[]): Reference[] {
   ]);
 }
 export const SYSTEM_PROMPT = prompt;
-export function messages(input: CoachInput, refs: Reference[]) {
+function prose(value: string) {
+  return value.replace(/(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/g, '（指し手は参照で確認）');
+}
+export function messages(input: CoachInput, _refs: Reference[], facts?: CoachFacts) {
   return [{role: 'system', content: SYSTEM_PROMPT}, {role: 'user', content: JSON.stringify({
-    game: {initial: input.input.initial, moves: input.input.moves}, analysis: refs,
-    perspective: input.perspective, profile: input.profile, style: input.style,
+    facts: facts ?? {視点: input.perspective === 'observer' ? '観戦' : input.perspective === 'sente' ? 'あなたが先手、相手が後手' : '相手が先手、あなたが後手', 参照: _refs.map(r => ({id: r.id}))},
+    perspective: input.perspective, profile: {practice: input.profile.practice.map(prose), goal: prose(input.profile.goal)}, style: input.style,
     // 履歴を会話ロールとして昇格させず、同じ棋譜の参考データとして渡す。
-    history: input.history, question: input.question ?? '対局を振り返ってください',
+    history: input.history.map(h => ({role: h.role, content: prose(h.content)})), question: prose(input.question ?? '対局を振り返ってください'),
   })}];
 }
 function setting(value: string | undefined, fallback: number, max: number) {
   const n = Number(value ?? fallback); return Number.isSafeInteger(n) && n > 0 && n <= max ? n : fallback;
 }
-export function timeoutMs(env: CoachEnv) { return setting(env.COACH_TIMEOUT_MS, 45_000, 120_000); }
-export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch): Promise<unknown> {
+export function timeoutMs(env: CoachEnv) { return setting(env.COACH_TIMEOUT_MS, 240_000, 600_000); }
+export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch, facts?: CoachFacts): Promise<unknown> {
   if (env.COACH_PROVIDER === 'fake') {
     if (!['local', 'staging'].includes(env.ENVIRONMENT)) throw new ApiError(503, 'provider_unavailable');
     return {sections: [{kind: 'facts', title: '対局の振り返り', text: '解析結果をもとに振り返りましょう。', refs: [refs[0].id]},
       {kind: 'advice', title: '次の練習', text: '気になった局面を盤の上で確かめましょう。', refs: []}]};
   }
   if (env.COACH_PROVIDER && env.COACH_PROVIDER !== 'openai-compatible') throw new ApiError(503, 'provider_unavailable');
-  if (!env.COACH_API_KEY || !env.COACH_MODEL || !env.COACH_BASE_URL) throw new ApiError(503, 'provider_unavailable');
-  const url = new URL(env.COACH_BASE_URL.replace(/\/$/, '') + '/chat/completions');
+  if (!env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
+  const url = new URL((env.COACH_BASE_URL ?? 'https://api.deepseek.com').replace(/\/$/, '') + '/chat/completions');
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new ApiError(503, 'provider_unavailable');
   const response = await transport(url.toString(), {method: 'POST', signal, redirect: 'error', headers: {'Authorization': `Bearer ${env.COACH_API_KEY}`, 'Content-Type': 'application/json'},
-    body: JSON.stringify({model: env.COACH_MODEL, messages: messages(input, refs), stream: false,
-      response_format: {type: 'json_object'}, reasoning_effort: 'none',
-      [env.COACH_TOKEN_PARAMETER === 'max_tokens' ? 'max_tokens' : 'max_completion_tokens']: setting(env.COACH_MAX_TOKENS, 2000, 8000)})});
+    body: JSON.stringify({model: env.COACH_MODEL ?? 'deepseek-flash', messages: messages(input, refs, facts), stream: false,
+      response_format: {type: 'json_object'}, reasoning_effort: 'max',
+      [env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: setting(env.COACH_MAX_TOKENS, 32768, 65536)})});
   if (!response.ok) { await response.body?.cancel(); throw new ApiError(502, 'provider_failed'); }
-  const data = record(await readJson(new Request('https://provider', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: response.body, duplex: 'half'} as RequestInit), 131_072));
+  const data = record(await readJson(new Request('https://provider', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: response.body, duplex: 'half'} as RequestInit), 1_048_576));
   if (data.choices?.[0]?.finish_reason !== 'stop' || typeof data.choices[0].message?.content !== 'string') throw new ApiError(502, 'invalid_output');
   try { return JSON.parse(data.choices[0].message.content); } catch { throw new ApiError(502, 'invalid_output'); }
 }
-export function validateOutput(value: unknown, refs: Reference[]) {
+export function validateOutput(value: unknown, refs: Reference[], facts?: CoachFacts) {
   try {
     const x = record(value); keys(x, ['sections']);
     if (!Array.isArray(x.sections) || !x.sections.length || x.sections.length > 12) throw new Error();
@@ -143,11 +147,12 @@ export function validateOutput(value: unknown, refs: Reference[]) {
       if (!['facts', 'advice'].includes(s.kind)) throw new Error();
       const title = text(s.title, 80), body = text(s.text, 2000);
       // 自由文から盤面に依存する指し手・数値を出せないようにし、検証済み参照だけを公開する。
-      if (/[0-9０-９一二三四五六七八九壱弐参]+\s*[歩香桂銀金角飛玉王と馬龍竜筋段手]|[▲△☗☖]|[0-9０-９]|[+-][一二三四五六七八九十百千]/.test(title + body)) throw new Error();
+      if (/[0-9０-９一二三四五六七八九壱弐参]+\s*[歩香桂銀金角飛玉王と馬龍竜筋段]|[▲△☗☖]|[0-9０-９]|[+-][一二三四五六七八九十百千]/.test((title + body).replace(/第一歩|一歩ずつ|一段と|一段階|次の一手/g, ''))) throw new Error();
       if (!Array.isArray(s.refs) || s.refs.length > 10 || (s.kind === 'facts' && !s.refs.length)) throw new Error();
       const selected = s.refs.map((id: unknown) => {
         const ref = refs.find(r => r.id === id); if (!ref) throw new Error(); return ref;
       });
+      if (facts && contradicts(title + '。' + body, s.refs, facts)) throw new Error();
       return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected};
     })};
   } catch { throw new ApiError(502, 'invalid_output'); }
@@ -155,9 +160,11 @@ export function validateOutput(value: unknown, refs: Reference[]) {
 
 export class Coach {
   private active = new Map<string, AbortController>();
-  constructor(private storage: DurableObjectStorage, private env: CoachEnv, private device: string, private paid: () => boolean) {
+  constructor(private storage: DurableObjectStorage, private env: CoachEnv, private device: string, private paid: () => boolean,
+    private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>) {
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS coach_usage (month INTEGER PRIMARY KEY, used INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
   }
   quota(now = Date.now()) {
     const month = monthStart(now), limit = setting(this.env.COACH_MONTHLY_LIMIT, 100, 10000);
@@ -167,18 +174,88 @@ export class Coach {
     return {monthStart: month, resetsAt: nextMonth(now), limit, used, reserved, remaining, low: remaining < limit / 10};
   }
   private status(id: string) { return this.storage.sql.exec<{status: string; month: number; deadline: number}>('SELECT status,month,deadline FROM coach_requests WHERE id=?', id).toArray()[0]; }
+  private async wake(at: number) {
+    const current = await this.storage.getAlarm();
+    if (current === null || current > at) await this.storage.setAlarm(at);
+  }
+  nextAlarm(): number | null {
+    return this.storage.sql.exec<{at: number | null}>(`SELECT MIN(CASE WHEN t.started=0 AND r.status='pending' THEN ? ELSE r.deadline END) AS at
+      FROM coach_requests r JOIN coach_tasks t ON t.id=r.id`, Date.now() + 100).one().at;
+  }
+  async alarm() {
+    const task = this.storage.sql.exec<{id: string; payload: string}>(`SELECT t.id,t.payload FROM coach_tasks t JOIN coach_requests r ON r.id=t.id
+      WHERE r.status='pending' AND t.started=0 AND r.deadline>? LIMIT 1`, Date.now()).toArray()[0];
+    if (task) {
+      this.storage.sql.exec('UPDATE coach_tasks SET started=1 WHERE id=?', task.id);
+      await this.wake(this.status(task.id)!.deadline);
+      await this.generate(JSON.parse(task.payload));
+    }
+    this.expire();
+  }
+  private expire() {
+    const now = Date.now();
+    this.storage.sql.exec("UPDATE coach_tasks SET payload=NULL,error='coach_timeout' WHERE id IN (SELECT id FROM coach_requests WHERE status='pending' AND deadline<=?)", now);
+    this.storage.sql.exec("UPDATE coach_requests SET status='failed',deadline=? WHERE status='pending' AND deadline<=?", now + 7 * 86400_000, now);
+    this.storage.sql.exec('DELETE FROM coach_tasks WHERE id IN (SELECT id FROM coach_requests WHERE status!=? AND deadline<=?)', 'pending', now);
+  }
+  private view(id: string) {
+    const current = this.status(id);
+    if (!current) throw new ApiError(404, 'not_found');
+    if (current.status !== 'pending' && current.deadline <= Date.now()) throw new ApiError(410, 'result_expired');
+    const task = this.storage.sql.exec<{output: string | null; error: string | null}>('SELECT output,error FROM coach_tasks WHERE id=?', id).toArray()[0];
+    return {requestId: id, status: current.status, expiresAt: current.deadline,
+      ...(task?.output ? JSON.parse(task.output) : {}), error: task?.error ?? null, quota: this.quota()};
+  }
+  private async generate(input: CoachInput, request?: Request): Promise<Response> {
+    const refs = references(input.results), controller = new AbortController();
+    this.active.set(input.requestId, controller);
+    const deadline = this.status(input.requestId)!.deadline;
+    const signal = AbortSignal.any([controller.signal, ...(request ? [request.signal] : []), AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+    try {
+      if (!this.paid()) throw new ApiError(403, 'paid_required');
+      if (this.env.COACH_PROVIDER !== 'fake' && !this.env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
+      const facts = this.loadFacts ? await this.loadFacts(input, signal) : undefined;
+      if (!facts && this.env.COACH_PROVIDER !== 'fake' && this.loadFacts) throw new ApiError(502, 'facts_unavailable');
+      const output = validateOutput(await complete(this.env, input, refs, signal, fetch, facts), refs, facts);
+      return this.storage.transactionSync(() => {
+        const current = this.status(input.requestId);
+        if (controller.signal.aborted || request?.signal.aborted || current?.status !== 'pending') throw new ApiError(409, 'cancelled');
+        if (Date.now() >= deadline || signal.aborted) throw new ApiError(504, 'coach_timeout');
+        if (!this.paid()) throw new ApiError(403, 'paid_required');
+        this.storage.sql.exec("UPDATE coach_requests SET status='completed',deadline=? WHERE id=?", Date.now() + 7 * 86400_000, input.requestId);
+        this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
+        this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,output=? WHERE id=?', JSON.stringify(output), input.requestId);
+        return json({requestId: input.requestId, ...output, quota: this.quota()});
+      });
+    } catch (error) {
+      const cancelled = controller.signal.aborted || request?.signal.aborted || this.status(input.requestId)?.status === 'cancelled';
+      const failure = cancelled ? new ApiError(409, 'cancelled') : Date.now() >= deadline || signal.aborted ? new ApiError(504, 'coach_timeout') : error instanceof ApiError ? error : new ApiError(502, 'provider_failed');
+      this.storage.sql.exec("UPDATE coach_requests SET status=?,deadline=? WHERE id=? AND status='pending'", cancelled ? 'cancelled' : 'failed', Date.now() + 7 * 86400_000, input.requestId);
+      this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,error=? WHERE id=?', failure.code, input.requestId);
+      return json({error: failure.code, quota: this.quota()}, failure.status);
+    } finally {
+      this.active.delete(input.requestId);
+      const next = this.nextAlarm();
+      if (next !== null) await this.wake(next);
+    }
+  }
   async fetch(request: Request): Promise<Response> {
     try {
       const now = Date.now();
-      this.storage.sql.exec("UPDATE coach_requests SET status='failed' WHERE status='pending' AND deadline<=?", now);
+      this.expire();
       this.storage.sql.exec('DELETE FROM coach_requests WHERE deadline<?', monthStart(now) - 32 * 86400_000);
       this.storage.sql.exec('DELETE FROM coach_usage WHERE month<?', monthStart(now) - 32 * 86400_000);
-      if (request.method === 'GET' && new URL(request.url).pathname === '/v1/coach') return json({paid: this.paid(), quota: this.quota()});
+      if (request.method === 'GET' && new URL(request.url).pathname === '/v1/coach') {
+        const latest = this.storage.sql.exec<{id: string}>('SELECT id FROM coach_requests ORDER BY rowid DESC LIMIT 1').toArray()[0];
+        return json({paid: this.paid(), quota: this.quota(), latest: latest && this.status(latest.id)!.deadline > now ? this.view(latest.id) : null});
+      }
       const cancel = /^\/v1\/coach\/([a-f0-9-]{36})$/.exec(new URL(request.url).pathname);
+      if (cancel && request.method === 'GET') return json(this.view(cancel[1]));
       if (cancel && request.method === 'DELETE') {
         // 本文を受信中のPOSTより先に届いた中止も、同じIDの墓標で止める。
-        this.storage.sql.exec("INSERT OR IGNORE INTO coach_requests VALUES (?,?,'cancelled',?)", cancel[1], monthStart(now), now + timeoutMs(this.env));
-        this.storage.sql.exec("UPDATE coach_requests SET status='cancelled' WHERE id=? AND status='pending'", cancel[1]);
+        this.storage.sql.exec("INSERT OR IGNORE INTO coach_requests VALUES (?,?,'cancelled',?)", cancel[1], monthStart(now), now + 7 * 86400_000);
+        this.storage.sql.exec("UPDATE coach_requests SET status='cancelled',deadline=? WHERE id=? AND status='pending'", now + 7 * 86400_000, cancel[1]);
+        this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL WHERE id=?', cancel[1]);
         this.active.get(cancel[1])?.abort();
         return json({status: this.status(cancel[1])?.status ?? 'not_found', quota: this.quota()});
       }
@@ -187,9 +264,10 @@ export class Coach {
       const input = parseCoach(await readJson(request, 1_048_576));
       if (!this.env.COACH_SIGNING_KEY) throw new ApiError(503, 'signing_unavailable');
       await verifyAnalysis(this.env.COACH_SIGNING_KEY, this.device, input.input, input.results, input.proof);
-      const refs = references(input.results);
-      const controller = new AbortController();
+      const asynchronous = request.headers.get('Prefer')?.includes('respond-async') ?? false;
       const timeout = timeoutMs(this.env), accepted = Date.now();
+      // 同期も保存前にwatchdogを永続化し、プロセス消失後の入力削除を保証する。
+      await this.wake(asynchronous ? accepted + 100 : accepted + timeout);
       this.storage.transactionSync(() => {
         // 本文受信・署名検証の待機中に更新された権利を、確定直前に再確認する。
         if (!this.paid()) throw new ApiError(403, 'paid_required');
@@ -199,26 +277,10 @@ export class Coach {
         if (!quota.remaining) throw new ApiError(429, 'monthly_limit');
         if (this.storage.sql.exec("SELECT id FROM coach_requests WHERE status='pending' AND deadline>? LIMIT 1", accepted).toArray().length) throw new ApiError(409, 'coach_busy');
         this.storage.sql.exec("INSERT INTO coach_requests VALUES (?,?,'pending',?)", input.requestId, quota.monthStart, accepted + timeout);
-        this.active.set(input.requestId, controller);
+        this.storage.sql.exec('INSERT INTO coach_tasks (id,payload,started) VALUES (?,?,?)', input.requestId, JSON.stringify(input), asynchronous ? 0 : 1);
       });
-      try {
-        const signal = AbortSignal.any([controller.signal, request.signal, AbortSignal.timeout(timeout)]);
-        const output = validateOutput(await complete(this.env, input, refs, signal), refs);
-        return this.storage.transactionSync(() => {
-          const current = this.status(input.requestId);
-          if (signal.aborted || current?.status !== 'pending') throw new ApiError(409, 'cancelled');
-          if (Date.now() >= current.deadline) throw new ApiError(504, 'coach_timeout');
-          if (!this.paid()) throw new ApiError(403, 'paid_required');
-          this.storage.sql.exec("UPDATE coach_requests SET status='completed' WHERE id=?", input.requestId);
-          this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
-          return json({requestId: input.requestId, ...output, quota: this.quota()});
-        });
-      } catch (error) {
-        this.storage.sql.exec("UPDATE coach_requests SET status=? WHERE id=? AND status='pending'", controller.signal.aborted || request.signal.aborted ? 'cancelled' : 'failed', input.requestId);
-        if (controller.signal.aborted || request.signal.aborted) throw new ApiError(409, 'cancelled');
-        if (Date.now() >= accepted + timeout) throw new ApiError(504, 'coach_timeout');
-        throw error instanceof ApiError ? error : new ApiError(502, 'provider_failed');
-      } finally { this.active.delete(input.requestId); }
+      if (asynchronous) return json(this.view(input.requestId), 202);
+      return await this.generate(input, request);
     } catch (error) {
       return json({error: error instanceof ApiError ? error.code : 'coach_unavailable', quota: this.quota()}, error instanceof ApiError ? error.status : 503);
     }

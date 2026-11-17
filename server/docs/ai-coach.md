@@ -2,6 +2,8 @@
 
 Issue [#12](https://github.com/phni3j9a/kifumate/issues/12)。API契約・安全策は [README](../README.md) を参照してください。
 
+最新の実装は Issue [#20](https://github.com/phni3j9a/kifumate/issues/20) に対応しています。末尾の「日本語事実化と非同期化」を現行の採用判断とし、以下の旧比較の推奨は履歴として残します。
+
 ## stagingの再現手順
 
 対象は既存の `kifumate-analysis-staging` だけです。購入権利の代替secretと偽の提供元は検証後に削除します。署名鍵は機能に必要な永続secretです（削除すると保存済み証明が使えません）。既存の署名鍵がある場合は上書きしないでください。
@@ -36,22 +38,22 @@ npx wrangler secret list --env staging
 
 2026-11-17に実行しました（結果は末尾）。**この比較ではstagingのWorker・secret・デプロイを操作しません**。以下は提供元APIだけを呼び、公開APIの月回数を消費しませんが、提供元に料金が発生します。前節のstaging手順は過去のスモーク用で、この比較には使いません。
 
-スクリプトはPython標準ライブラリだけを使い、通常はWorkerと共有の `src/coach-prompt.txt` を読みます。`--prompt-file` で未採用の指示文も比較できます。`--request-file` は単一のコーチPOST本文、または `[{"name":"条件名","payload":コーチPOST本文}]`。署名・要求ID・対局者名フィールドは送らず、棋譜・参照・プロフィール・スタイル・履歴・質問だけを送信します。**入力の匿名化は呼び出し元で行ってください**。Workerの入力検査は通りません。
+スクリプトは既存Python中継と同じcshogi環境を使い、通常はWorkerと共有の `src/coach-prompt.txt` を読みます。`--prompt-file` で未採用の指示文も比較できます。`--request-file` は単一のコーチPOST本文、または `[{"name":"条件名","payload":コーチPOST本文}]`。署名・要求ID・対局者名フィールドは送らず、棋譜・参照・プロフィール・スタイル・履歴・質問だけを送信します。**入力の匿名化は呼び出し元で行ってください**。Workerの入力検査は通りません。
 
 ```sh
 cd server
-python3 scripts/compare_coach.py --self-test  # キー不要・ネットワークなし
+container/.venv/bin/python scripts/compare_coach.py --self-test  # キー不要・ネットワークなし
 # キーの値は表示せず、引数にも置かない。set -xは禁止。
 set -a
 . ~/.config/kifumate/llm.env
 set +a
-python3 scripts/compare_coach.py --provider openai \
+container/.venv/bin/python scripts/compare_coach.py --provider openai \
   --request-file .local/coach-compare/cases.json --runs 2 \
   --output .local/coach-compare/new-openai.json \
   --input-usd-per-million 0.10 --cached-usd-per-million 0.01 \
   --cache-write-usd-per-million 0.125 --output-usd-per-million 0.50 \
   --budget-file .local/coach-compare/budget.jsonl --budget-usd 3
-python3 scripts/compare_coach.py --provider deepseek \
+container/.venv/bin/python scripts/compare_coach.py --provider deepseek \
   --request-file .local/coach-compare/cases.json --runs 2 \
   --output .local/coach-compare/new-deepseek.json \
   --input-usd-per-million 0.30 --cached-usd-per-million 0.006 \
@@ -261,14 +263,14 @@ python3 scripts/build_coach_cases.py --output-dir .local/coach-reasoning
 set -a
 . ~/.config/kifumate/llm.env
 set +a
-python3 scripts/compare_coach.py --provider openai --openai-api responses \
+container/.venv/bin/python scripts/compare_coach.py --provider openai --openai-api responses \
   --request-file .local/coach-reasoning/cases.json --runs 2 --prompt-file src/coach-prompt.txt \
   --output .local/coach-reasoning/max-baseline-openai.json \
   --reasoning-effort max --max-tokens 65536 --timeout 900 \
   --input-usd-per-million 0.10 --cached-usd-per-million 0.01 \
   --cache-write-usd-per-million 0.125 --output-usd-per-million 0.50 \
   --budget-file .local/coach-reasoning/budget.jsonl --budget-usd 3
-python3 scripts/compare_coach.py --provider deepseek \
+container/.venv/bin/python scripts/compare_coach.py --provider deepseek \
   --request-file .local/coach-reasoning/cases.json --runs 2 --prompt-file src/coach-prompt.txt \
   --output .local/coach-reasoning/max-baseline-deepseek.json \
   --reasoning-effort max --max-tokens 65536 --timeout 900 \
@@ -360,7 +362,7 @@ JSON構文不正・主比較のHTTP失敗・出力打切り・900秒タイムア
 - **主比較 $0.336199627**、補助診断の成功一件 **$0.008544425**、**usage確定分合計 $0.344744052**。HTTP失敗二件は各$0.017883500、完了不明の中断一件は$0.026094750の予約を維持しています。**未確定枠 $0.061861750込みの安全側合計は $0.406605802（上限$3以内）**。未確定分を無料として精算したり、台帳をリセットしたりしていません。提供元の請求書との突合ができていないため、これを全呼び出しの確定請求額とは呼びません。
 - 生データはこのworktreeの **`server/.local/coach-reasoning/`**。`analysis-current.json / cases.json / max-baseline-{openai,deepseek}.json / budget.jsonl / manual-review.json / validation.json / summary.json / truth.json` と診断応答を0600で保持。ケースSHA-256は **`9a9388ca81fc5d588104a8e5d6dd29610c80b6e0dd40911a00629d9e7310ad44`**。両モデルの全16件で条件・反復・利用者入力ハッシュが一致し、旧指示文のハッシュも前回と一致しました。修正案のAPI呼び出しは **0件**です。
 - APIキーは指定envファイルから環境変数として読むだけで、引数・ログ・文書・Gitには残していません。評価関数は指定パスからGit対象外の `container/eval/nn.bin` にコピー。ローカル解析用コンテナは終了済み。他のDocker・stagingのWorker・secret・デプロイには触れていません。
-- `python3 scripts/test_compare_coach.py` **10件成功**。既定の推論なし契約、最大推論と出力枠に応じた予算予約、推論を含む費用、Responses入力・usage・原応答保存・精算、8条件の切り出し、予算停止と不明費用の予約維持を検査します。従来は直接実行でテストを起動しなかったため、`unittest.main()` も追加しました。
+- `container/.venv/bin/python scripts/test_compare_coach.py` **10件成功**。既定の推論なし契約、最大推論と出力枠に応じた予算予約、推論を含む費用、Responses入力・usage・原応答保存・精算、8条件の切り出し、予算停止と不明費用の予約維持を検査します。従来は直接実行でテストを起動しなかったため、`unittest.main()` も追加しました。
 - `npm test` **53件成功**、`npm run typecheck` **成功**、`compare_coach.py --self-test` **10件成功**、変更したPython三ファイルの構文検査と `git diff --check` **成功**。取得したusageの再計算、全件の条件・反復・ハッシュ一致、全32回答の形式・意味評価の対応、予算の$3以内もassertで確認しました。キーの値と追跡対象ファイル・比較データ／ログを表示なしで突き合わせ、一致なしでした。
 
 ### Worker設定変更の提案と残る採用条件
@@ -372,3 +374,117 @@ JSON構文不正・主比較のHTTP失敗・出力打切り・900秒タイムア
 3. `COACH_MAX_TOKENS` は既定2000・実装上限8000で、推論込みの今回の出力とは合いません。Lunaの推論だけで最大46,813トークン、Flashは21,762トークンでした。採用時は出力枠と費用予約をセットで再設計します。また保存したResponses応答は暗号化推論オブジェクトを含み、再シリアライズで最大669,637バイト。現Workerの応答128 KiB制限もそのまま流用できません。比較用の65,536トークン・8 MiBを本番へそのまま移す意味ではありません。
 4. 構造化出力と意味検証は別の採用条件です。先後・勝者・宣言条件などの確定情報を自由文だけに委ねない設計、refs必須・上限などの契約保証、実戦手と候補の区別を改善してから再比較します。既存修正案は未採用のままです。
 5. 別棋譜、長い棋譜と履歴、自然な複数往復、各条件三反復以上、独立した将棋知識者による採点、実アプリの表示・中止・通信断は未検証です。今回の完了をIssue #12全体の完了や、本番採用の承認とは扱いません。
+
+## 日本語事実化と非同期化（2026-11-17、Issue #20）
+
+### 実装と評価方法
+
+ユーザー判断に従い、既定は **deepseek-flash / reasoning_effort:max** です。READMEのAPI契約が現行仕様です。古い比較での「採用しない／Lunaを次候補」は履歴であり、現行設定ではありません。
+
+- 将棋の盤面処理をTypeScriptで二重実装せず、既存の **Python/cshogi** に`/coach-facts`を追加しました。エンジン探索は行いません。合法な本譜と候補PVをたどり、KIFの同・成・不成・打・移動元、動いた駒・取った駒・指した側を確定します。cshogiの略字は成香・成桂・成銀へ補完します。
+- 日本語の形勢・段階・変化・印、詰み確認と詰まされる側、宣言可能な側、終局を付けます。**署名入力には投了・実際の宣言の終局記録がありません**。盤上の詰みは確定しますが、それ以外は勝敗・理由を不明とし、宣言可能を宣言済みに置き換えません。
+- サーバーが作る解析事実には生USI・SFEN・符号付き評価を含めず、LLMには事実を言い換える仕事だけをさせます。利用者が参考文として質問・プロフィール・履歴に書いた数値は保持します。参照IDとアプリへ返す`references`の形式は維持しました。明示的な勝敗・優勢側・宣言側・詰まされる側・駒と着手者・観戦の呼称を参照と突き合わせます。省略や曖昧な文章まで完全には検査できません。
+- `Prefer: respond-async`付きPOSTは202で返し、入力を一時保存してDOの永続alarmが実行します。GETで7日間再取得可能。接続切断や画面離脱では取り消さず、明示DELETEだけを中止に使います。ヘッダーなしの同期POSTと成功時だけの回数加算は維持しました。
+- [Cloudflare公式DO制限](https://developers.cloudflare.com/durable-objects/platform/limits/#wall-time-limits-by-invocation-type)を2026-11-17に確認。alarmは壁時計15分、CPU既定30秒はネットワーク待機を含みません。[waitUntilの30秒](https://developers.cloudflare.com/workers/platform/limits/#duration)には依存しません。実装の既定期限240秒・最大600秒、推論込み出力32768トークン（最大65536）は、前回実測とalarm上限から決めました。
+- 外部送信を再試行すると費用・重複生成を増やすため、実行開始を永続化し**同じ要求を自動再送しません**。実行途中の基盤障害で応答を失った場合は期限でfailedにして予約を返します。提供元で発生済みの費用まで取り消せるわけではありません。
+
+前回の`server/.local/coach-reasoning/cases.json`をそのまま再利用します（8条件・視点・スタイル・質問・履歴・署名対象の解析は変更なし、再探索なし）。`analysis-current.json / truth.json / manual-review.json`にも照合します。変更するのはサーバーが作る日本語事実と共有指示文です。生データ・台帳・全件の採点は **`server/.local/coach-facts/`** に0600で保存します。APIキーは指定envを環境変数として読み込むだけで、表示・引数・記録・Gitに残しません。
+
+```sh
+cd server
+set -a
+. ~/.config/kifumate/llm.env
+set +a
+# 全実行で同じ$2台帳を共有。実行済み出力は上書きしない。
+container/.venv/bin/python scripts/compare_coach.py --provider deepseek \
+  --request-file .local/coach-reasoning/cases.json --runs 2 \
+  --output .local/coach-facts/final-max.json --reasoning-effort max \
+  --max-tokens 32768 --timeout 240 \
+  --input-usd-per-million 0.30 --cached-usd-per-million 0.006 --output-usd-per-million 1.20 \
+  --budget-file .local/coach-facts/budget.jsonl --budget-usd 2
+# 同じコマンドで --reasoning-effort none / --output final-none.json も実行。
+unset OPENAI_API_KEY DEEPSEEK_API_KEY
+```
+
+予約はpeak単価で安全側に見積もり、[公式料金](https://api-docs.deepseek.com/quick_start/pricing)の時間帯別単価で実行費用も示します。今回は平日UTC 10時以降なのでoff-peak（入力$0.15／読込$0.003／出力$0.60、100万トークンあたり）です。usageからの推計であり、請求書・税・為替・Cloudflare費用との一致は保証しません。
+
+最初の短局一件成功後、ローカル日本語化処理でcshogiの詰み判定APIの呼び方が不適切と分かって停止しました。提供元の失敗ではなく、未送信分は無課金です。その一件の費用は台帳に残しました。続く予備maxではcshogi標準の杏・圭・全を使っていましたが、正式KIF駒名へ補完した最終版を別にmax/none各二反復します。予備出力も捨てず全件照合し、費用も合計に含めます。予備noneは台帳ロック待ちの0件時点で中止し、一度も送信していません。
+
+### 結論：誤りは半減、ただしゼロではない
+
+**最大推論の意味誤りは前回4/16→今回2/16（25%→12.5%）**。同じ8条件・同じ解析を使い、全最終出力を照合した結果です。勝敗・優勢な側・駒名・指した側・宣言できる側の取り違えは今回のmaxでは見つかりませんでした。一方、動きの方向と「取る／取り返す」の関係を作る誤りは残りました。少数の固定ケースなので、統計的な優位や別棋譜への一般化を証明する結果ではありません。
+
+| 条件（各2回） | 前回max 意味 | 今回max 意味 | 今回none 意味 | max 拒否 | none 拒否 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| short-opening | 1/2 | 0/2 | 0/2 | 0/2 | 1/2 |
+| game1-sente | 1/2 | 0/2 | 1/2 | 0/2 | 1/2 |
+| game2-gote | 1/2 | 1/2 | 1/2 | 0/2 | 2/2 |
+| game1-observer | 0/2 | 1/2 | 1/2 | 0/2 | 2/2 |
+| proven-mate | 0/2 | 0/2 | 0/2 | 0/2 | 0/2 |
+| unproven-mate | 0/2 | 0/2 | 1/2 | 0/2 | 2/2 |
+| declaration | 1/2 | 0/2 | 0/2 | 0/2 | 0/2 |
+| followup-injection | 0/2 | 0/2 | 0/2 | 0/2 | 2/2 |
+| **合計** | **4/16** | **2/16** | **4/16** | **0/16** | **10/16** |
+
+「意味」は誤りを含む回答数、「拒否」は実Workerの`validateOutput`による非公開判定です。noneの主因は本文への数字・棋譜表記の混入（game1-sente反復2は参照上限超過も重複）。意味が合っていても契約違反なら公開しません。JSON不正・HTTP失敗・打切り・240秒タイムアウトは最終二群とも0/16。**maxの残る2件は検査を通ります**。noneの意味誤り4件は全て形式検査で拒否されました。
+
+#### 残る誤り・改善の具体例
+
+- max `game2-gote / 2`：「**歩で取り返した手**」。対象28手目は、先手27手目の歩突きを後手の歩で初めて取る手です。直前に駒を取られた取り返しではありません。駒・側・評価変化は正しい一方、手の関係を追加しています。
+- max `game1-observer / 2`：「**後手の飛車の引き**」。対象36手目は4二→2二、42手目は2二→3二で、ともに横移動。「引く」という後退の説明は誤りです。これも参照と駒・側は合っているため現ガードでは止まりません。
+- none `game2-gote / 1`：「**3四歩を取った手**」は取った升を誤認（実際は3四の歩が3五で先手歩を取る）。`game1-observer / 1`にも横移動を「引き上げ」とする誤りがありました。
+- none `game1-sente / 2`は「角打ち→飛車取り→相手の金」と順を逆転（実際は角打ち→相手の金→飛車取り）。`unproven-mate / 2`は「**龍で飛車を打つ手**」と別の駒・動作を混同しました。
+- maxの後手条件は二回とも「相手の勝ち、あなたの負け」、宣言条件は二回とも「あなたが宣言可能、実際の宣言・勝敗は不明」。前回の駒・側の取り違えや宣言情報の見落としは、この最終比較では再現しませんでした。
+- noneの「角換わりや居飛車の可能性」は未提供の推測ですが、実際の戦型の断定ではないので意味誤り件数には含めていません。「35手目の銀取り」も、銀で歩を取る手の表現として曖昧ですが、銀を取ったとの明示ではないため保守的に非集計としました。曖昧さ・助言の一般論と、明確な入力との矛盾を分けています。
+
+予備maxは2/16（玉の左移動を右と説明、助言で未提供の誤った入玉宣言条件を生成）。最初の短局診断一件は誤りなし。**合計49件の最終出力全文**を照合し、推論本文は採点・引用していません。採点者は本作業のエージェントで、有段者による独立採点ではありません。
+
+### 偽陽性と機械検査の限界
+
+- 新しい意味矛盾ガード単独の偽陽性は、最終二群の**意味が正しい26回答中0**。予備を含めても**41回答中0**です。数字や棋譜表記の禁止による意図した形式拒否は、意味検査の偽陽性に混ぜません。
+- ただし、最終二群に残る意味誤り6件そのものは、この意味ガードでは検出できませんでした。新しいガードが万能である証拠ではなく、主に日本語入力化で従来の誤りを減らした結果です。明示的な勝敗・優勢側・駒・着手者・宣言側の矛盾8種類を拒否する回帰テストと、正しい通常文11種類の許可テストを追加しています。
+- 予備出力の点検で、修飾節「相手が金を取った飛車を桂で取り返す」の主語を誤って拾う過剰拒否と、観戦の「相手玉」を呼称誤りとする過剰拒否に気付き、検査を限定しました。別主語へのまたぎも回帰テストで抑えます。「第一歩」「次の一手」なども過剰拒否しません。
+- 自然言語の省略、複数局面をまとめた因果、取り返しの関係、方向、未提供の一般ルール、戦型の推測は残る対象です。自動検査を通ったことを、全文の正確さの保証として扱わないでください。
+
+### 速度・トークン・費用
+
+すべて最終16件の集計。提供元への直接呼び出しの時間で、日本語生成・Containerの起動・GETの遅延は含みません。stagingにはデプロイしておらず、実アプリの背景復帰・体感待ち時間は未検証です。
+
+| 設定 | 意味誤り | 検査拒否 | 秒 中央値／最大 | 初回巡回／反復巡回 中央秒 | 入力token | キャッシュ読込 | 出力token（推論込み） | 推論token | off-peak USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| max | 2/16 | 0/16 | **41.2075 / 80.669** | 44.6325 / 35.4600 | 942200 | 505216 | 118024 | 109086 | **0.137877648** |
+| none | 4/16 | 10/16 | **4.1145 / 8.535** | 4.4445 / 3.6040 | 941800 | 484223 | 7826 | 0 | **0.074784819** |
+
+maxは7/16が45秒超。全局三条件・二反復の中央値は62.6065秒（noneは7.2380秒）です。推論token最大14112で、採用した32768枠に収まりました。100試行の参考費用はmax **$0.8617**、none **$0.4674**（今回のoff-peak・小局面も多い構成）。noneを形式通過100回答へ補正すると約**$1.2464**ですが、意味の正しさは保証しません。自動再試行は実装していません。
+
+日本語の明示情報が増えたため、前回の生USI入力よりトークン・費用は増えます。max入力は206208→942200 token（約4.57倍）、中央値31.254→41.2075秒、最大117.398→80.669秒。前回と同じpeak単価へそろえると今回maxは **$0.275755296/16件**、前回は **$0.173464512/16件**。今回の実行時間帯の割引だけで、入力化が安くなったとは言いません。圧縮・PVの選別は正確さとの兼ね合いがあるため今回は行いません。
+
+| 実行 | 成功応答数 | peak単価の安全側台帳USD | 実行時間帯（off-peak）のusage推計USD |
+| --- | ---: | ---: | ---: |
+| 最初の短局診断 | 1 | 0.011052900 | 0.005526450 |
+| 省略字の予備max | 16 | 0.279381096 | 0.139690548 |
+| 正式表記max | 16 | 0.275755296 | 0.137877648 |
+| 正式表記none | 16 | 0.149569638 | 0.074784819 |
+| **合計** | **49** | **0.715758930** | **0.357879465** |
+
+**今回実行分の費用はusage積算で約$0.358**。全呼び出しを共有台帳で精算し、未確定予約0。割引を使わない安全側でも約$0.716で、指定上限$2以内です。前回比較の費用は今回の実行分に含めません。提供元の請求書との突合はしていないため、確定請求額とは呼びません。
+
+### 再現性・検証・残事項
+
+- 前回ケースSHA-256は`9a9388ca81fc5d588104a8e5d6dd29610c80b6e0dd40911a00629d9e7310ad44`で不変。最終指示文SHA-256は`b4ac425eb6ad6e2859ee302bb45303aae67691a7dfcad906d6e1deb3e4a67d71`。最終max/noneの全32件で条件・反復・送信本文ハッシュが一致し、**Workerの`messages`から生成した本文のSHA-256とも全件一致**を確認しました。
+- `.local/coach-facts/`に`facts.json / final-max.json / final-none.json / max-final-deepseek.json / max-deepseek.json / manual-review.json / validation.json / semantic-guard.json / summary.json / budget.jsonl`を0600で保存。予備noneは0件のファイルだけです。全49件と台帳49精算、未確定0、$2以内をassertで確認しました。APIキー値と追跡ファイル・今回の比較データ／ログを、値を表示せず突き合わせ、一致なしでした。
+- Vitest **79件**、pytest **44件**、TypeScript型検査、比較スクリプト自己検査 **10件**、変更Pythonの構文検査、`git diff --check`が成功。KIFの同・捕獲・成／不成／打・成香／成桂／成銀、後手開始、候補の同、三視点・評価方向・印・境界値・終局詰み・宣言、矛盾／通常文、非同期切断・DO再生成・中止競合・二重加算防止・権利失効・期限・保存削除を検査します。
+- **stagingへのデプロイ、secret変更、実アプリの操作は実施していません**。デプロイ手順はREADMEへ記載しました。別棋譜・長い履歴・512手近い入力の最大性能、実アプリの復帰・表示・回数、将棋知識者の独立採点は残ります。一般公開には既存の購入権利検証などの公開前課題も必要です。
+
+### PR #22 独立レビューへの対応
+
+- 後続の主語を読み飛ばす検査を修正しました。主語だけを先に列挙し、それぞれの文節を個別に照合します。後続の優勢・勝敗・宣言側の矛盾を再現するテストを追加してから修正しました。
+- **見逃しの少なさより、正しい文を拒否しないことを優先**します。否定・仮定・目的を含む文は安全側に許可し、「有利です」「勝ちました」など確かな断定形だけを検査します。否定・予防の助言・可能性・引用の打ち消し・練習の提案を拒否しないテストを追加しました。複雑な文章は検査対象外になる場合があります。
+- 同期POSTにも、入力保存・外部呼び出しより前に期限のwatchdogを永続化します。同期処理中のプロセス消失を模して、再生成後のalarmだけで入力削除・予約返却が行われるテストを追加しました。
+- 符号付き評価を送らない約束の対象は、**サーバーが作る解析事実**です。質問・プロフィール・履歴に利用者が書いた数値は、全角・別種の負号・空白・ASCIIも含めて保持します。数値の伏字拡張は行わず、既存のASCII数値の伏字も除去しました。Python比較入力も同じ処理にそろえました。出力本文の数字禁止は変更していません。
+
+再現テストは修正前に失敗を確認しています（指摘1〜3で13件、追加の断定形の限定で3件）。修正後はVitest **97件**、pytest **45件**、型検査、比較スクリプト自己検査 **11件**、`git diff --check`が成功しました。
+
+前回の診断・予備・最終比較の**全49回答**へ修正後の検査を再適用しました。意味が正しい**41回答中、意味ガードの偽陽性0**（最終32件では26回答中0）。既存の数字・棋譜表記・参照上限による形式拒否10件はそのままで、意味検査の偽陽性とは区別しています。残る意味誤りの見逃しを解消したという主張ではありません。再検査結果は`.local/coach-facts/review-revalidation.json`に0600で保存し、最終32件の送信本文ハッシュも引き続き一致することを確認しました。
+
+**実LLMの再呼び出し・追加費用・stagingデプロイはありません**。比較時の生出力・台帳・採点は変更していません。
