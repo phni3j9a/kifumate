@@ -45,6 +45,15 @@ CREATE TABLE analyses (
 );
 CREATE TABLE analysis_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
 `,
+  String.raw`
+CREATE TABLE classifications (
+  game_id TEXT PRIMARY KEY NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  rules_version INTEGER NOT NULL DEFAULT 0,
+  automatic TEXT,
+  manual TEXT NOT NULL DEFAULT '{}',
+  error TEXT
+);
+`,
 ];
 
 export interface MigrationDatabase {

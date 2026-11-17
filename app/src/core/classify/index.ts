@@ -44,8 +44,9 @@ export interface SideClassification {
   castles: CastleFinding[];
   castleStatus: "判定済み" | "未分類";
 }
+export const rulesVersion = 3;
 export interface Classification {
-  rulesVersion: 3;
+  rulesVersion: number;
   processedPlies: number;
   sides: { black: SideClassification; white: SideClassification };
   relationships: Finding[];
@@ -163,12 +164,54 @@ export function classifyMoves(
   initialPosition: ImmutablePosition,
   moves: readonly Move[],
 ): Classification {
+  const steps = classifySteps(initialPosition, moves);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+/** まとまった棋譜の再判定でも、16手ごとに画面へ実行時間を返す。 */
+export async function classifyRecordAsync(
+  record: ImmutableRecord,
+): Promise<Classification> {
+  const moves: Move[] = [];
+  for (let node = record.first.next; node; node = node.next) {
+    if (!(node.move instanceof Move)) break;
+    moves.push(node.move);
+  }
+  return finishAsync(classifySteps(record.initialPosition, moves));
+}
+
+/** 保存済みの開始SFENと本譜USIから、巨大なKIFコメントを読み直さず再判定する。 */
+export async function classifyUsiAsync(
+  sfen: string,
+  moves: readonly string[],
+): Promise<Classification> {
+  const position = Position.newBySFEN(sfen);
+  if (!position) throw new Error("開始局面を読めません");
+  return finishAsync(classifySteps(position, moves));
+}
+async function finishAsync(
+  steps: Generator<void, Classification>,
+): Promise<Classification> {
+  let next = steps.next();
+  while (!next.done) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    next = steps.next();
+  }
+  return next.value;
+}
+
+function* classifySteps(
+  initialPosition: ImmutablePosition,
+  moves: readonly (Move | string)[],
+): Generator<void, Classification> {
   const p = Position.newBySFEN(initialPosition.sfen);
   if (!p || !p.board.findKing(Color.BLACK) || !p.board.findKing(Color.WHITE)) {
     throw new Error("分類には両玉のある開始局面が必要です。");
   }
   const result: Classification = {
-    rulesVersion: 3,
+    rulesVersion,
     processedPlies: moves.length,
     sides: { black: emptySide(), white: emptySide() },
     relationships: [],
@@ -385,11 +428,18 @@ export function classifyMoves(
 
   scan(0);
   for (let i = 0; i < moves.length; i++) {
-    const move = moves[i]!,
+    const input = moves[i]!,
       ply = i + 1;
-    const canonical = p.createMoveByUSI(move.usi);
-    if (!canonical?.equals(move) || !p.isValidMove(move))
+    const canonical = p.createMoveByUSI(
+      typeof input === "string" ? input : input.usi,
+    );
+    if (
+      !canonical ||
+      (typeof input !== "string" && !canonical.equals(input)) ||
+      !p.isValidMove(canonical)
+    )
       throw new Error(`${ply}手目は合法手ではありません。`);
+    const move = canonical;
     // shortcut: 交換系戦型は序盤32手以内の典型手順のみ。別手順を追加する際は専用の反例テストも足す。
     if (ply <= 32) {
       const destination = relative(
@@ -433,6 +483,7 @@ export function classifyMoves(
     }
     if (!p.doMove(move)) throw new Error(`${ply}手目を適用できません。`);
     scan(ply);
+    if (ply % 16 === 0) yield;
   }
   return result;
 }

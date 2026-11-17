@@ -241,7 +241,7 @@ test("3版目移行: 既存棋譜を維持、保存再読み込み・CASCADE・�
   sql.close();
   const { sql: old, db } = await database();
   old.exec(
-    "DROP TABLE analyses; DROP TABLE analysis_meta; PRAGMA user_version=2",
+    "DROP TABLE classifications; DROP TABLE analyses; DROP TABLE analysis_meta; PRAGMA user_version=2",
   );
   old
     .prepare(

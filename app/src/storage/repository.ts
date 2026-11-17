@@ -1,3 +1,8 @@
+import {
+  classificationSelect,
+  classifyForStorage,
+  saveAutomatic,
+} from "./classifications";
 import { randomUUID } from "expo-crypto";
 import type { SQLiteDatabase } from "expo-sqlite";
 import type { Record as ShogiRecord } from "tsshogi";
@@ -28,6 +33,9 @@ export interface Game {
   /** 手で直した勝ち側。NULL は棋譜の結果どおり */
   winner: Winner | null;
   favorite: number;
+  classification_auto?: string | null;
+  classification_manual?: string | null;
+  classification_error?: string | null;
 }
 export type Winner = "black" | "white" | "draw" | "unknown";
 // 先後 side と勝ち側 w（SQL の式）から、自分から見た結果を出す SQL。resultFor と同じ規則。
@@ -39,8 +47,10 @@ export interface Alias {
 }
 export const listGames = (db: SQLiteDatabase) =>
   db.getAllAsync<Game>(
-    "SELECT * FROM games ORDER BY played_at DESC, created_at DESC",
+    `${classificationSelect} ORDER BY played_at DESC, created_at DESC`,
   );
+export const getGame = (db: SQLiteDatabase, id: string) =>
+  db.getFirstAsync<Game>(`${classificationSelect} WHERE games.id=?`, id);
 export const listAliases = (db: SQLiteDatabase) =>
   db.getAllAsync<Alias>("SELECT id, name FROM aliases ORDER BY created_at");
 /** 同じ開始局面・同じ指し手の棋譜がすでにあれば、その id */
@@ -70,23 +80,27 @@ export async function importGame(
   const id = randomUUID(),
     now = new Date().toISOString(),
     info = describe(record);
-  await db.runAsync(
-    `INSERT INTO games (id, identity, kif, black, white, played_at, plies, self_side, result, side_manual, result_manual, created_at, updated_at)
+  const classification = await classifyForStorage(record);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO games (id, identity, kif, black, white, played_at, plies, self_side, result, side_manual, result_manual, created_at, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    id,
-    key,
-    storedKif,
-    info.black,
-    info.white,
-    info.date,
-    info.plies,
-    side,
-    result,
-    +sideManual,
-    +resultManual,
-    now,
-    now,
-  );
+      id,
+      key,
+      storedKif,
+      info.black,
+      info.white,
+      info.date,
+      info.plies,
+      side,
+      result,
+      +sideManual,
+      +resultManual,
+      now,
+      now,
+    );
+    await saveAutomatic(db, id, classification);
+  });
   return { id, duplicate: false };
 }
 // 先後と勝ち側は別々に直す。どちらも1つの UPDATE で今の行のもう一方と合わせて result を決め直すので、
