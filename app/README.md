@@ -75,6 +75,8 @@ JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
   --output "$HOME/kifumate-releases/kifumate-0.1.0-update.apk"
 ```
 
+ローカルでも同じ `apk` プロファイルがEAS上の番号を先に更新し、その番号をネイティブへ埋め込みます。手元だけで番号を変更したり、クラウドの番号を巻き戻したりしません。完了後は `aapt dump badging <APK>` で番号を確かめ、配布ファイル名にも `versionCode` を付けてください。
+
 ### 版と上書き更新
 
 - **表示用の版**：`app.json` の `expo.version`（現在 `0.1.0`）を変更し、`package.json`／lockfileの版もそろえます。自動では上がりません。
@@ -104,6 +106,16 @@ EAS上の鍵とバックアップを両方失うと、配布済みアプリを�
 棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動・未使用の生体認証の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
 
 公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)。
+
+### #33 の配布確認（2026-11-17）
+
+- **配布の正本**：`~/kifumate-releases/kifumate-0.1.0-5-release.apk`（約108MB、表示版0.1.0／`versionCode=5`、arm64-v8a・armeabi-v7a・x86・x86_64）。このディレクトリに他の版のAPKは置いていません。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
+- 今回は**クラウド無料枠の待ち時間のためEASローカルビルドで代用**しました。クラウド1件（番号2）は約39分未開始で取消済み。ローカルは3回：番号3はJava21がJREのみだったため約4分51秒で失敗、JDK17へ直した番号4は18分44秒、配布用番号5は15分18秒で成功。番号の欠番はそのまま残し、EAS管理の同じ署名鍵と連番を使っています。クラウドのコンパイル完了は未確認です。
+- Pixel 3 `8AFX0S69E`／Android 11：版4の起動・KIF取り込み（通常入力欄へ検証用UiAutomatorで日本語を入力）・保存・再起動・再生・合法分岐・本番ふつう解析1局を確認。期限1時間／1端末の招待を入力し、精密解析1局（どちらも1手・2局面）、分岐中の解析1セッション、AIコーチ解説1回（総合・かんたん、追加質問なし）が成功しました。
+- 招待を取消し、コード原文と取消メタデータを削除。無料への復帰と、保存した精密候補・解説の閲覧を確認。15:57 UTCに本番の全3 Container・全slotがinactive、`active=0 / assigned=0`を確認。secret・serverソースは変更せず、`wrangler tail`も使用していません。
+- `adb install -r` で**同じ鍵の版4→5へ上書き更新**。初回インストール日時が変わらず、架空の棋譜1局・お気に入り・自分の側・精密3候補・同じ解説が残り、回数も2/10局のまま（同じ端末トークン）であることを確認。版5の署名はバックアップの証明書とも一致し、APK内の本番URL・非debuggable・通常の権限がINTERNETのみ（ほかはAndroidXのアプリ内署名権限）であることを確認しました。
+- `npm run check`（単体158件・禁止名称・型・lint）、Web E2E66件、Androidのリリースバンドル出力と配布物の禁止名称検査が通過。比較は解析モックが撮影前に完了する競合を直し、**84場面×2幅**が通過しました。実機の起動画面・アイコン・Aboutも画像で確認しています。
+- 画像／動画は `.local/screenshots/android/issue33-*`、比較は `.local/compare/{360x800,393x852}/`（gitignore対象）。iPhone・開発ビルド・AAB／ストア公開・購入連携は実施していません。`expo-doctor`には既存のExpo／FileSystem／Router／SQLiteの新しいパッチ版推奨が残ります。SDK更新や `npm audit fix --force` は行っていません。
 
 ## いま使えること
 
