@@ -247,6 +247,7 @@ npx wrangler secret put COACH_API_KEY --env staging
 printf 'https://api.deepseek.com\n' | npx wrangler secret put COACH_BASE_URL --env staging
 printf 'deepseek-flash\n' | npx wrangler secret put COACH_MODEL --env staging
 printf 'max_tokens\n' | npx wrangler secret put COACH_TOKEN_PARAMETER --env staging
+# 古いCOACH_TIMEOUT_MS / COACH_MAX_TOKENSがsecretなら、削除してvarsの240000 / 32768を使う。
 # 偽提供元を無効化（未設定なら不要）
 npx wrangler secret delete COACH_PROVIDER --env staging
 npm run deploy
