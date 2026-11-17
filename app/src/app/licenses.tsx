@@ -1,17 +1,55 @@
-import { Label, Page } from "../components/ui";
+import { Text } from "react-native";
+import { MIT, OFL } from "../components/license-texts";
+import { colors, font } from "../components/theme";
+import {
+  Card,
+  PageHeader,
+  PageScroll,
+  Screen,
+  SectionTitle,
+} from "../components/ui";
+const items = [
+  [
+    "将棋のルールと棋譜の読み書き：tsshogi（MIT）",
+    "Copyright (c) 2023 Kubo, Ryosuke",
+  ],
+  [
+    "文字コードの変換：encoding-japanese（MIT）",
+    "Copyright (c) 2012-present polygonplanet",
+  ],
+  [
+    "盤・駒・アイコンの描画：react-native-svg（MIT）",
+    "Copyright (c) [2015-2016] [Horcrux]",
+  ],
+  [
+    "書体：Zen Maru Gothic（SIL Open Font License 1.1）",
+    "Copyright 2021 The Zen Maru Gothic Project Authors",
+  ],
+];
 export default function Licenses() {
+  const body = font(500, 11, 1.6, colors.ink2);
   return (
-    <Page>
-      <Label title>オープンソースについて</Label>
-      <Label>将棋ルールと棋譜入出力：tsshogi（MIT）</Label>
-      <Label muted>Copyright (c) 2023 Kubo, Ryosuke</Label>
-      <Label>文字コード変換：encoding-japanese（MIT）</Label>
-      <Label muted>Copyright (c) 2012-present polygonplanet</Label>
-      <Label muted>
-        {
-          'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.'
-        }
-      </Label>
-    </Page>
+    <Screen>
+      <PageHeader title="ライセンス" />
+      <PageScroll>
+        <Card style={{ paddingVertical: 11, paddingHorizontal: 14, gap: 8 }}>
+          {items.map(([title, copyright]) => (
+            <Text key={title} selectable style={font(700, 12.5, 1.5)}>
+              {title}
+              {"\n"}
+              <Text style={body}>{copyright}</Text>
+            </Text>
+          ))}
+        </Card>
+        <SectionTitle>MIT License</SectionTitle>
+        <Text selectable style={[body, { marginHorizontal: 4 }]}>
+          {MIT}
+        </Text>
+        <SectionTitle>SIL Open Font License 1.1</SectionTitle>
+        <Text selectable style={[body, { marginHorizontal: 4 }]}>
+          {OFL}
+        </Text>
+      </PageScroll>
+    </Screen>
   );
 }

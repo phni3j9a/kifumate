@@ -1,4 +1,6 @@
 // 将来の解析・分類・解説は games.id を参照するテーブルをマイグレーションで追加する。
+// 棋譜の削除でいっしょに消えるよう、必ず `REFERENCES games(id) ON DELETE CASCADE` を付ける
+// （外部キーは migrate() が接続ごとに有効にしている）。
 export const migrations = [
   String.raw`
 CREATE TABLE games (

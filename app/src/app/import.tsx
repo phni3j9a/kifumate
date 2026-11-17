@@ -1,72 +1,143 @@
-import { useState } from "react";
-import { Platform, View } from "react-native";
-import { router, Stack } from "expo-router";
+import { useRef, useState, type ReactNode } from "react";
+import { Platform, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import type { Record as ShogiRecord } from "tsshogi";
-import { Button, Card, Field, Label, Message, Page } from "../components/ui";
-import { IdentityFields } from "../components/identity-fields";
+import { Icon, type IconName } from "../components/icons";
+import { KifHelpLink } from "../components/kif-help";
+import { toast } from "../components/overlay";
+import { colors, font, line } from "../components/theme";
+import {
+  Button,
+  Card,
+  Hint,
+  KifArea,
+  NoticeCard,
+  PageHeader,
+  PageScroll,
+  Screen,
+  Segmented,
+  TextButton,
+  s as ui,
+} from "../components/ui";
+import { dateLong } from "../core/format";
 import {
   decodeKif,
   describe,
   gameOutcome,
   matchNames,
   MAX_BYTES,
+  outcomeText,
   readKif,
   resultFor,
-  type Result,
   type Side,
 } from "../core/kif";
-import { importGame, listAliases } from "../storage/repository";
+import { findDuplicate, importGame, listAliases } from "../storage/repository";
+
+type Preview =
+  | { error: string }
+  | {
+      record: ShogiRecord;
+      auto: Side;
+      ambiguous: boolean;
+      names: number;
+      duplicate: string | null;
+    };
+/** 読み取り結果の1行（.vl）。tone は丸の色（.ck / .ck.wn） */
+function Line({
+  icon = "check",
+  warn = false,
+  title,
+  children,
+}: {
+  icon?: IconName;
+  warn?: boolean;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={s.vl}>
+      <View style={[s.ck, warn && { backgroundColor: colors.orange }]}>
+        <Icon name={icon} size={11} strokeWidth={3.2} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={font(900, 13, 1.4)}>{title}</Text>
+        {children}
+      </View>
+    </View>
+  );
+}
+const body = font(500, 11.5, 1.55, colors.ink2);
+
 export default function Import() {
   const db = useSQLiteContext();
-  const [text, setText] = useState(""),
-    [record, setRecord] = useState<ShogiRecord | null>(null),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
-  const [side, setSide] = useState<Side>(null),
-    [result, setResult] = useState<Result>("unknown"),
-    [sideManual, setSideManual] = useState(false),
-    [resultManual, setResultManual] = useState(false),
-    [busy, setBusy] = useState(false),
-    [duplicate, setDuplicate] = useState("");
-  async function preview(input: string) {
-    setError("");
-    setDuplicate("");
-    setRecord(null);
-    setBusy(true);
+  const [tab, setTab] = useState<"paste" | "file">("paste"),
+    [text, setText] = useState(""),
+    [file, setFile] = useState<{ name: string; text: string } | null>(null),
+    [view, setView] = useState<Preview | null>(null),
+    // undefined＝まだ選んでいない、null＝自分ではない
+    [pick, setPick] = useState<Side | undefined>(undefined),
+    [busy, setBusy] = useState(false);
+  const job = useRef(0);
+  // 入力が変わるたびに読み取り直す。貼り付け・入力中は少し待ってからまとめて読む。
+  function read(input: string, wait = 0) {
+    const id = ++job.current;
+    setPick(undefined);
+    if (!input.trim()) {
+      setView(null);
+      return;
+    }
+    setTimeout(async () => {
+      if (id !== job.current) return;
+      let next: Preview;
+      try {
+        const record = readKif(input),
+          d = describe(record),
+          names = await listAliases(db),
+          match = matchNames(
+            d.black,
+            d.white,
+            names.map((n) => n.name),
+          );
+        next = {
+          record,
+          auto: match.side,
+          ambiguous: match.ambiguous,
+          names: names.length,
+          duplicate: await findDuplicate(db, record),
+        };
+      } catch (e) {
+        next = {
+          error: e instanceof Error ? e.message : "読み取れませんでした。",
+        };
+      }
+      if (id === job.current) setView(next);
+    }, wait);
+  }
+  function fail(e: unknown, fallback: string) {
+    job.current++;
+    setPick(undefined);
+    setView({ error: e instanceof Error ? e.message : fallback });
+  }
+  async function paste() {
     try {
-      const r = readKif(input),
-        d = describe(r),
-        names = await listAliases(db),
-        match = matchNames(
-          d.black,
-          d.white,
-          names.map((n) => n.name),
-        );
-      setRecord(r);
-      setSide(match.side);
-      setResult(resultFor(match.side, gameOutcome(r)));
-      setSideManual(false);
-      setResultManual(false);
-      setNotice(
-        match.ambiguous
-          ? "両方の名前が登録名に一致しました。自分がどちらか選んでください。"
-          : !match.side
-            ? "登録名に一致しませんでした。自分の棋譜なら、先手・後手を指定してください。"
-            : "登録名から判定しました。違っていたら直せます。",
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "読み取れませんでした。");
-    } finally {
-      setBusy(false);
+      const pasted = await Clipboard.getStringAsync();
+      if (!pasted.trim()) {
+        toast("クリップボードに文字がありません");
+        return;
+      }
+      setText(pasted);
+      read(pasted);
+    } catch {
+      toast("貼り付けできませんでした。入力欄に貼り付けてください");
     }
   }
-  async function pick() {
-    setError("");
+  async function choose() {
     try {
-      let buffer: ArrayBuffer;
+      let buffer: ArrayBuffer, name: string;
       if (Platform.OS === "web") {
         const picked = await DocumentPicker.getDocumentAsync({
           type: "*/*",
@@ -77,6 +148,7 @@ export default function Import() {
         if ((asset.size ?? 0) > MAX_BYTES)
           throw new Error("ファイルは2MB以内にしてください。");
         buffer = await asset.file!.arrayBuffer();
+        name = asset.name;
       } else {
         // File自身のピッカーで読み取り権限を受け取る（共有キャッシュのパスに依存しない）。
         const picked = await File.pickFileAsync({ mimeTypes: ["*/*"] });
@@ -84,120 +156,296 @@ export default function Import() {
         if (picked.result.size > MAX_BYTES)
           throw new Error("ファイルは2MB以内にしてください。");
         buffer = await picked.result.arrayBuffer();
+        name = picked.result.name;
       }
       const decoded = decodeKif(new Uint8Array(buffer));
-      setText(decoded);
-      await preview(decoded);
+      setFile({ name, text: decoded });
+      read(decoded);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ファイルを開けませんでした。");
+      setFile(null);
+      fail(e, "ファイルを開けませんでした。");
     }
   }
+  const ok = view && "record" in view ? view : null;
+  const side = pick !== undefined ? pick : (ok?.auto ?? null);
+  const decided = pick !== undefined || !!ok?.auto;
   async function save() {
-    if (!record || busy) return;
+    if (!ok || !decided || busy) return;
     setBusy(true);
-    setError("");
     try {
       const saved = await importGame(
         db,
-        record,
+        ok.record,
         side,
-        result,
-        sideManual,
-        resultManual,
+        resultFor(side, gameOutcome(ok.record)),
+        // 登録名どおりの自動判定をそのまま使うときだけ、あとの再照合の対象にする。
+        !(ok.auto && side === ok.auto),
+        false,
       );
-      if (saved.duplicate) {
-        setDuplicate(saved.id);
-        setNotice(
-          "同じ開始局面と指し手の棋譜が、すでにあります。重ねて保存していません。",
-        );
-      } else {
-        router.dismissTo("/");
+      if (saved.duplicate) setView({ ...ok, duplicate: saved.id });
+      else {
+        router.replace({ pathname: "/game/[id]", params: { id: saved.id } });
+        toast("保存しました");
       }
     } catch {
-      setError("棋譜を保存できませんでした。もう一度お試しください。");
+      toast("棋譜を保存できませんでした。もう一度お試しください");
     } finally {
       setBusy(false);
     }
   }
-  const d = record ? describe(record) : null;
+  const d = ok ? describe(ok.record) : null;
+  const who = d && (
+    <View style={{ marginTop: 6 }}>
+      <Segmented
+        label="あなたはどちら"
+        options={[
+          ["black", `☗ ${d.black}`],
+          ["white", `☖ ${d.white}`],
+          ["none", "自分ではない"],
+        ]}
+        value={!decided ? null : (side ?? "none")}
+        onChange={(v) => setPick(v === "none" ? null : v)}
+      />
+    </View>
+  );
   return (
-    <Page>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Button onPress={() => router.back()}>閉じる</Button>
-          ),
-        }}
-      />
-      <Label title>指した将棋を、ここに。</Label>
-      <Label muted>
-        UTF-8・Shift_JIS のKIFに対応しています。取り込みは端末内だけで行います。
-      </Label>
-      <Button disabled={busy} onPress={() => void pick()}>
-        ファイルを選ぶ
-      </Button>
-      <Field
-        multiline
-        accessibilityLabel="KIFの本文"
-        placeholder="KIFの本文を貼り付け"
-        value={text}
-        onChangeText={(t) => {
-          setText(t);
-          setRecord(null);
-          setDuplicate("");
-          setNotice("");
-        }}
-        editable={!busy}
-        style={{ minHeight: 180 }}
-      />
-      <Button
-        disabled={busy || !text.trim()}
-        onPress={() => void preview(text)}
-      >
-        内容を確認
-      </Button>
-      <Message text={error} error />
-      {d && (
-        <Card>
-          <Label title>取り込む棋譜</Label>
-          <Label>先手：{d.black}</Label>
-          <Label>後手：{d.white}</Label>
-          <Label muted>
-            {d.date || "対局日不明"}・{d.plies}手
-          </Label>
-          <Message text={notice} />
-          <IdentityFields
-            side={side}
-            result={result}
-            onSide={(s) => {
-              setSide(s);
-              setSideManual(true);
-              if (!resultManual) setResult(resultFor(s, gameOutcome(record!)));
-            }}
-            onResult={(r) => {
-              setResult(r);
-              setResultManual(true);
-            }}
-          />
-          <View>
-            {duplicate ? (
-              <Button
-                primary
-                onPress={() => {
-                  router.dismissTo("/");
-                  router.push(`/game/${duplicate}`);
-                }}
-              >
-                保存済みの棋譜を開く
+    <Screen>
+      <PageHeader close title="棋譜を取り込む" />
+      <PageScroll>
+        <Segmented
+          options={[
+            ["paste", "テキスト"],
+            ["file", "ファイル"],
+          ]}
+          value={tab}
+          onChange={(next) => {
+            setTab(next);
+            read(next === "paste" ? text : (file?.text ?? ""));
+          }}
+        />
+        {tab === "paste" ? (
+          <View style={{ marginTop: 10 }}>
+            <KifArea
+              accessibilityLabel="KIF形式の棋譜"
+              placeholder="KIF形式の棋譜をここに貼り付けます"
+              value={text}
+              invalid={!!view && "error" in view}
+              onChangeText={(t) => {
+                setText(t);
+                read(t, 250);
+              }}
+            />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <Button size="sm" icon="paste" onPress={() => void paste()}>
+                クリップボードから貼り付け
               </Button>
+              {text ? (
+                <Button
+                  size="sm"
+                  onPress={() => {
+                    setText("");
+                    read("");
+                  }}
+                >
+                  消す
+                </Button>
+              ) : null}
+            </View>
+          </View>
+        ) : (
+          <View style={s.fpick}>
+            {file ? (
+              <>
+                <View style={s.fchip}>
+                  <Icon name="file" size={14} />
+                  <Text
+                    numberOfLines={1}
+                    style={[font(700, 12), { flexShrink: 1 }]}
+                  >
+                    {file.name}
+                  </Text>
+                </View>
+                <TextButton onPress={() => void choose()}>
+                  ほかのファイルを選ぶ
+                </TextButton>
+              </>
             ) : (
-              <Button primary disabled={busy} onPress={() => void save()}>
-                {busy ? "保存中…" : "棋譜を保存"}
-              </Button>
+              <>
+                <Button size="sm" icon="file" onPress={() => void choose()}>
+                  ファイルを選ぶ
+                </Button>
+                <Text style={font(500, 11.5, 1.6, colors.ink2)}>
+                  .kif / .kifu のファイルを選べます
+                </Text>
+              </>
             )}
           </View>
-        </Card>
-      )}
-    </Page>
+        )}
+        {!view ? (
+          <>
+            <Hint>
+              対局サービスへのログインや連携は要りません。棋譜のテキストかファイルがあれば取り込めます。
+            </Hint>
+            <View style={s.lnk}>
+              <KifHelpLink />
+            </View>
+          </>
+        ) : "error" in view ? (
+          <>
+            <NoticeCard
+              kind="bad"
+              image="sys-invalid"
+              title="棋譜として読み取れませんでした"
+              detail={view.error}
+            />
+            <View style={s.lnk}>
+              <KifHelpLink />
+            </View>
+          </>
+        ) : (
+          <>
+            <Card style={s.vr}>
+              <Line title="棋譜を読み取れました">
+                <View style={{ marginTop: 3, gap: 2 }}>
+                  {[
+                    ["日付", dateLong(d!.date)],
+                    ["先手", `☗ ${d!.black}`],
+                    ["後手", `☖ ${d!.white}`],
+                    ["結果", outcomeText(view.record)],
+                  ].map(([label, value]) => (
+                    <View key={label} style={{ flexDirection: "row", gap: 8 }}>
+                      <Text style={font(900, 10, 1.8, colors.ink2)}>
+                        {label}
+                      </Text>
+                      <Text style={[font(700, 12, 1.5), { flex: 1 }]}>
+                        {value}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </Line>
+              {view.duplicate ? null : (
+                <>
+                  <View style={ui.hairTop}>
+                    {!decided ? (
+                      <Line warn icon="info" title="あなたはどちらですか？">
+                        <Text style={body}>
+                          {view.ambiguous
+                            ? "先手と後手のどちらも、登録した名前に当てはまります。"
+                            : view.names
+                              ? "登録した名前に当てはまる対局者がいません。"
+                              : "対局者名がまだ登録されていません。"}
+                        </Text>
+                        {who}
+                      </Line>
+                    ) : !side ? (
+                      <Line title="自分の対局ではない">
+                        <Text style={body}>
+                          保存と再生はできます。戦績には数えません。
+                        </Text>
+                        {who}
+                      </Line>
+                    ) : (
+                      <Line
+                        title={`あなたは${side === "black" ? "先手" : "後手"}`}
+                      >
+                        <Text style={body}>
+                          {side === view.auto
+                            ? `登録した名前「${side === "black" ? d!.black : d!.white}」と一致しました。`
+                            : "手で指定しました。"}
+                        </Text>
+                        {who}
+                      </Line>
+                    )}
+                  </View>
+                  <View style={ui.hairTop}>
+                    <Line title="重複はありません">
+                      <Text style={body}>
+                        保存済みの棋譜に、同じ対局は見つかりませんでした。
+                      </Text>
+                    </Line>
+                  </View>
+                </>
+              )}
+            </Card>
+            {view.duplicate ? (
+              <NoticeCard
+                kind="warn"
+                image="sys-duplicate"
+                title="同じ棋譜がすでに保存されています"
+                detail="二重に保存すると戦績も二重に数えられるため、取り込みません。"
+              />
+            ) : null}
+            <View style={{ marginTop: 16 }}>
+              {view.duplicate ? (
+                <Button
+                  kind="pri"
+                  wide
+                  onPress={() =>
+                    router.replace({
+                      pathname: "/game/[id]",
+                      params: { id: view.duplicate! },
+                    })
+                  }
+                >
+                  保存済みの棋譜を開く
+                </Button>
+              ) : (
+                <Button
+                  kind="pri"
+                  wide
+                  disabled={!decided || busy}
+                  onPress={() => void save()}
+                >
+                  保存する
+                </Button>
+              )}
+            </View>
+          </>
+        )}
+      </PageScroll>
+    </Screen>
   );
 }
+const s = StyleSheet.create({
+  fpick: {
+    alignItems: "center",
+    gap: 10,
+    marginTop: 10,
+    paddingVertical: 22,
+    paddingHorizontal: 12,
+    borderWidth: line.ol,
+    borderStyle: "dashed",
+    borderColor: colors.dash,
+    borderRadius: 16,
+  },
+  fchip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "100%",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.sand,
+  },
+  lnk: { flexDirection: "row", marginTop: 6 },
+  vr: { marginTop: 12, paddingTop: 4, paddingHorizontal: 12, paddingBottom: 6 },
+  vl: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 9,
+    paddingVertical: 8,
+  },
+  ck: {
+    width: 20,
+    height: 20,
+    marginTop: 1,
+    borderRadius: 10,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    backgroundColor: colors.mint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

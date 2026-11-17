@@ -37,6 +37,17 @@ export const listGames = (db: SQLiteDatabase) =>
   );
 export const listAliases = (db: SQLiteDatabase) =>
   db.getAllAsync<Alias>("SELECT id, name FROM aliases ORDER BY created_at");
+/** 同じ開始局面・同じ指し手の棋譜がすでにあれば、その id */
+export async function findDuplicate(
+  db: SQLiteDatabase,
+  record: ShogiRecord,
+): Promise<string | null> {
+  const found = await db.getFirstAsync<{ id: string }>(
+    "SELECT id FROM games WHERE identity = ?",
+    identity(record),
+  );
+  return found?.id ?? null;
+}
 export async function importGame(
   db: SQLiteDatabase,
   record: ShogiRecord,
@@ -46,11 +57,8 @@ export async function importGame(
   resultManual: boolean,
 ): Promise<{ id: string; duplicate: boolean }> {
   const key = identity(record);
-  const duplicate = await db.getFirstAsync<{ id: string }>(
-    "SELECT id FROM games WHERE identity = ?",
-    key,
-  );
-  if (duplicate) return { id: duplicate.id, duplicate: true };
+  const duplicate = await findDuplicate(db, record);
+  if (duplicate) return { id: duplicate, duplicate: true };
   const storedKif = writeKif(record);
   readStoredKif(storedKif);
   const id = randomUUID(),
@@ -88,6 +96,10 @@ export async function updateInfo(
     new Date().toISOString(),
     id,
   );
+}
+// 元に戻せない。games.id を参照する行（解析結果・分類・解説など）は ON DELETE CASCADE でいっしょに消える。
+export async function deleteGame(db: SQLiteDatabase, id: string) {
+  await db.runAsync("DELETE FROM games WHERE id=?", id);
 }
 export async function toggleFavorite(db: SQLiteDatabase, game: Game) {
   await db.runAsync(

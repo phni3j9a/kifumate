@@ -13,48 +13,33 @@ test("ネイティブ共有は書き込みの完了を待ち、書き込み失�
       finish = resolve;
       fail = reject;
     });
-    const screen = loadWithMocks<{ default: () => ReactElement }>(
-      "src/app/export.tsx",
-      {
-        react: {
-          useState: (value: unknown) => [
-            value,
-            (next: unknown) => messages.push(next),
-          ],
-        },
-        "react-native": { Platform: { OS: "android" } },
-        "expo-router": {
-          Stack: { Screen: "Screen" },
-          useLocalSearchParams: () => ({ id: "test" }),
-        },
-        "expo-clipboard": {},
-        "expo-sharing": {
-          isAvailableAsync: async () => true,
-          shareAsync: async () => {
-            calls.push("share");
-          },
-        },
-        "expo-file-system": {
-          Paths: { cache: "cache" },
-          File: class {
-            uri = "file://test.kifu";
-            write() {
-              calls.push("write");
-              return pending;
-            }
-          },
-        },
-        "../components/ui": Object.fromEntries(
-          ["Button", "Field", "Label", "Message", "Page"].map((name) => [
-            name,
-            name,
-          ]),
-        ),
-        "../components/use-game": {
-          useGame: () => ({ game: { kif: "本譜" }, error: "" }),
+    const sheet = loadWithMocks<{
+      default: (props: object) => ReactElement;
+    }>("src/components/export-sheet.tsx", {
+      "react-native": { Platform: { OS: "android" }, View: "View" },
+      "expo-clipboard": {},
+      "expo-sharing": {
+        isAvailableAsync: async () => true,
+        shareAsync: async () => {
+          calls.push("share");
         },
       },
-    );
+      "expo-file-system": {
+        Paths: { cache: "cache" },
+        File: class {
+          uri = "file://test.kifu";
+          write() {
+            calls.push("write");
+            return pending;
+          }
+        },
+      },
+      "./overlay": {
+        Sheet: "Sheet",
+        toast: (text: string) => messages.push(text),
+      },
+      "./ui": { Button: "Button", Hint: "Hint", KifArea: "KifArea" },
+    });
     function findButton(element: ReactElement): (() => void) | undefined {
       const { children, onPress } = element.props as {
         children?: unknown;
@@ -63,7 +48,7 @@ test("ネイティブ共有は書き込みの完了を待ち、書き込み失�
       if (
         element.type === "Button" &&
         onPress &&
-        children === "ファイルを保存・共有"
+        children === "ファイルに保存・共有"
       )
         return onPress;
       for (const child of [children].flat(Infinity)) {
@@ -73,7 +58,9 @@ test("ネイティブ共有は書き込みの完了を待ち、書き込み失�
         }
       }
     }
-    const press = findButton(screen.default());
+    const press = findButton(
+      sheet.default({ visible: true, onClose() {}, id: "test", kif: "本譜" }),
+    );
     assert(press);
     press();
     await setImmediate();

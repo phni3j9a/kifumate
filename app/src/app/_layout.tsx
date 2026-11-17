@@ -1,57 +1,63 @@
 import { Suspense } from "react";
+import { useFonts } from "expo-font";
 import { Stack, type ErrorBoundaryProps } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { colors, Button, Label, Page } from "../components/ui";
+import { ZenMaruGothic_500Medium } from "@expo-google-fonts/zen-maru-gothic/500Medium";
+import { ZenMaruGothic_700Bold } from "@expo-google-fonts/zen-maru-gothic/700Bold";
+import { ZenMaruGothic_900Black } from "@expo-google-fonts/zen-maru-gothic/900Black";
+import { DialogHost, ToastHost } from "../components/overlay";
+import { colors } from "../components/theme";
+import { Button, Problem, Screen } from "../components/ui";
 import { migrate } from "../storage/schema";
 export const unstable_settings = { anchor: "(tabs)" };
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
   return (
-    <Page>
-      <Label title>開けませんでした</Label>
-      <Label>端末内のデータは消していません。もう一度お試しください。</Label>
-      <Button onPress={retry}>もう一度</Button>
-    </Page>
+    <SafeAreaProvider>
+      <Screen>
+        <Problem text="開けませんでした。端末内のデータは消していません。もう一度お試しください。">
+          <Button onPress={retry}>もう一度</Button>
+        </Problem>
+      </Screen>
+    </SafeAreaProvider>
   );
 }
 export default function Layout() {
+  // 書体が入るまで何も描かない（別の書体で一瞬出て、行の高さが変わるのを避ける）。
+  const [loaded, failed] = useFonts({
+    ZenMaruGothic_500Medium,
+    ZenMaruGothic_700Bold,
+    ZenMaruGothic_900Black,
+  });
+  if (!loaded && !failed) return null;
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <Suspense
         fallback={
-          <Page>
-            <Label>棋譜を読み込んでいます…</Label>
-          </Page>
+          <Screen>
+            <Problem text="棋譜を読み込んでいます…" />
+          </Screen>
         }
       >
         <SQLiteProvider databaseName="kifumate.db" onInit={migrate} useSuspense>
           <Stack
             screenOptions={{
-              headerStyle: { backgroundColor: colors.background },
-              headerTintColor: colors.ink,
-              headerTitleStyle: { fontWeight: "800" },
-              contentStyle: { backgroundColor: colors.background },
-              headerBackButtonDisplayMode: "minimal",
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.bg },
             }}
           >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" />
             <Stack.Screen
               name="import"
-              options={{ title: "棋譜を取り込む", presentation: "modal" }}
+              options={{ animation: "slide_from_bottom" }}
             />
-            <Stack.Screen name="game/[id]" options={{ title: "対局" }} />
-            <Stack.Screen name="names" options={{ title: "自分の対局者名" }} />
-            <Stack.Screen name="info" options={{ title: "対局情報" }} />
-            <Stack.Screen
-              name="export"
-              options={{ title: "KIFを書き出す", presentation: "modal" }}
-            />
-            <Stack.Screen name="licenses" options={{ title: "ライセンス" }} />
           </Stack>
         </SQLiteProvider>
       </Suspense>
+      <ToastHost />
+      <DialogHost />
     </SafeAreaProvider>
   );
 }
