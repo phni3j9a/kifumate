@@ -99,6 +99,20 @@ describe('依頼と取得の分離', () => {
     const free = new Coach(state.storage, config, 'device', () => false);
     expect((await free.fetch(new Request('https://device/v1/coach/' + p.requestId))).status).toBe(200);
   }));
+  it('権利の外部照会を受理・実行・成功確定時に更新し、生成中の取消は保存しない', async () => fixture(async state => {
+    let active = true, cached = true, checks = 0;
+    const c = new Coach(state.storage, config, 'device', () => cached,
+      async () => { active = false; return undefined; },
+      async () => { checks++; cached = active; });
+    const p = await payload();
+    expect((await c.fetch(post(p))).status).toBe(202);
+    expect(checks).toBe(2);
+    await c.alarm();
+    const result = await (await c.fetch(new Request('https://device/v1/coach/' + p.requestId))).json() as any;
+    expect(result.status).toBe('failed'); expect(result.error).toBe('paid_required');
+    expect(result.sections).toBeUndefined(); expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+    expect(checks).toBeGreaterThanOrEqual(4);
+  }));
   it('実行前の中止・権利失効・提供元失敗は数えず、状態を取得できる', async () => fixture(async state => {
     let paid = true;
     const c = new Coach(state.storage, config, 'device', () => paid), p = await payload();

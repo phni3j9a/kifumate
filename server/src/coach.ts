@@ -161,7 +161,7 @@ export function validateOutput(value: unknown, refs: Reference[], facts?: CoachF
 export class Coach {
   private active = new Map<string, AbortController>();
   constructor(private storage: DurableObjectStorage, private env: CoachEnv, private device: string, private paid: () => boolean,
-    private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>) {
+    private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>, private refreshPaid?: () => Promise<void>) {
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS coach_usage (month INTEGER PRIMARY KEY, used INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
@@ -212,11 +212,13 @@ export class Coach {
     const deadline = this.status(input.requestId)!.deadline;
     const signal = AbortSignal.any([controller.signal, ...(request ? [request.signal] : []), AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
     try {
+      await this.refreshPaid?.();
       if (!this.paid()) throw new ApiError(403, 'paid_required');
       if (this.env.COACH_PROVIDER !== 'fake' && !this.env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
       const facts = this.loadFacts ? await this.loadFacts(input, signal) : undefined;
       if (!facts && this.env.COACH_PROVIDER !== 'fake' && this.loadFacts) throw new ApiError(502, 'facts_unavailable');
       const output = validateOutput(await complete(this.env, input, refs, signal, fetch, facts), refs, facts);
+      await this.refreshPaid?.();
       return this.storage.transactionSync(() => {
         const current = this.status(input.requestId);
         if (controller.signal.aborted || request?.signal.aborted || current?.status !== 'pending') throw new ApiError(409, 'cancelled');
@@ -225,11 +227,13 @@ export class Coach {
         this.storage.sql.exec("UPDATE coach_requests SET status='completed',deadline=? WHERE id=?", Date.now() + 7 * 86400_000, input.requestId);
         this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
         this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,output=? WHERE id=?', JSON.stringify(output), input.requestId);
+        console.log(JSON.stringify({event: 'coach_completed'}));
         return json({requestId: input.requestId, ...output, quota: this.quota()});
       });
     } catch (error) {
       const cancelled = controller.signal.aborted || request?.signal.aborted || this.status(input.requestId)?.status === 'cancelled';
       const failure = cancelled ? new ApiError(409, 'cancelled') : Date.now() >= deadline || signal.aborted ? new ApiError(504, 'coach_timeout') : error instanceof ApiError ? error : new ApiError(502, 'provider_failed');
+      console.warn(JSON.stringify({event: 'coach_failed', error: failure.code}));
       this.storage.sql.exec("UPDATE coach_requests SET status=?,deadline=? WHERE id=? AND status='pending'", cancelled ? 'cancelled' : 'failed', Date.now() + 7 * 86400_000, input.requestId);
       this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,error=? WHERE id=?', failure.code, input.requestId);
       return json({error: failure.code, quota: this.quota()}, failure.status);
@@ -242,6 +246,7 @@ export class Coach {
   async fetch(request: Request): Promise<Response> {
     try {
       const now = Date.now();
+      await this.refreshPaid?.();
       this.expire();
       this.storage.sql.exec('DELETE FROM coach_requests WHERE deadline<?', monthStart(now) - 32 * 86400_000);
       this.storage.sql.exec('DELETE FROM coach_usage WHERE month<?', monthStart(now) - 32 * 86400_000);
@@ -268,6 +273,7 @@ export class Coach {
       const timeout = timeoutMs(this.env), accepted = Date.now();
       // 同期も保存前にwatchdogを永続化し、プロセス消失後の入力削除を保証する。
       await this.wake(asynchronous ? accepted + 100 : accepted + timeout);
+      await this.refreshPaid?.();
       this.storage.transactionSync(() => {
         // 本文受信・署名検証の待機中に更新された権利を、確定直前に再確認する。
         if (!this.paid()) throw new ApiError(403, 'paid_required');
