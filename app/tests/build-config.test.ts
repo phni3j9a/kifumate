@@ -58,6 +58,8 @@ test("起動画面・通常/アダプティブアイコンと不要権限の除�
     "READ_MEDIA_VIDEO",
     "READ_MEDIA_AUDIO",
     "VIBRATE",
+    "USE_BIOMETRIC",
+    "USE_FINGERPRINT",
   ]) {
     assert.ok(
       app.android.blockedPermissions.includes(

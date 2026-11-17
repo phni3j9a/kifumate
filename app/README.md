@@ -63,13 +63,14 @@ mkdir -p ~/kifumate-releases
 # ~/kifumate-releases/kifumate-0.1.0-<versionCode>.apk
 ```
 
-ビルドURLは本人用の管理画面です。EASの内部配布URL／APKのダウンロードURLを公開しないでください。`.easignore` は開発環境変数・ネイティブ生成物・ローカル検証データ・署名情報をアップロードから除きます。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。無料枠を節約するため、ローカル検証を通してから依頼し、AABや開発版を確認のためだけに追加ビルドしません。
+EASプロジェクトの `internalDistributionBuildPrivacy` は **PRIVATE**（未認証アクセス無効）に設定しています。ビルドURLは本人用の管理画面で、知人へはAPKの実体を個別に渡します。EASの内部配布URL／APKのダウンロードURLを公開しないでください。`.easignore` は開発環境変数・ネイティブ生成物・ローカル検証データ・署名情報をアップロードから除きます。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。無料枠を節約するため、ローカル検証を通してから依頼し、AABや開発版を確認のためだけに追加ビルドしません。
 
 クラウドが混雑している場合や上書き更新確認の2回目は、Android SDK・NDK・JDKがあるLinux/macOSで同じEAS設定を使えます。ローカルでもログイン・EASの鍵と版番号への接続が必要です。
 
 ```sh
-# このマシンは JDK 21、~/Android/Sdk（SDK Platform 37.0・Build Tools 37.0.0）を使用
-ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
+# このマシンは JDK 17、~/Android/Sdk（SDK Platform 37.0・Build Tools 37.0.0）を使用
+JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
+  ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
   npx eas-cli@latest build --platform android --profile apk --local \
   --output "$HOME/kifumate-releases/kifumate-0.1.0-update.apk"
 ```
@@ -100,7 +101,7 @@ EAS上の鍵とバックアップを両方失うと、配布済みアプリを�
 
 通常アイコンは `assets/mascot-kit/00-app/app-icon.png` の1024px素材、起動画面とAndroidアダプティブアイコンの透過前景は `01-onboarding/01-welcome.png` から作成しています。前景はAndroidの安全域内に収め、背景色はモックの黄色、起動画面は共通のクリーム色。フォント読み込みまで起動画面を保ちます。
 
-棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
+棋譜のファイル選択はOSのファイル選択画面を使い、ストレージ全体・メディア・マイク・画面への重ね表示・振動・未使用の生体認証の権限はブロックします。Androidの自動バックアップも無効（トークンだけ復元できない状態との不整合を避けるため）。実際のAPKの権限は `aapt dump permissions <APK>`、署名と版は `apksigner verify --print-certs <APK>`／`aapt dump badging <APK>` で確認してください。
 
 公式資料（2026-11-17確認）：[APKの作成](https://docs.expo.dev/build-reference/apk/)・[署名情報のダウンロード](https://docs.expo.dev/app-signing/syncing-credentials/)・[版番号の管理](https://docs.expo.dev/build-reference/app-versions/)・[ローカルビルド](https://docs.expo.dev/build-reference/local-builds/)。
 
