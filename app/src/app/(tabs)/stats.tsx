@@ -510,7 +510,12 @@ export default function Stats() {
                   accessibilityRole="button"
                   accessibilityLabel={`${row.name} ${row.total.n}局 ${winLoss(row.total)} ${row.total.r}%の対局を表示`}
                   onPress={() =>
-                    open({ dim: dimension, value: row.id, title: row.name })
+                    open({
+                      dim: dimension,
+                      value: row.id,
+                      family: row.family ?? "",
+                      title: row.name,
+                    })
                   }
                   style={[
                     s.row,

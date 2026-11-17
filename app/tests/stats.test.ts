@@ -10,7 +10,15 @@ import {
   classifyUsiAsync,
   rulesVersion,
 } from "../src/core/classify";
-import { matchesGame, statRows, tally, tagsOf } from "../src/core/stats";
+import {
+  matchesGame,
+  matchesStatRow,
+  statRows,
+  tally,
+  tagsOf,
+  type Dimension,
+  type GameFilter,
+} from "../src/core/stats";
 import {
   reclassifyGames,
   resetTags,
@@ -372,5 +380,69 @@ test("再判定中の手動修正を保持し、途中で削除された棋譜�
     );
   } finally {
     sql.close();
+  }
+});
+
+test("集計行の条件と元の条件のANDで、自分/相手の戦法・囲いの一覧件数が一致する", () => {
+  const games = [
+    game("a", "black", "win", {
+      family: "居飛車",
+      strategies: ["yagura", "climbing-silver"],
+      castles: ["mino"],
+    }),
+    game("b", "white", "loss", {
+      family: "居飛車",
+      strategies: ["climbing-silver"],
+      castles: ["mino", "high-mino"],
+    }),
+    game("c", "black", "draw", {
+      family: "振り飛車",
+      strategies: ["climbing-silver"],
+      castles: ["mino"],
+    }),
+    game("d", "white", "unknown", {
+      family: "未分類",
+      strategies: ["climbing-silver"],
+      castles: [],
+    }),
+    game("other", null, "win"),
+  ].map((g, i) => ({
+    ...g,
+    classification_manual: JSON.stringify({
+      ...JSON.parse(g.classification_manual!),
+      [g.self_side === "black" ? "white" : "black"]: {
+        family: i % 2 ? "居飛車" : "振り飛車",
+        strategies: ["climbing-silver"],
+        castles: [],
+      },
+    }),
+  }));
+  const filters: GameFilter[] = [
+    {},
+    { myst: "yagura" },
+    { opst: "居飛車" },
+    { mycs: "mino" },
+    { side: "white", period: "30" },
+  ];
+  for (const filter of filters) {
+    const visible = games.filter(
+      (g) =>
+        g.self_side &&
+        matchesGame(g, filter, Date.parse("2026-11-16T12:00:00Z")),
+    );
+    for (const dimension of ["myst", "opst", "mycs"] as Dimension[]) {
+      for (const row of statRows(visible, dimension)) {
+        const listed = games.filter(
+          (g) =>
+            matchesGame(g, filter, Date.parse("2026-11-16T12:00:00Z")) &&
+            matchesStatRow(g, dimension, row.id, row.family),
+        );
+        assert.equal(
+          listed.length,
+          row.total.n,
+          JSON.stringify({ filter, dimension, row }),
+        );
+      }
+    }
   }
 });

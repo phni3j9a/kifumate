@@ -33,7 +33,11 @@ export default function Info() {
   const { records, offline } = useAnalysis();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db, reload } = useGame(id);
-  const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
+  const kif = game?.kif;
+  const record = useMemo(
+    () => (kif === undefined ? null : readStoredKif(kif)),
+    [kif],
+  );
   const [sheet, setSheet] = useState(false);
   // 保存は押した順に1つずつ。前の保存と再読み込みが終わってから次を始める
   const queue = useRef(Promise.resolve());

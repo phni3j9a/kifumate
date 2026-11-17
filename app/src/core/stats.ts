@@ -136,6 +136,23 @@ export function tally(games: readonly Game[]) {
 }
 export const winLoss = (t: ReturnType<typeof tally>) =>
   `${t.w}勝${t.l}敗${t.d ? `${t.d}分` : ""}`;
+/** 元の絞り込みとは別に、集計行の条件をANDで適用する。 */
+export function matchesStatRow(
+  game: Game,
+  dimension: Dimension,
+  id: string,
+  family?: Tags["family"],
+) {
+  if (!game.self_side) return false;
+  const tags = tagsOf(
+    game,
+    dimension === "opst" ? opposite(game.self_side) : game.self_side,
+  );
+  return (
+    (!family || tags.family === family) &&
+    hasTag(tags, dimension === "mycs" ? "castles" : "strategies", id)
+  );
+}
 export function statRows(games: Game[], dimension: Dimension) {
   const kind = dimension === "mycs" ? "castles" : "strategies";
   const own = games.filter((g) => g.self_side);
@@ -145,20 +162,27 @@ export function statRows(games: Game[], dimension: Dimension) {
     id: string;
     name: string;
     depth: number;
+    family?: Tags["family"];
     total: ReturnType<typeof tally>;
   }[] = [];
-  const add = (id: string, depth: number, list: Game[]) => {
+  const add = (
+    id: string,
+    depth: number,
+    list: Game[],
+    family?: Tags["family"],
+  ) => {
     if (list.length)
       rows.push({
         id,
         name: tagName(kind, id),
         depth,
+        family,
         total: tally(list),
       });
   };
   const names = [...new Set(own.flatMap((g) => tags(g)[kind]))];
   const of = (id: string, list = own) =>
-    list.filter((g) => hasTag(tags(g), kind, id));
+    list.filter((g) => matchesStatRow(g, dimension, id));
   if (kind === "castles") {
     const parent = (id: string) =>
       classificationCatalog.castles.find((c) => c.id === id)?.parentId;
@@ -173,15 +197,15 @@ export function statRows(games: Game[], dimension: Dimension) {
   } else {
     for (const family of families) {
       const list = of(family);
-      add(family, 0, list);
+      add(family, 0, list, family);
       [...new Set(list.flatMap((g) => tags(g).strategies))]
         .sort((a, b) => of(b, list).length - of(a, list).length)
-        .forEach((id) => add(id, 1, of(id, list)));
+        .forEach((id) => add(id, 1, of(id, list), family));
     }
     // 大分類未確定でも、具体的な戦法だけ記録されたデータを落とさない。
     for (const id of names) {
       const list = of(id).filter((g) => tags(g).family === unclassified);
-      add(id, 0, list);
+      add(id, 0, list, unclassified);
     }
   }
   add(unclassified, 0, of(unclassified));

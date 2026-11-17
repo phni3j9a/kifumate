@@ -221,3 +221,68 @@ test("対局情報の分類修正・未分類・自動へ戻す・再起動・�
   await page.getByLabel("棋譜を検索").fill("銀冠");
   await expect(page.getByText("「銀冠」に合う棋譜がありません")).toBeVisible();
 });
+
+test("分類で絞った戦績から大分類の行を開いても、元の絞り込みと件数を保つ", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
+  await seedGames(page, statsGames);
+  await page.getByRole("tab", { name: "戦績" }).click();
+  await page
+    .getByRole("button", { name: "戦績の絞り込み", exact: true })
+    .click();
+  await page.getByRole("button", { name: "矢倉", exact: true }).first().click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "1局を表示", exact: true })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "居飛車 1局 0勝0敗1分 0%の対局を表示",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("自分の戦法・1局 0勝0敗1分", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "自分 対 相手E、9手を開く", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("具体的戦法の行を開くときも、集計に使った大分類を保つ", async ({
+  page,
+}) => {
+  const shared = statsGames
+    .slice(0, 3)
+    .map((g, i) => ({
+      ...g,
+      tags: {
+        ...g.tags,
+        [g.self!]: tags([
+          i === 0 ? "居飛車" : i === 1 ? "振り飛車" : "未分類",
+          "棒銀",
+        ]),
+      },
+    }));
+  await page.goto("/");
+  await expect(page.getByText("まだ棋譜がありません")).toBeVisible();
+  await seedGames(page, shared);
+  await page.getByRole("tab", { name: "戦績" }).click();
+  await page
+    .getByRole("button", {
+      name: "棒銀 1局 1勝0敗 100%の対局を表示",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("自分の戦法・1局 1勝0敗", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "相手B 対 自分、6手を開く", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "自分 対 相手C、7手を開く", exact: true }),
+  ).toHaveCount(0);
+});

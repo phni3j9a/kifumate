@@ -120,7 +120,11 @@ export default function GameScreen() {
 }
 function GameView({ id }: { id: string }) {
   const { game, error, db } = useGame(id);
-  const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
+  const kif = game?.kif;
+  const record = useMemo(
+    () => (kif === undefined ? null : readStoredKif(kif)),
+    [kif],
+  );
   const [ply, setPly] = useState(0),
     [branch, setBranch] = useState<Branch | null>(null),
     [, redraw] = useState(0);

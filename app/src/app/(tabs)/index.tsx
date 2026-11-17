@@ -6,6 +6,7 @@ import {
 import { useClassifications } from "../../components/classifications-provider";
 import {
   matchesGame,
+  matchesStatRow,
   strategyNames,
   tagsOf,
   tagName,
@@ -14,6 +15,7 @@ import {
   type Dimension,
   type GameFilter,
   type PlayerSide,
+  type Tags,
 } from "../../core/stats";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -114,6 +116,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
   const params = useLocalSearchParams<{
     dim?: Dimension;
     value?: string;
+    family?: Tags["family"];
     period?: string;
     side?: string;
     result?: string;
@@ -140,7 +143,6 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
             myst: params.myst,
             mycs: params.mycs,
             opst: params.opst,
-            ...(params.dim ? { [params.dim]: params.value } : {}),
           }
         : noFilter,
     ),
@@ -243,6 +245,12 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
     )
       return false;
     if (!matchesGame(g, filter, today)) return false;
+    if (
+      drilldown &&
+      params.dim &&
+      !matchesStatRow(g, params.dim, params.value ?? "", params.family)
+    )
+      return false;
     return true;
   });
   const active = Object.values(filter).filter(Boolean).length;
