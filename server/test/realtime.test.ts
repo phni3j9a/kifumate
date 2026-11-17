@@ -22,13 +22,15 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
       schedule: async when => { due = when; },
     };
     let rt = new RealtimeSessions(state.storage, backend, idleMs, () => now);
-    const request = async (method = 'GET', data?: unknown, owner = 'a', paid = true, id?: string) => {
-      const response = await rt.fetch(new Request('https://device/v1/realtime' + (id ? '/' + id : ''), {
-        method, headers: {'content-type': 'application/json'}, ...(data === undefined ? {} : {body: JSON.stringify(data)}),
-      }), owner, paid, work => tasks.push(work));
+    const send = async (request: Request, owner = 'a', paid = true) => {
+      const response = await rt.fetch(request, owner, paid, work => tasks.push(work));
       return {httpStatus: response.status, ...await response.json() as any};
     };
-    await check({request, backend, calls, sql: state.storage.sql,
+    const request = (method = 'GET', data?: unknown, owner = 'a', paid = true, id?: string) => send(
+      new Request('https://device/v1/realtime' + (id ? '/' + id : ''), {
+        method, headers: {'content-type': 'application/json'}, ...(data === undefined ? {} : {body: JSON.stringify(data)}),
+      }), owner, paid);
+    await check({request, send, backend, calls, sql: state.storage.sql,
       advance: (ms: number) => { now += ms; }, time: (value: number) => { now = value; },
       drain: async () => { await Promise.all(tasks.splice(0)); }, expire: () => rt.expire(),
       stops: () => stops, due: () => due, disconnected: () => rt.disconnected(),
@@ -94,6 +96,36 @@ describe('分岐中の解析', () => {
     expect((await f.request('GET', undefined, 'a', false)).status).toBe('off');
     expect(f.stops()).toBe(1);
     expect(f.sql.exec('SELECT * FROM usage').toArray()).toEqual([]);
+  }));
+  it.each(['POST', 'PUT'])('%sの本文待機中に有料権利が失効したら解析を開始しない', async method => fixture(async f => {
+    let id: string | undefined;
+    if (method === 'PUT') {
+      id = (await f.request('POST', position)).sessionId;
+      await f.drain(); f.advance(1000);
+    }
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let reading!: () => void;
+    const bodyRead = new Promise<void>(resolve => { reading = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      start(value) { controller = value; },
+      pull() { reading(); },
+    }, {highWaterMark: 0});
+    const pending = f.send(new Request('https://device/v1/realtime' + (id ? '/' + id : ''), {
+      method, headers: {'content-type': 'application/json'}, body,
+    }));
+    await bodyRead;
+    const revoked = await f.request('GET', undefined, 'a', false);
+    expect(revoked.paid).toBe(false); expect(revoked.status).toBe('off');
+    expect((await f.request('GET', undefined, 'b', true)).paid).toBe(true);
+    const calls = f.calls.length;
+    controller.enqueue(new TextEncoder().encode(JSON.stringify({...position, ...(id ? {sequence: 1} : {})})));
+    controller.close();
+    const denied = await pending; await f.drain();
+    expect(denied.httpStatus).toBe(403); expect(denied.error).toBe('paid_required');
+    expect(f.calls.length).toBe(calls);
+    expect(f.sql.exec('SELECT owner FROM rt_sessions WHERE charged IS NOT NULL').toArray()).toEqual([]);
+    f.advance(1000);
+    expect((await f.request('GET', undefined, 'a', false)).quota.usedMs).toBe(revoked.quota.usedMs);
   }));
   it('月300分で自動停止して戻る日時を返し、翌月の局面更新で再開する', async () => fixture(async f => {
     f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 500);

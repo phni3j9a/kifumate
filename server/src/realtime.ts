@@ -15,6 +15,7 @@ interface Session extends Record<string, SqlStorageValue> {
 export class RealtimeSessions {
   private abort?: AbortController;
   private stopping?: Promise<void>;
+  private entitlements = new Map<string, {paid: boolean; pending: number}>();
   private sql: SqlStorage;
   constructor(private storage: DurableObjectStorage, private backend: RealtimeBackend, private idleMs: number, private now = Date.now) {
     this.sql = storage.sql;
@@ -100,6 +101,10 @@ export class RealtimeSessions {
     this.sql.exec("UPDATE rt_sessions SET charged=NULL,status='paused',error='analysis_unavailable' WHERE owner=?", session.owner);
   }
   async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void): Promise<Response> {
+    // 本文待機中も同じ端末の最新権利を参照し、完了した端末の情報は保持しない。
+    const entitlement = this.entitlements.get(owner) ?? {paid, pending: 0};
+    entitlement.paid = paid; entitlement.pending++;
+    this.entitlements.set(owner, entitlement);
     try {
       await this.expire();
       this.sql.exec("UPDATE rt_sessions SET result=NULL WHERE charged IS NULL AND activity<?", this.now() - RETENTION_MS);
@@ -108,8 +113,8 @@ export class RealtimeSessions {
       this.sql.exec('DELETE FROM rt_usage WHERE month<?', monthStart(monthStart(this.now()) - 1));
       const url = new URL(request.url);
       const match = /^\/v1\/realtime\/([0-9a-f-]{36})$/.exec(url.pathname);
-      if (!paid && this.active()?.owner === owner) await this.halt('off', 'paid_required');
-      if (request.method === 'GET' && url.pathname === '/v1/realtime') return json({...this.view(owner), paid});
+      if (!entitlement.paid && this.active()?.owner === owner) await this.halt('off', 'paid_required');
+      if (request.method === 'GET' && url.pathname === '/v1/realtime') return json({...this.view(owner), paid: entitlement.paid});
       if (request.method === 'DELETE' && match) {
         const session = this.session(owner);
         if (session?.id !== match[1]) throw new ApiError(409, 'stale_session');
@@ -117,7 +122,7 @@ export class RealtimeSessions {
         this.sql.exec("UPDATE rt_sessions SET status='off',result=NULL,error=NULL WHERE owner=?", owner);
         return json(this.view(owner));
       }
-      if (!paid) throw new ApiError(403, 'paid_required');
+      if (!entitlement.paid) throw new ApiError(403, 'paid_required');
       const creating = request.method === 'POST' && url.pathname === '/v1/realtime';
       if (!creating && !(request.method === 'PUT' && match)) throw new ApiError(404, 'not_found');
       const raw = await readJson(request) as Record<string, unknown>;
@@ -128,6 +133,7 @@ export class RealtimeSessions {
       if ('mode' in position) throw new ApiError(400, 'invalid_input');
       // readJson は await するため、ここでも最新の貸与・権利・期限を確認する。
       await this.expire();
+      if (!entitlement.paid) throw new ApiError(403, 'paid_required');
       const current = this.session(owner), active = this.active();
       if (active && active.owner !== owner) throw new ApiError(409, 'realtime_busy');
       if (!this.quota(owner).remainingMs) throw new ApiError(429, 'monthly_limit');
@@ -148,6 +154,8 @@ export class RealtimeSessions {
     } catch (error) {
       if (error instanceof ApiError) return json({...this.view(owner), error: error.code}, error.status);
       return json({error: 'analysis_unavailable'}, 503);
+    } finally {
+      if (--entitlement.pending === 0) this.entitlements.delete(owner);
     }
   }
   private async run(owner: string, id: string, sequence: number, input: Input, signal: AbortSignal) {
