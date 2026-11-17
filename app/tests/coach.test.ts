@@ -166,7 +166,8 @@ test("回数：残り10%以上を知らせず、10%未満とゼロの更新日�
     /2026\/12\/1 0:00:00（日本時間）/,
   );
 });
-test("HTTP：共有認証・非同期ヘッダー・POST/GET/DELETEを同じIDで実行", async () => {
+test("HTTP：共有認証・非同期ヘッダー・statusだけのDELETE後も同じIDでGETし確定", async () => {
+  let cancelled = false;
   const seen: { method: string; url: string; prefer?: string; body: string }[] =
     [];
   const server = createServer(async (req, res) => {
@@ -175,16 +176,22 @@ test("HTTP：共有認証・非同期ヘッダー・POST/GET/DELETEを同じID�
     seen.push({
       method: req.method!,
       url: req.url!,
-      prefer: req.headers.prefer,
+      prefer: req.headers.prefer as string | undefined,
       body,
     });
     assert.equal(req.headers.authorization, `Bearer ${"a".repeat(64)}`);
     res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify(
-        req.url === "/v1/coach" && req.method === "GET" ? overview : reply(),
-      ),
-    );
+    if (req.method === "DELETE") {
+      cancelled = true;
+      res.end(JSON.stringify({ status: "cancelled", quota }));
+    } else
+      res.end(
+        JSON.stringify(
+          req.url === "/v1/coach" && req.method === "GET"
+            ? overview
+            : reply(cancelled ? "cancelled" : "pending"),
+        ),
+      );
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const addr = server.address() as { port: number };
@@ -196,12 +203,12 @@ test("HTTP：共有認証・非同期ヘッダー・POST/GET/DELETEを同じID�
     await c.coach();
     await c.createCoach(input);
     await c.getCoach(input.requestId);
-    await c.cancelCoach(input.requestId);
+    assert.equal((await c.cancelCoach(input.requestId)).status, "cancelled");
     assert.equal(seen[1]!.prefer, "respond-async");
     assert.deepEqual(JSON.parse(seen[1]!.body), input);
     assert.deepEqual(
       seen.map((s) => s.method),
-      ["GET", "POST", "GET", "DELETE"],
+      ["GET", "POST", "GET", "DELETE", "GET"],
     );
     assert(seen[2]!.url.endsWith(input.requestId));
   } finally {
@@ -443,4 +450,11 @@ test("v4→v5移行は棋譜を保持し、再実行・CASCADE・プロフィー
   assert.deepEqual(await s.storage.profile(), defaultProfile);
   assert.equal(s.sql.prepare("SELECT COUNT(*) n FROM games").get()!.n, 1);
   s.sql.close();
+});
+
+test("伏せ字は名前以外の全角数値・符号を変えず、結合文字の名前も一致する", () => {
+  assert.equal(
+    redact("山田太郎の評価は＋６００、−20。ガクさん", ["ガク"], game),
+    "あなたの評価は＋６００、−20。あなたさん",
+  );
 });

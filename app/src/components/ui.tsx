@@ -181,6 +181,7 @@ export function RoundButton({
   warn = false,
   disabled = false,
   size = 34,
+  style,
 }: {
   icon: IconName;
   label: string;
@@ -188,6 +189,7 @@ export function RoundButton({
   warn?: boolean;
   disabled?: boolean;
   size?: number;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <Pressable
@@ -201,6 +203,7 @@ export function RoundButton({
         s.rb,
         { width: size, height: size },
         warn && { backgroundColor: colors.coralSoft },
+        style,
         pressed && s.down2,
       ]}
     >

@@ -4,7 +4,7 @@ import { seedGames, type MockGame } from "../tests/helpers/seed-games";
 //   npm run compare -- 393x852 game     … 大きさと、名前に game を含む場面だけ
 // 出力は .local/compare/<幅x高さ>/NN-名前.png（左：モック、中：アプリ Web、右：あれば Android 実機）。
 // 実機の画面は `adb exec-out screencap -p > .local/compare/android/名前.png` で置くと、3列目に並ぶ。
-// モックにしかない入口（解析・有料プラン・AIコーチなど）は、そのまま差として写る。
+// 未実装の購入先や、実モデル用の待機・失敗表示の追加は差として残す。
 import { fakeAnalysis } from "../tests/helpers/fake-analysis";
 import type { AnalysisResult } from "../src/analysis/types";
 import { spawn } from "node:child_process";
@@ -227,6 +227,27 @@ async function run(width: number, height: number) {
   await act("tab", "set");
   await tab("設定");
   await shot("settings");
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "DB.profile={practice:[],goal:''}; DB.style={focus:'総合',detail:'ふつう'}; show()",
+    ),
+  );
+  await act("nav", "profile");
+  await a.getByRole("button", { name: /^学習プロフィール/ }).click();
+  await shot("coach-profile-free");
+  await act("pract", "四間飛車");
+  await tap("四間飛車");
+  await m.fill(
+    "#goal-in",
+    "アマ初段になりたい。終盤で詰みを逃さないようにしたい。",
+  );
+  await a
+    .getByRole("textbox", { name: "目標", exact: true })
+    .fill("アマ初段になりたい。終盤で詰みを逃さないようにしたい。");
+  await shot("coach-profile");
+  await act("back");
+  await tap("戻る");
+
   await act("nav", "names");
   await a.getByText("自分の対局者名", { exact: true }).click();
   await shot("names-empty");
@@ -270,6 +291,24 @@ async function run(width: number, height: number) {
   await shot("game-saved-toast");
   await pause(2800);
   await shot("game-not-analysed");
+  await act("ai");
+  await tap("AIに聞く");
+  await shot("coach-lock");
+  await act("aiclose");
+  await tap("AIコーチを閉じる");
+  fake.paid = true;
+  await plan("paid");
+  await a.reload();
+  await tap("AIに聞く");
+  await act("ai");
+  await shot("coach-need-precise");
+  await act("aiclose");
+  await tap("AIコーチを閉じる");
+  fake.paid = false;
+  await plan("free");
+  await a.reload();
+  await button("AIに聞く").waitFor();
+
   for (let i = 0; i < 60; i++) {
     await m.keyboard.press("ArrowRight");
     await button("1手進む").click();
@@ -634,6 +673,122 @@ async function run(width: number, height: number) {
   await m.keyboard.press("Home");
   await tap("最初へ");
   await shot("analysis-completed");
+  // AIコーチ。非同期の偽APIだけを使い、実モデルへの費用は発生させない。
+  const aiMock = (code: string) =>
+    m.evaluate((code) => (window as any).__compare(code), code);
+  await act("ai");
+  await tap("AIに聞く");
+  await shot("coach-style");
+  await aiMock("AI.gen=true; renderAI()");
+  fake.coach.status = "pending";
+  await tap("解説をつくる");
+  await a.getByText("解説を作っています…", { exact: true }).waitFor();
+  await shot("coach-thinking");
+  await aiMock(
+    "AI.gen=false; CUR.ai={focus:AI.focus,detail:AI.detail,html:commentary(AI.focus,AI.detail),chat:[]}; renderAI()",
+  );
+  // 本文の内容をそろえて部品を比較。モック固有の「見本文」の注記だけを外す。
+  fake.coach.sections = (await m
+    .locator("#ai-main .blk, #scr .aim .blk")
+    .evaluateAll((els) =>
+      els.map((el) => ({
+        kind: el.classList.contains("adv") ? "advice" : "facts",
+        title: el.querySelector("h4")!.firstChild!.textContent!,
+        text: [...el.querySelectorAll("p")]
+          .map((p) => p.textContent)
+          .join("\n"),
+        references: [],
+      })),
+    )) as typeof fake.coach.sections;
+  if (!fake.coach.sections.length)
+    throw new Error("比較用のモック解説がありません");
+  await m
+    .locator("#scr .ain")
+    .evaluate(
+      (el) =>
+        (el.textContent =
+          "数字と指し手は、解析結果のままです。説明の文章はAIが書いています。"),
+    );
+  fake.coach.status = "completed";
+  await a.getByText("この対局のまとめ", { exact: true }).waitFor();
+  await shot("coach-commentary");
+  await act("aisize");
+  await tap("大きくする");
+  await aiMock(
+    "CUR.ai.chat.push({q:'次に何を練習するといい？',a:aiQuestions().find(q=>q.q==='次に何を練習するといい？').a(),face:'chat-explaining'}); renderAI(); R.aim.scrollTop=R.aim.scrollHeight",
+  );
+  fake.coach.sections = [
+    {
+      kind: "advice",
+      title: "答え",
+      text: "気になった局面を、分岐で指し直して確かめてみましょう。相手の手を自分で指してみると、ねらいが分かりやすくなります。",
+      references: [],
+    },
+  ];
+  await tap("次に何を練習するといい？");
+  await a.getByText("答え", { exact: true }).waitFor();
+  await a
+    .getByTestId("coach-sheet")
+    .getByText("答え", { exact: true })
+    .scrollIntoViewIfNeeded();
+  await shot("coach-question");
+  // AI固有の失敗はモックにないため、共通の文章部品で同じ理由を並べる。
+  fake.coach.status = "failed";
+  await a
+    .getByRole("textbox", { name: "AIコーチへの質問" })
+    .fill("もう少し教えて");
+  await tap("質問を送る");
+  await a
+    .getByText(
+      "解説を終えられませんでした。回数は減っていません。もう一度試せます",
+      { exact: true },
+    )
+    .waitFor();
+  await aiMock(
+    "R.aim.innerHTML='<p class=hint>解説を終えられませんでした。回数は減っていません。もう一度試せます</p><button class=tx-b>もう一度試す</button>'+R.aim.innerHTML; R.aim.scrollTop=0",
+  );
+  await a
+    .getByText(
+      "解説を終えられませんでした。回数は減っていません。もう一度試せます",
+      { exact: true },
+    )
+    .scrollIntoViewIfNeeded();
+  await shot("coach-failed");
+  fake.coach.online = false;
+  await act("aiclose");
+  await tap("AIコーチを閉じる");
+  await act("ai");
+  await tap("AIに聞く");
+  await a.getByText(/通信できません。保存済みの解説/).waitFor();
+  await aiMock(
+    "R.aim.innerHTML='<p class=hint>通信できません。保存済みの解説は読めます。つながってから、もう一度試してください。</p><button class=tx-b>もう一度試す</button>'+R.aim.innerHTML",
+  );
+  await shot("coach-offline");
+  fake.coach.online = true;
+  fake.coach.remaining = 0;
+  fake.coach.low = true;
+  await act("aiclose");
+  await tap("AIコーチを閉じる");
+  await aiMock("CUR.ai=null; DB.usage.ai=DB.usage.aiMax");
+  await a.evaluate(async () => {
+    const r = (globalThis as any).__r;
+    const mod = [...r.getModules().entries()].find(
+      ([, m]: any) =>
+        m.verboseName === "node_modules/expo-sqlite/build/index.js",
+    ) as any;
+    const db = await r(mod[0]).openDatabaseAsync("kifumate.db");
+    await db.runAsync("DELETE FROM coaches");
+  });
+  await a.reload();
+  await act("ai");
+  await tap("AIに聞く");
+  await shot("coach-limit");
+  await act("aiclose");
+  await tap("AIコーチを閉じる");
+  fake.coach.remaining = 99;
+  fake.coach.low = false;
+  await aiMock("DB.usage.ai=37");
+
   await act("cand", "1");
   await tap("2位");
   await shot("analysis-candidate-2");

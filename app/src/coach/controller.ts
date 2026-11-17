@@ -161,7 +161,10 @@ export class CoachController {
       };
       await this.storage.saveOverview(this.snapshot.overview);
     }
-    if (reply.status === "pending") return;
+    if (reply.status === "pending") {
+      if (r.error) await this.save({ ...r, error: null });
+      return;
+    }
     let answers = r.answers;
     if (reply.status === "completed") {
       if (!reply.sections?.length) throw new Error("応答を読めません");

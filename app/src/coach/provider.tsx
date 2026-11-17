@@ -37,7 +37,7 @@ export function CoachProvider({
       if (
         AppState.currentState !== "background" &&
         AppState.currentState !== "inactive" &&
-        (restore || visible.size)
+        (restore || (visible.size > 0 && controller.busy))
       )
         await controller.sync();
       if (live) timer = setTimeout(() => void tick(), 3000);

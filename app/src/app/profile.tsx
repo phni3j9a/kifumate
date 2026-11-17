@@ -1,4 +1,4 @@
-import { TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 import { useCoach } from "../coach/provider";
 import { practices } from "../coach/types";
 import { StylePicker } from "../coach/style-picker";
@@ -23,9 +23,22 @@ export default function ProfileScreen() {
       <PageHeader title="学習プロフィール" />
       <PageScroll>
         {!overview?.paid && (
-          <Hint style={{ marginTop: 0, marginBottom: 10 }}>
+          <Text
+            style={[
+              font(500, 10.5, 1.5, colors.ink2),
+              {
+                marginBottom: 10,
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                borderWidth: line.thin,
+                borderStyle: "dashed",
+                borderColor: colors.dash,
+                borderRadius: 10,
+              },
+            ]}
+          >
             AIコーチ（有料プラン）の解説に使われる設定です。
-          </Hint>
+          </Text>
         )}
         <SectionTitle>練習中の戦法（いくつでも）</SectionTitle>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>

@@ -16,7 +16,7 @@ export function StylePicker({
       <Text
         style={[
           font(900, 12, 1.3),
-          { marginTop: 14, marginHorizontal: 2, marginBottom: 7 },
+          { marginTop: profile ? 8 : 2, marginHorizontal: 2, marginBottom: 7 },
         ]}
       >
         {profile ? "どこを中心に" : "どこを中心に説明しますか"}

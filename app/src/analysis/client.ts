@@ -95,8 +95,11 @@ export class AnalysisClient {
     this.request("/v1/coach", "POST", input, true, { Prefer: "respond-async" });
   getCoach = (id: string): Promise<CoachReply> =>
     this.request(`/v1/coach/${encodeURIComponent(id)}`);
-  cancelCoach = (id: string): Promise<CoachReply> =>
-    this.request(`/v1/coach/${encodeURIComponent(id)}`, "DELETE");
+  cancelCoach = async (id: string): Promise<CoachReply> => {
+    await this.request(`/v1/coach/${encodeURIComponent(id)}`, "DELETE");
+    // 中止の応答はstatus/quotaだけの場合がある。成功との競合もGETで確定する。
+    return this.getCoach(id);
+  };
   quota = (): Promise<Quota> => this.request("/v1/quota");
   create = (input: Input): Promise<Reply> =>
     this.request("/v1/jobs", "POST", {

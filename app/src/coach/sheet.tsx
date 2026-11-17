@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentRef } from "react";
+import { useRef, useState, type ComponentRef } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -95,7 +95,9 @@ export function CoachSheet({
         ? "lock"
         : analysis?.attempt || !saved
           ? "need"
-          : saved.mode !== "precise" || !saved.coachProof
+          : saved.mode !== "precise" ||
+              !saved.coachProof ||
+              r?.error?.includes("精密解析の証明")
             ? "redo"
             : limit
               ? "cap"
@@ -108,9 +110,6 @@ export function CoachSheet({
         : stage === "setup"
           ? "chat-listening"
           : "chat-default";
-  useEffect(() => {
-    if (hasAnswers && !attempt) setSetup(false);
-  }, [hasAnswers, attempt]);
   async function send(text?: string) {
     if (sending || controller.busy) {
       toast("別の解説や質問を作っています。終わってからお試しください");
@@ -214,10 +213,7 @@ export function CoachSheet({
       style={[
         s.sheet,
         {
-          height: Math.max(
-            250,
-            height - insets.top - (full ? fullTop : halfTop),
-          ),
+          top: Math.min(insets.top + (full ? fullTop : halfTop), height - 250),
           paddingBottom: insets.bottom,
         },
       ]}
@@ -441,13 +437,12 @@ export function CoachSheet({
           </View>
         )}
       </ScrollView>
-      {(stage === "ready" ||
+      {(!!notice ||
         stage === "setup" ||
-        stage === "cap" ||
         stage === "gen" ||
-        stage === "need" ||
-        stage === "redo" ||
-        stage === "lock") && (
+        stage === "lock" ||
+        (stage === "ready" && !paid) ||
+        (["need", "redo"].includes(stage) && !analysis?.attempt)) && (
         <View style={s.footer}>
           {!!notice && (
             <Text
@@ -534,7 +529,7 @@ export function CoachSheet({
         <View style={s.inputRow}>
           <TextInput
             accessibilityLabel="AIコーチへの質問"
-            placeholder="続けて質問する"
+            placeholder="この対局について質問する"
             value={question}
             onChangeText={setQuestion}
             maxLength={1000}
@@ -545,6 +540,7 @@ export function CoachSheet({
           />
           <RoundButton
             icon="send"
+            style={{ backgroundColor: colors.mint }}
             label="質問を送る"
             disabled={!question.trim() || sending || controller.busy}
             onPress={() => void send(question.trim())}
@@ -574,32 +570,39 @@ function SectionView({
         section.kind === "advice" && { backgroundColor: colors.advice },
       ]}
     >
-      <Text
-        accessibilityRole="header"
-        style={[font(900, 12.5, 1.3), { marginBottom: 5 }]}
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 5,
+        }}
       >
-        {section.title}
-      </Text>
-      <Text
-        style={[
-          font(700, 10.5, 1.4),
-          {
-            alignSelf: "flex-start",
-            borderWidth: line.thin,
-            borderColor: colors.ink,
-            borderRadius: radius.pill,
-            paddingHorizontal: 7,
-            paddingVertical: 3,
-            backgroundColor:
-              section.kind === "advice" ? colors.mint : colors.sand,
-            marginBottom: 5,
-          },
-        ]}
-      >
-        {section.kind === "advice"
-          ? "学習プロフィールにもとづく助言"
-          : "解析結果にもとづく説明"}
-      </Text>
+        <Text accessibilityRole="header" style={font(900, 12.5, 1.3)}>
+          {section.title}
+        </Text>
+        <Text
+          style={[
+            font(700, 10.5, 1),
+            {
+              marginLeft: "auto",
+              borderWidth: line.thin,
+              borderColor: colors.ink,
+              borderRadius: radius.pill,
+              paddingHorizontal: 7,
+              paddingTop: 3,
+              paddingBottom: 4,
+              backgroundColor:
+                section.kind === "advice" ? colors.mint : colors.sand,
+            },
+          ]}
+        >
+          {section.kind === "advice"
+            ? "学習プロフィールにもとづく助言"
+            : "解析結果にもとづく説明"}
+        </Text>
+      </View>
       <Text selectable style={font(500, 12.5, 1.7)}>
         {section.text}
       </Text>
@@ -676,7 +679,6 @@ const s = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 5,
-    maxHeight: "92%",
     backgroundColor: colors.bg,
     borderTopWidth: line.ol,
     borderColor: colors.ink,
