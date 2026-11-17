@@ -321,3 +321,81 @@ test("別sessionId・違うplyの結果は出さない", async () => {
   assert.equal(c.snapshot.result, null);
   await c.stop();
 });
+
+test("前面復帰の権利確認中はPOSTせず、回収した別局面は必ずPUTしてから表示", async () => {
+  const { controller: c, api, calls } = setup();
+  const entitlement = deferred<RealtimeReply>();
+  api.realtime = async () => entitlement.promise;
+  c.setVisible(true);
+  c.move(input(1));
+  await flush();
+  assert.equal(calls.posts.length, 0);
+  entitlement.resolve(reply({ sessionId: null, result: null }));
+  await flush();
+  assert.equal(calls.posts.length, 1);
+  await c.stop();
+  api.realtime = async () => reply({ sessionId: null, result: null });
+  api.startRealtime = async () => {
+    throw new TypeError("応答喪失");
+  };
+  const recovered = reply({
+    sequence: 8,
+    result: { ...reply().result!, score: { kind: "cp", value: 999 } },
+  });
+  const update = deferred<RealtimeReply>();
+  api.updateRealtime = async (_id, _input, sequence) => {
+    calls.puts.push(sequence);
+    return update.promise;
+  };
+  api.realtime = async () => recovered;
+  c.move(input(1));
+  await flush();
+  assert.deepEqual(calls.puts, [9]);
+  assert.equal(c.snapshot.result, null);
+  update.resolve(reply({ sequence: 9 }));
+  await flush();
+  assert.equal({ ...c.snapshot }.result?.score?.value, 25);
+  await c.stop();
+});
+test("遅いGETは局面変更後に到着しても古い評価値を表示しない", async () => {
+  const { controller: c, api } = setup();
+  await enter(c);
+  api.startRealtime = async () => reply({ status: "analyzing", result: null });
+  const oldGet = deferred<RealtimeReply>();
+  api.realtime = async () => oldGet.promise;
+  c.move(input(1));
+  await flush();
+  await new Promise((r) => setTimeout(r, 10));
+  api.updateRealtime = async (_id, _input, sequence) =>
+    reply({ sequence, result: { ...reply().result!, ply: 2 } });
+  c.move(input(2));
+  await flush();
+  oldGet.resolve(reply());
+  await flush();
+  assert.equal(c.snapshot.result?.ply, 2);
+  await c.stop();
+});
+test("オンへ戻すだけでは開始せず、停止503のIDは次の操作で再送する", async () => {
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  c.move(input(1));
+  await flush();
+  let fail = true;
+  api.stopRealtime = async (id) => {
+    calls.stops.push(id);
+    if (fail) throw new ApiError(503, "unavailable");
+    return reply({ status: "off" });
+  };
+  c.toggle();
+  await flush();
+  c.toggle();
+  await flush();
+  assert.equal(calls.posts.length, 1);
+  assert.equal(c.snapshot.enabled, true);
+  fail = false;
+  c.move(input(2));
+  await flush();
+  assert.deepEqual(calls.stops, ["session-a", "session-a"]);
+  assert.equal(calls.posts.length, 2);
+  await c.stop();
+});

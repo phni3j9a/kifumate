@@ -238,17 +238,19 @@ function GameView({ id }: { id: string }) {
   const { width: W, height: H } = useWindowDimensions();
   const base = branch?.base;
   // 戻る操作は、まず分岐を抜ける（モックの back()）。
-  useEffect(() => {
-    if (base === undefined) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      setPly(base);
-      setBranch(null);
-      setSelected(null);
-      setPromotion([]);
-      return true;
-    });
-    return () => sub.remove();
-  }, [base]);
+  useFocusEffect(
+    useCallback(() => {
+      if (base === undefined) return;
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        setPly(base);
+        setBranch(null);
+        setSelected(null);
+        setPromotion([]);
+        return true;
+      });
+      return () => sub.remove();
+    }, [base]),
+  );
   if (!record || !game)
     return (
       <Screen>

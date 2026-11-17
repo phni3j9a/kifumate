@@ -504,7 +504,7 @@ export function AnalysisPanel({
               onPress={showReset}
             >
               <Text
-                numberOfLines={branch ? 2 : running && offline ? 2 : 1}
+                numberOfLines={running && offline ? 2 : 1}
                 style={font(500, 11.5 + u * 0.06, 1.45, colors.ink2)}
               >
                 {sub}

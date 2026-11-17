@@ -49,6 +49,7 @@ for (const screen of ["info", "game/[id]"]) {
           useState: (v: unknown) => [v, () => {}],
           useRef: (v: unknown) => ({ current: v }),
           useEffect: () => {},
+          useCallback: (fn: unknown) => fn,
         },
         "react-native": {
           ...stub(["Pressable", "Text", "View", "ScrollView"]),
@@ -59,6 +60,7 @@ for (const screen of ["info", "game/[id]"]) {
         "react-native-svg": { default: "Svg", Line: "Line" },
         "expo-router": {
           useLocalSearchParams: () => ({ id: "a" }),
+          useFocusEffect: () => {},
           router: {},
         },
         [`${prefix}/components/use-game`]: {
@@ -93,7 +95,9 @@ for (const screen of ["info", "game/[id]"]) {
         [`${prefix}/components/graph`]: stub(["EvalGraph"]),
         [`${prefix}/components/icons`]: stub(["Icon"]),
         [`${prefix}/components/analysis-panel`]: stub(["AnalysisPanel"]),
+        [`${prefix}/components/realtime-controls`]: stub(["RealtimeToggle"]),
         [`${prefix}/analysis/provider`]: {
+          useRealtime: () => ({ controller: {}, quota: null }),
           useAnalysis: () => ({
             records: {},
             offline: false,
