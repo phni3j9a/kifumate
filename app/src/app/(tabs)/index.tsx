@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import {
@@ -21,7 +21,8 @@ export default function Games() {
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
-    [side, setSide] = useState("all");
+    [side, setSide] = useState("all"),
+    [showFilters, setShowFilters] = useState(false);
   const load = useCallback(async () => {
     try {
       setGames(await listGames(db));
@@ -75,45 +76,60 @@ export default function Games() {
               ＋ 取り込む
             </Button>
           </View>
-          <Field
-            accessibilityLabel="棋譜を検索"
-            placeholder="対局者名・日付で検索"
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-          />
-          <View style={styles.row}>
-            {[
-              ["all", "すべて"],
-              ["favorite", "お気に入り"],
-              ["win", "勝ち"],
-              ["loss", "負け"],
-              ["none", "未解析"],
-            ].map(([value, label]) => (
-              <Chip
-                key={value}
-                label={label!}
-                selected={filter === value}
-                onPress={() => setFilter(value!)}
+          {games.length > 0 && (
+            <>
+              <Field
+                accessibilityLabel="棋譜を検索"
+                placeholder="対局者名・日付で検索"
+                value={query}
+                onChangeText={setQuery}
+                returnKeyType="search"
               />
-            ))}
-          </View>
-          <View style={styles.row}>
-            {[
-              ["all", "対象すべて"],
-              ["self", "自分の対局"],
-              ["other", "自分以外"],
-              ["black", "先手"],
-              ["white", "後手"],
-            ].map(([value, label]) => (
-              <Chip
-                key={value}
-                label={label!}
-                selected={side === value}
-                onPress={() => setSide(value!)}
-              />
-            ))}
-          </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                <Chip
+                  label="絞り込み"
+                  selected={showFilters || side !== "all"}
+                  onPress={() => setShowFilters(!showFilters)}
+                />
+                {[
+                  ["all", "すべて"],
+                  ["favorite", "お気に入り"],
+                  ["win", "勝ち"],
+                  ["loss", "負け"],
+                  ["none", "未解析"],
+                ].map(([value, label]) => (
+                  <Chip
+                    key={value}
+                    label={label!}
+                    selected={filter === value}
+                    onPress={() => setFilter(value!)}
+                  />
+                ))}
+              </ScrollView>
+              {showFilters && (
+                <View style={styles.row}>
+                  {[
+                    ["all", "対象すべて"],
+                    ["self", "自分の対局"],
+                    ["other", "自分以外"],
+                    ["black", "先手"],
+                    ["white", "後手"],
+                  ].map(([value, label]) => (
+                    <Chip
+                      key={value}
+                      label={label!}
+                      selected={side === value}
+                      onPress={() => setSide(value!)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          )}
           <Message text={error} error />
           {error ? <Button onPress={() => void load()}>もう一度</Button> : null}
         </View>

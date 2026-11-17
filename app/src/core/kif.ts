@@ -57,8 +57,7 @@ export function readKif(input: string): ShogiRecord {
       /^(\s*\d+\s+[▲△▼▽]?)([1-9])(?=[一二三四五六七八九])/gm,
       (_, prefix: string, n: string) =>
         prefix + "０１２３４５６７８９"[Number(n)],
-    )
-    .replace(/^([^\n:：]+):/gm, "$1：");
+    );
   if (!/^(?:\s*\d+\s+|手合割[：:]|手数[―ー\-\s]|\|)/m.test(text)) {
     throw new Error(
       "KIFの指し手や開始局面が見つかりません。KIF形式の本文を確認してください。",
@@ -92,6 +91,10 @@ export function readKif(input: string): ShogiRecord {
   let last = 0;
   let branch = false;
   for (const line of text.split("\n")) {
+    if (/^\s*\d+\s*$/.test(line))
+      throw new Error(
+        "指し手が途中で途切れています。KIFの全文を確認してください。",
+      );
     if (/^変化[：:]\s*\d+手/.test(line)) branch = true;
     const n = line.match(/^\s*(\d+)\s+/);
     if (!n) continue;
@@ -113,6 +116,11 @@ export function readKif(input: string): ShogiRecord {
   record.forEach((node) => {
     if (!node.prev) return;
     count++;
+    if (!(node.move instanceof Move) && node.move.type === "any") {
+      throw new Error(
+        `${node.ply}手目「${node.displayText}」を読めません。指し手または終局理由を確認してください。`,
+      );
+    }
     if (node.move instanceof Move) {
       const p = Position.newBySFEN(node.prev.sfen);
       if (!p?.isValidMove(node.move))

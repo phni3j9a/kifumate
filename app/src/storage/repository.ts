@@ -89,8 +89,7 @@ export async function updateInfo(
 }
 export async function toggleFavorite(db: SQLiteDatabase, game: Game) {
   await db.runAsync(
-    "UPDATE games SET favorite=?, updated_at=? WHERE id=?",
-    game.favorite ? 0 : 1,
+    "UPDATE games SET favorite=1-favorite, updated_at=? WHERE id=?",
     new Date().toISOString(),
     game.id,
   );

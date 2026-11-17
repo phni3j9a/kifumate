@@ -66,18 +66,25 @@ export default function Import() {
   async function pick() {
     setError("");
     try {
-      const picked = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        copyToCacheDirectory: true,
-      });
-      if (picked.canceled) return;
-      const asset = picked.assets[0]!;
-      if ((asset.size ?? 0) > MAX_BYTES)
-        throw new Error("ファイルは2MB以内にしてください。");
-      const buffer =
-        Platform.OS === "web"
-          ? await asset.file!.arrayBuffer()
-          : await new File(asset.uri).arrayBuffer();
+      let buffer: ArrayBuffer;
+      if (Platform.OS === "web") {
+        const picked = await DocumentPicker.getDocumentAsync({
+          type: "*/*",
+          base64: false,
+        });
+        if (picked.canceled) return;
+        const asset = picked.assets[0]!;
+        if ((asset.size ?? 0) > MAX_BYTES)
+          throw new Error("ファイルは2MB以内にしてください。");
+        buffer = await asset.file!.arrayBuffer();
+      } else {
+        // File自身のピッカーで読み取り権限を受け取る（共有キャッシュのパスに依存しない）。
+        const picked = await File.pickFileAsync({ mimeTypes: ["*/*"] });
+        if (picked.canceled) return;
+        if (picked.result.size > MAX_BYTES)
+          throw new Error("ファイルは2MB以内にしてください。");
+        buffer = await picked.result.arrayBuffer();
+      }
       const decoded = decodeKif(new Uint8Array(buffer));
       setText(decoded);
       await preview(decoded);

@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import Encoding from "encoding-japanese";
-import { Color, Move, PieceType, Position, Square } from "tsshogi";
+import {
+  Color,
+  Move,
+  PieceType,
+  Position,
+  Square,
+  Record as ShogiRecord,
+} from "tsshogi";
 import {
   Branch,
   decodeKif,
@@ -19,6 +26,8 @@ const kif = readFileSync("tests/fixtures/standard.kif", "utf8");
 test("実書式：全角座標・同・成・時刻・コメント・CRLF・BOM", () => {
   const record = readKif("\ufeff" + kif.replace(/\n/g, "\r\n"));
   assert.equal(describe(record).plies, 5);
+  assert.equal(record.moves[1]?.elapsedMs, 1000);
+  assert.equal(record.moves[3]?.elapsedMs, 3000);
   assert.equal(gameOutcome(record), "black");
   assert.equal(record.moves[3]?.comment.trim(), "角を交換する");
 });
@@ -92,6 +101,8 @@ test("空・異形式・手数欠落・不正な座標・非合法手・未知�
     kif.replace("７六歩(77)", "７五歩(77)"),
     kif.replace("７六歩(77)", "０六歩(77)"),
     "手合割：謎",
+    "手合割：平手\n1",
+    "手合割：平手\n1 デタラメ",
   ]) {
     assert.throws(() => readKif(text), text);
   }
@@ -149,4 +160,28 @@ test("合法手は二歩・行き所なし・自玉放置・打ち歩詰めを�
       m.to.equals(new Square(5, 2)),
     ),
   );
+});
+
+test("時間のコロン・ASCIIヘッダーを壊さず書き出す", () => {
+  const r = readKif(
+    kif.replace("先手：", "先手:").replace("開始日時：", "開始日時:"),
+  );
+  const roundtrip = readKif(writeKif(r));
+  assert.equal(describe(roundtrip).date, "2026/11/16 10:00:00");
+  assert.equal(roundtrip.moves[1]?.elapsedMs, 1000);
+  assert.equal(roundtrip.moves[3]?.elapsedMs, 3000);
+});
+test("盤面図・持ち駒・後手番の指定と入力内の変化を保持する", () => {
+  const p = Position.newBySFEN("4k4/9/9/9/9/9/4P4/9/4K4 w P 1")!;
+  const diagram = new ShogiRecord(p);
+  const parsed = readKif(writeKif(diagram));
+  assert.equal(identity(parsed), identity(diagram));
+  const branched = readKif(
+    kif + "\n変化：3手\n3 ２六歩(27)\n4 ８四歩(83)\n5 中断\n",
+  );
+  assert.equal(identity(branched), identity(readKif(kif)));
+  let count = 0;
+  branched.forEach(() => count++);
+  assert.equal(count, 10);
+  assert.equal(identity(readKif(writeKif(branched))), identity(branched));
 });

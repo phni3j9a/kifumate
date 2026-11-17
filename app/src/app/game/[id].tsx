@@ -113,7 +113,7 @@ export default function GameScreen() {
         ...game!,
         favorite: favorite ?? game!.favorite,
       });
-      setFavorite((favorite ?? game!.favorite) ? 0 : 1);
+      setFavorite((previous) => ((previous ?? game!.favorite) ? 0 : 1));
     } catch {
       setMessage("お気に入りを保存できませんでした。");
     }

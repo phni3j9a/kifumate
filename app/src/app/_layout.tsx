@@ -5,7 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors, Button, Label, Page } from "../components/ui";
 import { migrate } from "../storage/schema";
-export const unstable_settings = { initialRouteName: "(tabs)" };
+export const unstable_settings = { anchor: "(tabs)" };
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
   return (
     <Page>

@@ -6,15 +6,25 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "icon": "./src/assets/app-icon.webp",
+    "icon": "./src/assets/app-icon.png",
     "plugins": [
       "expo-router",
       "expo-sqlite",
       "expo-document-picker",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-font"
     ],
-    "android": { "package": "jp.kifumate.app" },
-    "ios": { "bundleIdentifier": "jp.kifumate.app", "supportsTablet": true },
-    "web": { "bundler": "metro", "output": "single", "name": "kifumate" }
+    "android": {
+      "package": "jp.kifumate.app"
+    },
+    "ios": {
+      "bundleIdentifier": "jp.kifumate.app",
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "kifumate"
+    }
   }
 }
