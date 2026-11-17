@@ -219,7 +219,7 @@ npx wrangler secret put COACH_API_KEY --env staging
 | `COACH_MODEL` | `gpt-6-luna` | `deepseek-flash` |
 | `COACH_TOKEN_PARAMETER` | `max_completion_tokens`（既定） | `max_tokens` |
 
-両者に `reasoning_effort:none`、`response_format:{type:json_object}` を送ります。2026-11-17に [OpenAIモデル公式](https://platform.openai.com/docs/models/gpt-6-luna)、[DeepSeek変更履歴](https://api-docs.deepseek.com/updates/)、[Chat Completions公式](https://api-docs.deepseek.com/api/create-chat-completion/) を確認しました。DeepSeekの仕様上の呼称はV4.1 Flash 1017、API IDは`deepseek-flash`です。利用可能なアカウント・応答互換性は実キーで未検証のため、候補を固定採用したわけではありません。
+両者に `reasoning_effort:none`、`response_format:{type:json_object}` を送ります。2026-11-17に [OpenAIモデル公式](https://platform.openai.com/docs/models/gpt-6-luna)、[DeepSeek変更履歴](https://api-docs.deepseek.com/updates/)、[Chat Completions公式](https://api-docs.deepseek.com/api/create-chat-completion/) を確認しました。DeepSeekの仕様上の呼称はV4.1 Flash 1017、API IDは`deepseek-flash`です。2026-11-17の実キーによる直接比較では両APIの応答互換性を確認しました。ただし双方に意味の誤り・出力検査失敗が残り、どちらも本番採用は未決定です。次の検証候補は費用の低い `gpt-6-luna`。共有指示文は維持し、未採用の修正案・全64回の品質／速度／費用は [比較結果](docs/ai-coach.md#実モデルの比較結果2026-11-17) を参照してください。stagingの設定は今回変更していません。
 
 `COACH_PROVIDER=fake` は **local/stagingだけ**に許可し、production等では503にします。既定では偽物を使わず、キー・URL・モデル未設定なら503（使用数0増加）です。
 
