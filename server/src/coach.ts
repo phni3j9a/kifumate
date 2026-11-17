@@ -14,11 +14,6 @@ export interface CoachEnv {
   COACH_TOKEN_PARAMETER?: string;
   COACH_TIMEOUT_MS?: string;
 }
-const CONFIG_KEYS = ['ENVIRONMENT', 'COACH_SIGNING_KEY', 'COACH_API_KEY', 'COACH_BASE_URL', 'COACH_MODEL', 'COACH_PROVIDER',
-  'COACH_MONTHLY_LIMIT', 'COACH_MAX_TOKENS', 'COACH_TOKEN_PARAMETER', 'COACH_TIMEOUT_MS'] as const;
-export function coachConfiguration(env: CoachEnv): CoachEnv {
-  return Object.fromEntries(CONFIG_KEYS.map(k => [k, env[k]])) as unknown as CoachEnv;
-}
 export interface Proof {
   version: 1; device: string; jobId: string; mode: 'precise';
   issuedAt: number; expiresAt: number; digest: string; mac: string;

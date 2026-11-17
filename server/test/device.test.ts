@@ -218,17 +218,27 @@ it('分岐APIでも認証を通し、所有者・権利の内部ヘッダーを�
   const reg = await SELF.fetch('https://api/v1/devices', {method: 'POST'});
   const {token} = await reg.json() as any;
   const hash = await sha256(token), stub = devices.getByName(hash);
+  const secrets = {COACH_API_KEY: 'realtime-provider-secret', COACH_SIGNING_KEY: 'realtime-signing-secret',
+    INVITE_ADMIN_KEY: 'realtime-admin-secret', DEV_PAID_HASHES: 'realtime-development-secret'};
   await runInDurableObject(stub, (instance: any) => {
+    Object.assign(instance.env, secrets);
     instance.env.REALTIME = {getByName: (slot: string) => ({fetch: async (request: Request) => Response.json({
       slot, owner: request.headers.get('X-Realtime-Owner'), paid: request.headers.get('X-Dev-Paid'),
       auth: request.headers.get('Authorization'), path: new URL(request.url).pathname,
+      hash: request.headers.get('X-Device-Hash'), devEntitlement: request.headers.get('X-Dev-Entitlement'),
+      config: request.headers.get('X-Coach-Config'), headers: Object.fromEntries(request.headers), body: await request.text(),
     })})};
   });
-  const response = await SELF.fetch('https://api/v1/realtime', {headers: {
-    Authorization: 'Bearer ' + token, 'X-Realtime-Owner': 'f'.repeat(64), 'X-Dev-Paid': '1',
+  const body = JSON.stringify({initial: 'startpos', moves: []});
+  const response = await SELF.fetch('https://api/v1/realtime', {method: 'POST', body, headers: {
+    'Content-Type': 'application/json', Authorization: 'Bearer ' + token, 'X-Realtime-Owner': 'f'.repeat(64), 'X-Dev-Paid': '1',
+    'X-Dev-Entitlement': '1', 'X-Device-Hash': 'forged', 'X-Coach-Config': 'forged',
   }});
   expect(response.status).toBe(200);
   const result = await response.json() as any;
   expect(result.owner).toBe(stub.id.toString()); expect(result.paid).toBe('0'); expect(result.auth).toBe(null);
   expect(result.path).toBe('/v1/realtime'); expect(result.slot).toMatch(/^slot-[01]$/);
+  expect(result.hash).toBe(hash); expect(result.devEntitlement).toBe('0'); expect(result.config).toBe(null);
+  expect(result.body).toBe(body);
+  for (const value of [...Object.values(secrets), token]) expect(JSON.stringify([result.headers, result.body])).not.toContain(value);
 });

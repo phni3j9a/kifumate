@@ -2,7 +2,20 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
-## Issue #28：AIコーチの提供元失敗の修正（2026-11-17）
+## PR #30追補：秘密情報の内部転送撤去（2026-11-17）
+
+- **前回、本番でも`wrangler tail --env production`を実行しました。** consoleの固定フィールドだけを抽出していましたが、内部HTTPの自動メタデータへsecretを載せる実装自体を撤去しました。今回の追補作業ではtailを実行・記録していません。
+- `X-Coach-Config`と設定コピーのヘルパー／保持用フィールドを削除し、コーチ生成・精密解析の署名はDO自身のenvを直接参照します。secretだけでなく提供元・上限の設定一式も、内部HTTPヘッダー・本文へ追加しません。
+- Worker→Deviceは外部ヘッダーを`Content-Type`・`Prefer`だけに限定。権利の真偽値・IPハッシュはサーバーで算出し、Device→Realtimeの端末ハッシュ・所有者・権利も上書きします。secret4種と端末トークンの値が両境界のヘッダー／本文に含まれない回帰テスト、外部からの偽装値の拒否を追加しました。
+- MainがDNS一覧の競合なしを再確認後、両環境を通常手順でデプロイ。その後、両環境の`COACH_SIGNING_KEY`をそれぞれランダム32バイトの新しい値へ標準入力だけで差し替えました。新しい鍵は表示・ファイル保存していません。**両環境の差し替え前の精密解析証明は無効**です。管理鍵とDeepSeekキーは変更していません。
+- 切替後のVersion：staging `9e8feee7-e5b8-40cf-80ef-3985d60e4442`、production `f400a9b6-789f-4ccf-a00f-ddf583cc524b`。デプロイ済みの`index.ts`・`coach.ts`と最終ソースの一致を確認しました。
+- 公式仕様のDO更新猶予300秒を待ち、本番で1端末・1時間の確認招待を使い、新規精密解析7局面→実DeepSeekの**解説1回が31.812秒で成功**（GET待機込み、used=1／reserved=0）。finallyで招待を取り消し、無料化を確認、コード原文・取消用メタデータも削除しました。
+- Vitest **133件**、pytest **45件**、型検査、`git diff --check`成功。13:21 UTCに両環境の全6 Container applicationでactive=0／assigned=0、登録済みinstanceすべてinactiveを確認しました。
+- READMEに公式Secrets／DOコード更新／Bindingsへの根拠リンク、版切替の猶予、内部ヘッダーの信頼境界、tailを共有・記録しないこと、表示されたsecretを差し替える手順を追加しました。
+
+**残事項**：漏えいしたDeepSeek旧キーは利用者による新規発行・`~/.config/kifumate/llm.env`更新待ちです。READMEの標準入力による更新・確認・旧キー失効の手順で対応してください。今回このキーは差し替えていません。
+
+## Issue #28：AIコーチの提供元失敗の修正（初回確認、2026-11-17）
 
 - 原因：`fetch`に指定していた`redirect:'error'`をCloudflare Workersが受理せず、外部送信前に`TypeError`になっていました。stagingのtailで`provider_fetch / TypeError / elapsedMs:0`を確認し、同じオプションをWorkersネイティブ`Request`へ渡す回帰テストでも再現。`redirect:'manual'`へ変更し、3xxを既存の非2xx検査で拒否するため、転送先へのAPIキー送信は引き続き防ぎます。DeepSeekのモデル・要求本文・安全検査は変更していません。
 - 診断：提供元のHTTPステータス、固定の発生箇所・例外種別、所要時間だけを構造化ログへ追加。本文・例外のmessage/stack・任意のname・キー・利用者の文は記録しません。期限タイマーはfinallyで解除し、処理終了／診断ログの確定が240秒まで延びる問題も解消しました。
@@ -22,7 +35,7 @@
 - 終了時、staging／productionの全6 Container applicationで`active=0 / assigned=0`、登録済み全instanceが`inactive`、location/version=nullと確認しました（13:05 UTC以前）。他アプリのコンテナには停止操作も設定変更も行っていません。
 - 最終ローカル検証：Vitest **132件**、pytest **45件**、型検査、招待管理スクリプト自己検査、変更Pythonの構文検査、`git diff --check`が成功。ネイティブRequestの回帰テストは修正前失敗・修正後成功を確認しました。
 
-**残事項／運用注意**：Wranglerの`tail --format json`の自動メタデータは内部`X-Coach-Config`のsecretを含み得ます。初期調査でこのメタデータが表示されたため、生tailファイルを削除し、以後は固定consoleフィールドだけを受信直後に抽出しました。独自診断ログにはsecretを出していません。既存鍵を上書きしない指示に従いローテーションはしていないため、必要性・影響は管理者が判断してください。実アプリのUI操作・長い棋譜／履歴の再評価、一般公開前の権利検証・予算遮断は今回の範囲外です。
+**残事項／運用注意**：Wranglerの`tail --format json`の自動メタデータは内部`X-Coach-Config`のsecretを含み得ます。初期調査でこのメタデータが表示されたため、生tailファイルを削除し、以後は固定consoleフィールドだけを受信直後に抽出しました。独自診断ログにはsecretを出していません。初回は既存鍵を上書きしない指示に従いローテーションを行いませんでしたが、上記の追補で内部転送の撤去と両環境の署名鍵差し替えを実施しました。DeepSeekキーのみ利用者の更新待ちです。実アプリのUI操作・長い棋譜／履歴の再評価、一般公開前の権利検証・予算遮断は今回の範囲外です。
 
 以下はIssue [#24](https://github.com/phni3j9a/kifumate/issues/24)時点の記録です。
 
