@@ -62,15 +62,73 @@ describe('入力・名前・指し手の境界', () => {
       expect(() => parseCoach(bad)).toThrow();
     }
   });
-  it('既知の内部名・サービス・人名の敬称を入力と出力で拒否する', async () => {
+  it('既知の内部名・サービスを入力と出力で拒否する', async () => {
     const p = await payload('device');
-    for (const name of ['水匠11 Plus', 'YaneuraOu', 'NNUE', '将棋ウォーズ', '81Dojo', '羽生さん', 'Alice様', 'ＤｅｅｐＳｅｅｋ', 'ChatGPT']) {
+    for (const name of ['水匠11 Plus', 'YaneuraOu', 'NNUE', '将棋ウォーズ', '81Dojo', 'ＤｅｅｐＳｅｅｋ', 'ChatGPT']) {
       expect(() => checkNames(name)).toThrow('unsafe_names');
       expect(() => parseCoach({...p, question: name})).toThrow('unsafe_names');
       expect(() => validateOutput({sections: [{...safe.sections[0], text: name}]}, refs)).toThrow('invalid_output');
     }
     expect(() => checkNames('あなたと相手の解析結果')).not.toThrow();
     expect(JSON.stringify(messages(parseCoach(p), refs))).not.toMatch(/水匠|YaneuraOu|DeepSeek/i);
+  });
+  it.each(['王様を安全にしたい', 'たくさん練習したい', '同様の局面', '模様を良くしたい'])('普通の日本語「%s」を名前と推測して拒否しない', async sentence => {
+    const p = await payload('device');
+    const parsed = parseCoach({...p, question: sentence, profile: {...p.profile, goal: sentence}, history: [{role: 'user', content: sentence}]});
+    expect(parsed.question).toBe(sentence);
+    expect(parsed.profile.goal).toBe(sentence);
+    expect(parsed.history[0].content).toBe(sentence);
+    const out = validateOutput({sections: [{...safe.sections[0], title: sentence, text: sentence}]}, refs);
+    expect(out.sections[0].title).toBe(sentence);
+    expect(out.sections[0].text).toBe(sentence);
+  });
+  it('敬称による人名推測は行わない', async () => {
+    const p = await payload('device');
+    for (const name of ['羽生さん', 'Alice様']) {
+      expect(parseCoach({...p, question: name}).question).toBe(name);
+      expect(validateOutput({sections: [{...safe.sections[0], text: name}]}, refs).sections[0].text).toBe(name);
+    }
+  });
+  const invisible = ['\u00ad', '\u061c', '\u180e', '\u200b', '\u200c', '\u200d', '\u202e', '\u2060', '\u2066', '\ufeff', '\u034f', '\ufe0f', '\u{e0100}', '\u{e0001}'];
+  it('書式文字やゼロ幅文字を挟んだ禁止名をLLM入力で拒否する', async () => {
+    const p = await payload('device');
+    for (const separator of invisible) {
+      for (const name of ['水匠', 'YaneuraOu', '将棋ウォーズ', 'ＤｅｅｐＳｅｅｋ']) {
+        const hidden = name[0] + separator + name.slice(1);
+        expect(() => checkNames(hidden)).toThrow('unsafe_names');
+        for (const data of [ {...p, question: hidden}, {...p, profile: {...p.profile, goal: hidden}},
+          {...p, profile: {...p.profile, practice: [hidden]}}, {...p, question: '質問', history: [{role: 'assistant', content: hidden}]} ]) {
+          expect(() => messages(parseCoach(data), refs)).toThrow('unsafe_names');
+        }
+      }
+    }
+  });
+  it('書式文字やゼロ幅文字を挟んだ禁止名を出力で拒否する', () => {
+    for (const separator of invisible) {
+      const hidden = '水' + separator + '匠';
+      for (const section of [{...safe.sections[0], text: hidden}, {...safe.sections[0], title: hidden}]) {
+        expect(() => validateOutput({sections: [section]}, refs)).toThrow('invalid_output');
+      }
+    }
+  });
+  it('禁止名を含まない文もLLM送信本文とアプリ応答から不可視文字を除去する', async () => {
+    const p = await payload('device');
+    for (const separator of invisible) {
+      const hidden = '振' + separator + 'り返り';
+      const parsed = parseCoach({...p, profile: {practice: [hidden], goal: hidden}, question: hidden, history: [{role: 'user', content: hidden}]});
+      const sent = JSON.parse(messages(parsed, refs)[1].content);
+      expect(sent.profile).toEqual({practice: ['振り返り'], goal: '振り返り'});
+      expect(sent.question).toBe('振り返り');
+      expect(sent.history[0].content).toBe('振り返り');
+      const out = validateOutput({sections: [{...safe.sections[0], title: hidden, text: hidden}]}, refs);
+      expect(out.sections[0].title).toBe('振り返り');
+      expect(out.sections[0].text).toBe('振り返り');
+    }
+  });
+  it('不可視文字を除去すると空になる質問・出力を拒否する', async () => {
+    const p = await payload('device');
+    expect(() => parseCoach({...p, question: '\u2060'})).toThrow('invalid_input');
+    expect(() => validateOutput({sections: [{...safe.sections[0], text: '\u2060'}]}, refs)).toThrow('invalid_output');
   });
   it('任意の読み筋や評価値を本文に出せず、署名済み参照だけを返す', () => {
     const out = validateOutput(safe, refs);

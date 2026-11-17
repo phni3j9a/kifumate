@@ -57,15 +57,18 @@ export async function verifyAnalysis(secret: string, device: string, input: Inpu
   if (!valid || p.digest !== await sha256(canonical({input, results}))) throw new ApiError(400, 'invalid_proof');
 }
 
-// 固有名を指示文にも含めず、入力・出力の両方で検査する。
-const FORBIDDEN = /水匠|suisho|やねうら王|yaneura|技巧|elmo|nnue|halfka|apery|ponanza|dlshogi|将棋ウォーズ|将棋倶楽部|将棋クエスト|ぴよ将棋|shogi\s*(?:wars|quest|club)|81dojo|lishogi|将棋ドットコム|openai|deepseek|chatgpt|gpt[\s-]*\d|luna|claude|gemini|評価関数名|エンジン名|(?:[\p{L}\p{N}_]+)(?:さん|様|氏|選手|先生|さま)/iu;
-export function checkNames(text: string) {
-  if (FORBIDDEN.test(text.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, ''))) throw new ApiError(400, 'unsafe_names');
+// 製品名だけを検査し、人名の伏せ字は登録名を持つアプリ側で行う。
+const FORBIDDEN = /水匠|suisho|やねうら王|yaneura|技巧|elmo|nnue|halfka|apery|ponanza|dlshogi|将棋ウォーズ|将棋倶楽部|将棋クエスト|ぴよ将棋|shogi\s*(?:wars|quest|club)|81dojo|lishogi|将棋ドットコム|openai|deepseek|chatgpt|gpt[\s-]*\d|luna|claude|gemini/iu;
+export function checkNames(text: string): string {
+  const cleaned = text.replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, '');
+  if (FORBIDDEN.test(cleaned.normalize('NFKC'))) throw new ApiError(400, 'unsafe_names');
+  return cleaned;
 }
 function text(value: unknown, max: number, empty = false): string {
-  if (typeof value !== 'string' || value.length > max || (!empty && !value.trim()) || /[\u0000-\u0008\u000b-\u001f]/.test(value)) throw new ApiError(400, 'invalid_input');
-  checkNames(value);
-  return value;
+  if (typeof value !== 'string' || value.length > max || /[\u0000-\u0008\u000b-\u001f]/.test(value)) throw new ApiError(400, 'invalid_input');
+  const cleaned = checkNames(value);
+  if (!empty && !cleaned.trim()) throw new ApiError(400, 'invalid_input');
+  return cleaned;
 }
 export function parseCoach(value: unknown) {
   const x = record(value);
