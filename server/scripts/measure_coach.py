@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""stagingの署名付き精密解析とAIコーチを検証する。実LLMの比較には使わない。"""
+"""署名付き精密解析とAIコーチの解説・質問を検証する。実LLMの比較には使わない。"""
 import argparse
 import json
 import os
@@ -41,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--token-file", type=Path, default=Path(".local/coach-device.json"))
-    parser.add_argument("--expect", choices=["fake", "unavailable"], required=True)
+    parser.add_argument("--expect", choices=["fake", "real", "unavailable"], required=True)
     parser.add_argument("--request-file", type=Path, default=Path(".local/coach-request.json"))
     args = parser.parse_args()
     token = json.loads(args.token_file.read_text())["token"]
@@ -77,13 +77,16 @@ def main():
     assert status == 202, (status, answer)
     answer = collect(args.url, token, request_id)
     seconds = round(time.monotonic() - started, 3)
-    if args.expect == "fake":
+    chat_seconds = None
+    if args.expect in ("fake", "real"):
         assert answer["status"] == "completed" and answer["sections"], (status, answer)
         assert answer["quota"]["used"] == before + 1
         chat_id = str(uuid.uuid4())
+        chat_started = time.monotonic()
         status, chat = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": chat_id, "question": "次に何を練習したらいい？", "history": [{"role": "assistant", "content": answer["sections"][0]["text"]}]}, asynchronous=True)
         assert status == 202, (status, chat)
         chat = collect(args.url, token, chat_id)
+        chat_seconds = round(time.monotonic() - chat_started, 3)
         assert chat["status"] == "completed" and chat["quota"]["used"] == before + 2, (status, chat)
         status, recovered = call(args.url + '/v1/coach/' + request_id, token)
         assert status == 200 and recovered['sections'] == answer['sections']
@@ -101,9 +104,9 @@ def main():
     status, cancelled = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": cancel_id})
     assert status == 409 and cancelled["error"] == "request_exists"
     _, quota = call(args.url + "/v1/coach", token)
-    assert quota["quota"]["used"] == before + (2 if args.expect == "fake" else 0)
+    assert quota["quota"]["used"] == before + (2 if args.expect in ("fake", "real") else 0)
     assert quota["quota"]["reserved"] == 0
-    print(json.dumps({"provider": args.expect, "seconds": seconds, "positions": len(payload["analysis"]["results"]), "proof": True,
+    print(json.dumps({"provider": args.expect, "seconds": seconds, "questionSeconds": chat_seconds, "positions": len(payload["analysis"]["results"]), "proof": True,
                       "tamperRejected": True, "cancelledUncounted": True, "quota": quota["quota"]}, ensure_ascii=False))
 
 

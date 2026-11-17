@@ -139,7 +139,9 @@ node scripts/invitations.mjs revoke --env staging --hash "$HASH"
 
 公式bindingは**拠点ごとの近似カウンター**で、同期前のバーストや複数拠点では設定値を超え得ます。請求の厳密な上限ではありません。招待の追加制限は単一DOのトランザクションで全拠点共有、形式不正や成功も数えます。窓は最初の試行から15分、古い試行行は次の試行時に削除。端末とIPはハッシュだけを保持します。IP共有のモバイル回線では他人の試行も含むので、正当な入力が拒否された場合も連打せず待ってください。端末の実在性検証は別課題です。
 
-**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed`（公開エラー）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed / coach_provider_failed`（公開エラー・固定の発生箇所・例外種別・提供元HTTPステータス・所要時間）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+
+診断は`npx wrangler tail --env staging`（本番は`production`）で構造化consoleログを確認します。**`--format json`の生出力には、Wranglerが自動付加する内部リクエストヘッダー（`X-Coach-Config`内のsecretを含む）が現れ得ます。** 生出力を保存・共有せず、必要ならconsoleログの上記固定フィールドだけを受信直後に抽出してください。独自診断は例外のmessage・stack・任意のname、提供元本文・入力・キーを出しません。処理完了時に期限タイマーも解除し、ログや処理終了を期限まで引き延ばしません。
 
 - 配布開始後は毎日、Cloudflare Dashboard → 対象Worker → Observabilityで`coach_completed`・`coach_failed`・`analysis_completed`の件数と429/5xx、端末発行数を前日と比較してください。最初の見直し目安は**AIコーチ成功100件/日、全局解析200局/日、端末発行30台/日、提供元失敗10件/日**。少人数向けの警戒値で、サーバーがこの値で自動停止するものではありません。
 - 月の端末別上限（全局週10/100局、精密20局、分岐月300分、コーチ月100回）・最大6コンテナ・無操作停止・提供元240秒/32768トークンで増加を抑えます。失敗でも提供元費用は発生し得るので、成功数だけでなく失敗数とDeepSeek使用量・Cloudflare Billingも確認します。費用式は[measurement.md](docs/measurement.md)。
@@ -290,7 +292,7 @@ POST本文（追加キー・人名フィールドは拒否）：
 
 ### 設定と提供元
 
-| 設定 | 既定／production |
+| 設定 | 既定／staging／production |
 | --- | --- |
 | `COACH_PROVIDER` | `openai-compatible` |
 | `COACH_BASE_URL` | `https://api.deepseek.com` |
@@ -304,7 +306,9 @@ LLMへ送る根拠は`container/coach_facts.py`で決定的に作る日本語だ
 
 盤面の詰みは勝者・敗者・終局理由を確定できますが、**既存の署名入力には投了・実際の宣言などの終局記録がありません**。その場合は勝敗・終局理由を不明とし、宣言可能という探索結果から実戦の宣言勝ちを作りません。**サーバーが解析から作る事実**には生USI・SFEN・符号付き評価を含めず、日本語化してLLMへ渡します。利用者が質問・プロフィール・履歴に書いた数値（「評価が＋600なのはなぜ？」など）は、全角・半角や符号を変えずに保持します。これは解析で確認した事実ではなく参考文です。自由文のUSIの既存伏字と、出力本文の数値禁止は維持します。アプリへ返す署名済み`references`のUSI・評価は従来どおりです。
 
-再比較の誤り・偽陽性・速度・費用は[検証記録](docs/ai-coach.md)を参照してください。`COACH_PROVIDER=fake`は**local/stagingのみ**許可し、productionでは503で拒否します。
+提供元への送信はWorkersが対応する`redirect:manual`で行い、3xxも失敗として拒否します（キーを転送先へ送信しません）。送信前・HTTP応答・読取・出力形式の失敗と、事実生成／出力検査の失敗を別の発生箇所として記録します。
+
+再比較の誤り・偽陽性・速度・費用は[検証記録](docs/ai-coach.md)、Issue #28の実環境確認は[production.md](docs/production.md)を参照してください。`COACH_PROVIDER=fake`は**local/stagingのみ**許可し、productionでは503で拒否します。
 
 ## ローカル開発
 
@@ -395,9 +399,9 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 
 最新の確認結果は[production.md](docs/production.md)、解析の実測は[measurement.md](docs/measurement.md)、AIコーチの検証は[ai-coach.md](docs/ai-coach.md)を参照。
 
-## productionの準備とデプロイ（ユーザー確認後にMainが実行）
+## productionの準備とデプロイ
 
-**今回、本番へはデプロイしていません。以下の実デプロイはユーザー確認後だけ実行してください。**
+本番への反映はユーザー承認後に行います。登録済み環境の更新は「通常の更新・再デプロイ」を使い、初回登録を繰り返さないでください。
 
 - Worker名：`kifumate-analysis-production`。DO namespace・レート制限・Containerはstagingとは別。
 - 本番URL：**`https://kifumate-api.quarterlambda.com`**。同じアカウントのactiveなzone `quarterlambda.com` を確認済みです。第1階層のサブドメインで、[Workers Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)としてWranglerがDNSと証明書を構成します。workers.dev・preview URLは無効。既存DNSとの競合は勝手に置換せず停止して確認します。
@@ -413,12 +417,20 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 | `INVITE_ADMIN_KEY` | 招待発行・取消用。署名鍵／staging管理鍵とも別の新規乱数 |
 | `COACH_API_KEY` | `~/.config/kifumate/llm.env`の`DEEPSEEK_API_KEY` |
 
+### デプロイ前のDNS確認（初回・通常更新共通）
+
+DNS読み取り権限のある経路（Cloudflare Dashboard → `quarterlambda.com` → DNS → Records、DNS readを持つAPIトークン、またはMCP）でDNS一覧を開き、`kifumate-api.quarterlambda.com`を検索します。別用途のA・AAAA・CNAME等がないことを確認し、Workers & Pages → `kifumate-analysis-production` → Settings → Domains & Routesでも、このホストが同WorkerのCustom Domainであることを確認してください。初回は未登録、通常更新では既存の本番Workerへの関連付けだけを許可します。競合・別Workerへの関連付け・確認できない状態ならデプロイせず停止します。Wranglerの現在のOAuth権限ではDNS一覧APIは403になるため、これだけで確認済みとは扱いません。既存の同WorkerへのCustom Domainの紐付けとWranglerの変更内容（`domains/changeset`の競合・追加・削除）も補助として照合しますが、DNS一覧の確認の代わりにはしません。確認のために認証権限を勝手に変更しないでください。
+
+**非TTY（エージェント・CI・出力のリダイレクトを含む）では、Wrangler 4.163.0はCustom Domainの`override_existing_origin`と`override_existing_dns_record`を自動的に有効にし、既存DNSの置換を確認しません。** 対話確認に頼らず、必ず上記の一覧を事前確認してください。これは追加オプションを指定しなくても起きる挙動です（[公式Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、インストール済みWranglerの`publishCustomDomains`実装で確認）。
+
 ### 初回登録の前提確認
 
-以下は`server/`から実行します。初回の一時secretファイルはまだ作りません。
+以下は`server/`から実行します。上記DNS確認を済ませ、初回の一時secretファイルはまだ作りません。
 
 ```sh
 npm ci
+python3 -m venv container/.venv
+container/.venv/bin/pip install -r container/requirements.txt pytest==9.0.2
 npm test && npm run typecheck && npm run test:python
 node scripts/test_invitations.mjs
 npx wrangler whoami
@@ -491,7 +503,7 @@ DeepSeekキーを変更するときだけ、原本`~/.config/kifumate/llm.env`�
 )
 ```
 
-コード・設定の通常デプロイと、キー更新後にデプロイし直す場合は、どちらも次だけです：
+コード・設定の通常デプロイと、キー更新後にデプロイし直す場合は、どちらもテスト・型検査と「デプロイ前のDNS確認」を済ませて次だけを実行します：
 
 ```sh
 npx wrangler deploy --env production
@@ -507,7 +519,7 @@ curl --silent --show-error -i -X OPTIONS https://kifumate-api.quarterlambda.com/
   -H 'Origin: https://example.com'
 ```
 
-初回は少数の期限付き招待から配布し、`GET /v1/entitlements`・AIコーチの実提供元・ログ・Cloudflare/DeepSeek使用量を確認してください。確認用コードは取消し、Containerがinactive・active=0/assigned=0になったことを確認してから終了します。本番の証明書発行・DNS伝播・本番実LLMのスモークは承認後の残作業です。
+初回は少数の期限付き招待から配布し、`GET /v1/entitlements`・AIコーチの実提供元・ログ・Cloudflare/DeepSeek使用量を確認してください。確認用コードは取消し、Containerがinactive・active=0/assigned=0になったことを確認してから終了します。実施済みのデプロイ・実LLM確認の結果は[production.md](docs/production.md)を参照してください。
 
 ## 一般公開前に必要なこと
 
