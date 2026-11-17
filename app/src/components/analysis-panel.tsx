@@ -103,14 +103,29 @@ export function AnalysisPanel({
       style={[
         s.tab,
         {
-          height: 27 + u * 0.25,
-          backgroundColor: on ? colors.white : colors.sand,
+          height: (on ? 27 : 24) + u * 0.25,
+          backgroundColor: locked
+            ? "transparent"
+            : on
+              ? colors.white
+              : colors.sand,
           borderBottomColor: on ? colors.white : colors.ink,
+          ...(locked
+            ? {
+                borderStyle: "dashed" as const,
+                borderWidth: line.thin,
+                borderColor: colors.dash,
+              }
+            : {}),
         },
       ]}
     >
       {locked && <Icon name="lock" size={10} />}
-      <Text style={font(900, 11)}>{label}</Text>
+      <Text
+        style={font(locked ? 700 : 900, 11, 1, on ? colors.ink : colors.ink2)}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
   const preciseInfo = () =>
@@ -118,6 +133,7 @@ export function AnalysisPanel({
       title: "精密解析は、有料プランで使えます",
       text: "候補を3手まで出し、より深く読みます。週20局まで使えます。課金は準備中です。",
       ok: "閉じる",
+      single: true,
     });
   async function cancel() {
     const previous = analysis?.saved?.jobId;
@@ -237,7 +253,10 @@ export function AnalysisPanel({
         {branch ? (
           tab(row ? "おすすめ" : "分岐")
         ) : t ? (
-          tab(t.mode === "precise" ? "精密解析" : "解析")
+          <>
+            {tab(t.mode === "precise" ? "精密解析" : "解析")}
+            {waiting && !quota?.paid && tab("精密", preciseInfo, false, true)}
+          </>
         ) : saved ? (
           rows.map((r, i) => tab(r.label, () => onSelect(i), i === selected))
         ) : quota?.paid ? (
@@ -252,6 +271,7 @@ export function AnalysisPanel({
           </>
         )}
         {!branch &&
+          !t &&
           saved?.mode === "std" &&
           tab(
             "2位・3位",
