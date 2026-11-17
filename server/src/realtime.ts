@@ -15,8 +15,10 @@ interface Session extends Record<string, SqlStorageValue> {
 export class RealtimeSessions {
   private abort?: AbortController;
   private stopping?: Promise<void>;
-  constructor(private sql: SqlStorage, private backend: RealtimeBackend, private idleMs: number, private now = Date.now) {
-    sql.exec(`CREATE TABLE IF NOT EXISTS rt_usage (owner TEXT, month INTEGER, ms INTEGER NOT NULL, PRIMARY KEY(owner,month));
+  private sql: SqlStorage;
+  constructor(private storage: DurableObjectStorage, private backend: RealtimeBackend, private idleMs: number, private now = Date.now) {
+    this.sql = storage.sql;
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS rt_usage (owner TEXT, month INTEGER, ms INTEGER NOT NULL, PRIMARY KEY(owner,month));
       CREATE TABLE IF NOT EXISTS rt_sessions (owner TEXT PRIMARY KEY, id TEXT NOT NULL, sequence INTEGER NOT NULL,
         status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL);`);
   }
@@ -32,16 +34,19 @@ export class RealtimeSessions {
   private account(now: number) {
     const session = this.active();
     if (!session || session.charged === null) return;
-    let cursor = session.charged;
-    while (cursor < now) {
-      const month = monthStart(cursor), end = Math.min(now, nextMonth(cursor));
-      const exhausted = this.used(session.owner, month) + end - cursor >= MONTHLY_MS;
-      this.sql.exec('INSERT INTO rt_usage VALUES (?,?,?) ON CONFLICT(owner,month) DO UPDATE SET ms=MIN(?,ms+excluded.ms)',
-        session.owner, month, Math.min(MONTHLY_MS, end - cursor), MONTHLY_MS);
-      if (exhausted) this.sql.exec("UPDATE rt_sessions SET status='limit' WHERE owner=? AND status NOT IN ('off','failed')", session.owner);
-      cursor = end;
-    }
-    this.sql.exec('UPDATE rt_sessions SET charged=? WHERE owner=?', now, session.owner);
+    if (now <= session.charged) return;
+    this.storage.transactionSync(() => {
+      let cursor = session.charged!;
+      while (cursor < now) {
+        const month = monthStart(cursor), end = Math.min(now, nextMonth(cursor));
+        const exhausted = this.used(session.owner, month) + end - cursor >= MONTHLY_MS;
+        this.sql.exec('INSERT INTO rt_usage VALUES (?,?,?) ON CONFLICT(owner,month) DO UPDATE SET ms=MIN(?,ms+excluded.ms)',
+          session.owner, month, Math.min(MONTHLY_MS, end - cursor), MONTHLY_MS);
+        if (exhausted) this.sql.exec("UPDATE rt_sessions SET status='limit' WHERE owner=? AND status NOT IN ('off','failed')", session.owner);
+        cursor = end;
+      }
+      this.sql.exec('UPDATE rt_sessions SET charged=? WHERE owner=?', now, session.owner);
+    });
   }
   quota(owner: string) {
     this.account(this.now());
@@ -81,8 +86,9 @@ export class RealtimeSessions {
     if (this.stopping) await this.stopping;
     const session = this.active();
     if (!session) return;
-    const quota = this.quota(session.owner);
-    if (!quota.remainingMs || this.session(session.owner)?.status === 'limit') await this.halt('limit');
+    const quota = this.quota(session.owner), current = this.session(session.owner)!;
+    if (['off', 'failed'].includes(current.status)) await this.halt(current.status, current.error);
+    else if (!quota.remainingMs || current.status === 'limit') await this.halt('limit');
     else if (this.now() >= session.activity + this.idleMs) await this.halt('paused');
     else await this.schedule();
   }

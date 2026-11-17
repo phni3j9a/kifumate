@@ -212,3 +212,23 @@ describe('永続ジョブと回数', () => {
     expect((await request(stub, '/v1/quota')).data.totalRemaining).toBe(10);
   });
 });
+
+it('分岐APIでも認証を通し、所有者・権利の内部ヘッダーを必ず上書きする', async () => {
+  expect((await SELF.fetch('https://api/v1/realtime')).status).toBe(401);
+  const reg = await SELF.fetch('https://api/v1/devices', {method: 'POST'});
+  const {token} = await reg.json() as any;
+  const hash = await sha256(token), stub = devices.getByName(hash);
+  await runInDurableObject(stub, (instance: any) => {
+    instance.env.REALTIME = {getByName: (slot: string) => ({fetch: async (request: Request) => Response.json({
+      slot, owner: request.headers.get('X-Realtime-Owner'), paid: request.headers.get('X-Dev-Paid'),
+      auth: request.headers.get('Authorization'), path: new URL(request.url).pathname,
+    })})};
+  });
+  const response = await SELF.fetch('https://api/v1/realtime', {headers: {
+    Authorization: 'Bearer ' + token, 'X-Realtime-Owner': 'f'.repeat(64), 'X-Dev-Paid': '1',
+  }});
+  expect(response.status).toBe(200);
+  const result = await response.json() as any;
+  expect(result.owner).toBe(stub.id.toString()); expect(result.paid).toBe('0'); expect(result.auth).toBe(null);
+  expect(result.path).toBe('/v1/realtime'); expect(result.slot).toMatch(/^slot-[01]$/);
+});

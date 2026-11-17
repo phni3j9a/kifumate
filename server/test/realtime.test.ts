@@ -8,7 +8,7 @@ import { MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realt
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const position = {initial: 'startpos', moves: []};
 const origin = Date.parse('2026-11-17T00:00:00Z');
-async function fixture(check: (f: any) => Promise<void>) {
+async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
   const stub = devices.getByName(await sha256(crypto.randomUUID()));
   await runInDurableObject(stub, async (_instance, state) => {
     let now = origin, stops = 0, due = 0;
@@ -21,7 +21,7 @@ async function fixture(check: (f: any) => Promise<void>) {
       stop: async () => { stops++; now += 5; },
       schedule: async when => { due = when; },
     };
-    let rt = new RealtimeSessions(state.storage.sql, backend, 30_000, () => now);
+    let rt = new RealtimeSessions(state.storage, backend, idleMs, () => now);
     const request = async (method = 'GET', data?: unknown, owner = 'a', paid = true, id?: string) => {
       const response = await rt.fetch(new Request('https://device/v1/realtime' + (id ? '/' + id : ''), {
         method, headers: {'content-type': 'application/json'}, ...(data === undefined ? {} : {body: JSON.stringify(data)}),
@@ -31,8 +31,8 @@ async function fixture(check: (f: any) => Promise<void>) {
     await check({request, backend, calls, sql: state.storage.sql,
       advance: (ms: number) => { now += ms; }, time: (value: number) => { now = value; },
       drain: async () => { await Promise.all(tasks.splice(0)); }, expire: () => rt.expire(),
-      stops: () => stops, due: () => due,
-      restart: () => { rt = new RealtimeSessions(state.storage.sql, backend, 30_000, () => now); },
+      stops: () => stops, due: () => due, disconnected: () => rt.disconnected(),
+      restart: () => { rt = new RealtimeSessions(state.storage, backend, idleMs, () => now); },
     });
   });
 }
@@ -135,8 +135,8 @@ describe('分岐中の解析', () => {
     const stop = f.backend.stop;
     f.backend.stop = async () => { throw new Error('temporary'); };
     expect((await f.request('DELETE', undefined, 'a', true, first.sessionId)).httpStatus).toBe(503);
-    f.advance(1000); expect((await f.request()).quota.usedMs).toBe(1000);
-    expect((await f.request('POST', position, 'b')).error).toBe('realtime_busy');
+    f.advance(1000); expect((await f.request()).httpStatus).toBe(503);
+    expect(f.sql.exec('SELECT charged FROM rt_sessions').toArray()[0].charged).not.toBe(null);
     f.backend.stop = stop;
     await f.request('DELETE', undefined, 'a', true, first.sessionId);
     expect(f.stops()).toBe(1);
@@ -153,4 +153,27 @@ describe('分岐中の解析', () => {
     await f.request('POST', position); await f.drain();
     expect((await f.request('DELETE', undefined, 'a', true, old)).error).toBe('stale_session');
   }));
+  it('alarmが月境界をまたいで遅延しても旧月の上限で停止し、自動再開しない', async () => fixture(async f => {
+    const boundary = nextMonth(origin);
+    f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 500);
+    f.time(boundary - 1000);
+    const first = await f.request('POST', position); await f.drain();
+    f.time(boundary + 100); await f.expire();
+    const limited = await f.request();
+    expect(limited.status).toBe('limit'); expect(limited.quota.usedMs).toBe(105);
+    expect(f.stops()).toBe(1); expect(f.calls.length).toBe(1);
+    expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).httpStatus).toBe(202);
+    await f.drain();
+  }));
+  it('休止時間を設定でき、予期せぬ停止でも時間を確定する', async () => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    expect(f.due()).toBe(origin + 1000);
+    f.advance(500); f.disconnected();
+    expect((await f.request()).quota.usedMs).toBe(500);
+    f.advance(5000); expect((await f.request()).quota.usedMs).toBe(500);
+    await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId); await f.drain();
+    f.advance(1000); await f.expire(); expect(f.stops()).toBe(1);
+    expect((await f.request()).quota.usedMs).toBe(1505);
+  }, 1000));
+
 });
