@@ -80,7 +80,16 @@ export class Device extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.coachConfig = coachConfiguration(env);
-    this.coach = new Coach(ctx.storage, this.coachConfig, ctx.id.toString(), () => this.paid());
+    this.coach = new Coach(ctx.storage, this.coachConfig, ctx.id.toString(), () => this.paid(), async (input, signal) => {
+      if (this.coachConfig.COACH_PROVIDER === 'fake') return undefined;
+      const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
+      const response = await this.env.PRECISE.getByName('slot-' + slot).fetch('http://container/coach-facts', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, signal,
+        body: JSON.stringify({initial: input.input.initial, moves: input.input.moves, results: input.results, perspective: input.perspective}),
+      });
+      if (!response.ok) throw new ApiError(502, 'facts_unavailable');
+      return await response.json();
+    });
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL,
@@ -202,6 +211,7 @@ export class Device extends DurableObject<Env> {
     if (this.busy) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; }
     this.busy = true;
     try {
+      await this.coach.alarm();
       this.prune(Date.now());
       const job = this.rows<Job & Record<string, SqlStorageValue>>("SELECT * FROM jobs WHERE status IN ('running','queued') ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,created,rowid LIMIT 1")[0];
       if (!job) return;
@@ -247,9 +257,14 @@ export class Device extends DurableObject<Env> {
       this.busy = false;
       const next = this.rows<{attempts: number}>("SELECT attempts FROM jobs WHERE status IN ('running','queued') ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,created,rowid LIMIT 1")[0];
       const expiry = this.rows<{expiry: number}>('SELECT MIN(terminal) + ? AS expiry FROM jobs WHERE terminal IS NOT NULL', RETENTION_MS)[0]?.expiry;
+      const coachAlarm = this.coach.nextAlarm();
       if (next) await this.ctx.storage.setAlarm(Date.now() + (next.attempts ? Math.min(30_000, 1000 * 2 ** next.attempts) : 100));
       else if (expiry) await this.ctx.storage.setAlarm(Math.max(Date.now() + 100, expiry));
       else await this.ctx.storage.deleteAlarm();
+      if (coachAlarm !== null) {
+        const current = await this.ctx.storage.getAlarm();
+        if (current === null || current > coachAlarm) await this.ctx.storage.setAlarm(Math.max(Date.now() + 100, coachAlarm));
+      }
     }
   }
 }

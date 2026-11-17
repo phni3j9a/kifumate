@@ -13,6 +13,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cshogi
+from coach_facts import build_facts
 
 MAX_MOVES = 512
 MODES = {"std": (250, 1, 1), "precise": (1000, 2, 3)}
@@ -330,13 +331,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global engine
-        if self.path not in ("/analyze", "/realtime"):
+        if self.path not in ("/analyze", "/realtime", "/coach-facts"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 16384:
+            if not 0 < length <= (1_048_576 if self.path == "/coach-facts" else 16384):
                 return self.respond(413, {"error": "input_too_large"})
             data = json.loads(self.rfile.read(length))
+            if self.path == "/coach-facts":
+                if data["initial"] != "startpos":
+                    validate_sfen(data["initial"])
+                return self.respond(200, build_facts(data))
             cancel = None
             if self.path == '/realtime':
                 if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:

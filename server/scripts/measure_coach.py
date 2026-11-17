@@ -10,9 +10,11 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
-def call(url, token, method="GET", data=None):
+def call(url, token, method="GET", data=None, asynchronous=False):
     request = Request(url, method=method, headers={"Authorization": "Bearer " + token, "Content-Type": "application/json", "User-Agent": "kifumate-measurement/1.0"},
                       data=None if data is None else json.dumps(data).encode())
+    if asynchronous:
+        request.add_header("Prefer", "respond-async")
     try:
         with urlopen(request, timeout=90) as response:
             return response.status, json.load(response)
@@ -22,6 +24,17 @@ def call(url, token, method="GET", data=None):
             return error.code, json.loads(raw)
         except ValueError:
             raise RuntimeError(f"HTTP {error.code}: JSONではない応答です。接続先の拒否やUser-Agentを確認してください") from None
+
+
+def collect(url, token, request_id):
+    deadline = time.monotonic() + 270
+    while time.monotonic() < deadline:
+        status, answer = call(url + '/v1/coach/' + request_id, token)
+        assert status == 200, (status, answer)
+        if answer['status'] != 'pending':
+            return answer
+        time.sleep(3)
+    raise RuntimeError('コーチの取得が期限を超えました')
 
 
 def main():
@@ -60,17 +73,25 @@ def main():
     before = initial_quota["quota"]["used"]
     request_id = str(uuid.uuid4())
     started = time.monotonic()
-    status, answer = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": request_id})
+    status, answer = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": request_id}, asynchronous=True)
+    assert status == 202, (status, answer)
+    answer = collect(args.url, token, request_id)
     seconds = round(time.monotonic() - started, 3)
     if args.expect == "fake":
-        assert status == 200 and answer["sections"], (status, answer)
+        assert answer["status"] == "completed" and answer["sections"], (status, answer)
         assert answer["quota"]["used"] == before + 1
-        status, chat = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": str(uuid.uuid4()), "question": "次に何を練習したらいい？", "history": [{"role": "assistant", "content": answer["sections"][0]["text"]}]})
-        assert status == 200 and chat["quota"]["used"] == before + 2, (status, chat)
+        chat_id = str(uuid.uuid4())
+        status, chat = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": chat_id, "question": "次に何を練習したらいい？", "history": [{"role": "assistant", "content": answer["sections"][0]["text"]}]}, asynchronous=True)
+        assert status == 202, (status, chat)
+        chat = collect(args.url, token, chat_id)
+        assert chat["status"] == "completed" and chat["quota"]["used"] == before + 2, (status, chat)
+        status, recovered = call(args.url + '/v1/coach/' + request_id, token)
+        assert status == 200 and recovered['sections'] == answer['sections']
+        assert recovered['quota']['used'] == before + 2
         status, duplicate = call(args.url + "/v1/coach", token, "POST", {**payload, "requestId": request_id})
         assert status == 409 and duplicate["error"] == "request_exists"
     else:
-        assert status == 503 and answer["error"] == "provider_unavailable", (status, answer)
+        assert answer["status"] == "failed" and answer["error"] == "provider_unavailable", (status, answer)
     bad = json.loads(json.dumps(payload))
     bad["analysis"]["results"][0]["score"] = None
     status, tamper = call(args.url + "/v1/coach", token, "POST", {**bad, "requestId": str(uuid.uuid4())})

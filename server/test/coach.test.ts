@@ -150,7 +150,7 @@ describe('提供元', () => {
       const transport = async (url: any, init: any) => {
         called = true; expect(url).toBe(base + '/chat/completions');
         expect(init.headers.Authorization).toBe('Bearer secret');
-        const body = JSON.parse(init.body); expect(body.model).toBe(model); expect(body[parameter]).toBe(2000); expect(body.stream).toBe(false); expect(body.reasoning_effort).toBe('none');
+        const body = JSON.parse(init.body); expect(body.model).toBe(model); expect(body[parameter]).toBe(32768); expect(body.stream).toBe(false); expect(body.reasoning_effort).toBe('max');
         return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
       };
       expect(await complete({...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: base, COACH_MODEL: model, COACH_TOKEN_PARAMETER: parameter, COACH_API_KEY: 'secret'}, p, refs, new AbortController().signal, transport)).toEqual(safe);
@@ -162,7 +162,7 @@ describe('提供元', () => {
   it('提供元エラー・不正JSON・途中打切り・過大応答は失敗する', async () => {
     const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model', COACH_API_KEY: 'secret'};
     const p = parseCoach(await payload('device'));
-    for (const response of [new Response('private detail', {status: 500}), Response.json({choices: [{finish_reason: 'length', message: {content: '{}'}}]}), Response.json({choices: [{finish_reason: 'stop', message: {content: 'invalid'}}]}), new Response('x'.repeat(131073))]) {
+    for (const response of [new Response('private detail', {status: 500}), Response.json({choices: [{finish_reason: 'length', message: {content: '{}'}}]}), Response.json({choices: [{finish_reason: 'stop', message: {content: 'invalid'}}]}), new Response('x'.repeat(1048577))]) {
       await expect(complete(e, p, refs, new AbortController().signal, async () => response)).rejects.toThrow();
     }
   });
@@ -243,7 +243,7 @@ describe('権利・回数・中止', () => {
         const p = await payload('device', now);
         expect((await c.fetch(req(p))).status).toBe(200);
         expect(c.quota(now).used).toBe(0); expect(c.quota(now - 2).used).toBe(1);
-        spy.mockImplementation(async () => {now += 50000; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
+        spy.mockImplementation(async () => {now += 250000; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
         expect((await c.fetch(req(await payload('device', now)))).status).toBe(504);
         expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
         // 不正出力も成功とみなさない。
