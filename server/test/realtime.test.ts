@@ -1,0 +1,156 @@
+import { env } from 'cloudflare:workers';
+import { runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+import { Device } from '../src/index';
+import { monthStart, nextMonth, sha256 } from '../src/model';
+import { MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realtime';
+
+const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
+const position = {initial: 'startpos', moves: []};
+const origin = Date.parse('2026-11-17T00:00:00Z');
+async function fixture(check: (f: any) => Promise<void>) {
+  const stub = devices.getByName(await sha256(crypto.randomUUID()));
+  await runInDurableObject(stub, async (_instance, state) => {
+    let now = origin, stops = 0, due = 0;
+    const tasks: Promise<void>[] = [], calls: any[] = [];
+    const backend: RealtimeBackend = {
+      analyze: async (input, session, sequence, signal) => {
+        calls.push({input, session, sequence, signal});
+        return Response.json({ply: input.moves.length, score: {kind: 'cp', value: sequence}, candidates: [], mate: null});
+      },
+      stop: async () => { stops++; now += 5; },
+      schedule: async when => { due = when; },
+    };
+    let rt = new RealtimeSessions(state.storage.sql, backend, 30_000, () => now);
+    const request = async (method = 'GET', data?: unknown, owner = 'a', paid = true, id?: string) => {
+      const response = await rt.fetch(new Request('https://device/v1/realtime' + (id ? '/' + id : ''), {
+        method, headers: {'content-type': 'application/json'}, ...(data === undefined ? {} : {body: JSON.stringify(data)}),
+      }), owner, paid, work => tasks.push(work));
+      return {httpStatus: response.status, ...await response.json() as any};
+    };
+    await check({request, backend, calls, sql: state.storage.sql,
+      advance: (ms: number) => { now += ms; }, time: (value: number) => { now = value; },
+      drain: async () => { await Promise.all(tasks.splice(0)); }, expire: () => rt.expire(),
+      stops: () => stops, due: () => due,
+      restart: () => { rt = new RealtimeSessions(state.storage.sql, backend, 30_000, () => now); },
+    });
+  });
+}
+
+describe('分岐中の解析', () => {
+  it('JST月境界・年越し・うるう年', () => {
+    const boundary = Date.parse('2026-11-30T15:00:00Z');
+    expect(monthStart(boundary - 1)).toBe(Date.parse('2026-10-31T15:00:00Z'));
+    expect(monthStart(boundary)).toBe(boundary);
+    expect(nextMonth(Date.parse('2026-12-31T15:00:00Z'))).toBe(Date.parse('2027-01-31T15:00:00Z'));
+    expect(nextMonth(Date.parse('2028-02-28T15:00:00Z'))).toBe(Date.parse('2028-02-29T15:00:00Z'));
+  });
+  it('探索済みの待機時間も数え、GETでは休止期限を延長しない。休止・再開・明示停止', async () => fixture(async f => {
+    const first = await f.request('POST', position);
+    expect(first.httpStatus).toBe(202); expect(first.sequence).toBe(0);
+    await f.drain();
+    expect((await f.request()).status).toBe('ready');
+    f.advance(20_000);
+    expect((await f.request()).quota.usedMs).toBe(20_000);
+    expect(f.due()).toBe(origin + 30_000);
+    f.advance(10_000); await f.expire();
+    const paused = await f.request();
+    expect(paused.status).toBe('paused'); expect(paused.quota.usedMs).toBe(30_005); expect(f.stops()).toBe(1);
+    f.advance(50_000);
+    expect((await f.request()).quota.usedMs).toBe(30_005);
+    const resumed = await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId);
+    expect(resumed.httpStatus).toBe(202); await f.drain();
+    f.advance(1000);
+    const stopped = await f.request('DELETE', undefined, 'a', true, first.sessionId);
+    expect(stopped.status).toBe('off'); expect(stopped.quota.usedMs).toBe(31_010);
+    expect((await f.request('PUT', {...position, sequence: 2}, 'a', true, first.sessionId)).error).toBe('stale_session');
+    expect((await f.request('POST', position)).httpStatus).toBe(202); await f.drain();
+  }));
+  it('準備中も数え、旧局面をAbortし、逆順・重複の局面と遅延結果を捨てる', async () => fixture(async f => {
+    let release!: (response: Response) => void;
+    f.backend.analyze = async (...args: any[]) => {
+      f.calls.push(args);
+      return new Promise<Response>(resolve => { release = resolve; });
+    };
+    const first = await f.request('POST', position);
+    f.advance(2000); expect((await f.request()).quota.usedMs).toBe(2000);
+    f.backend.analyze = async () => Response.json({ply: 1, score: {kind: 'cp', value: 99}});
+    const latest = await f.request('PUT', {...position, moves: ['7g7f'], sequence: 2}, 'a', true, first.sessionId);
+    expect(latest.httpStatus).toBe(202); expect(f.calls[0][3].aborted).toBe(true);
+    expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).error).toBe('stale_sequence');
+    expect((await f.request('PUT', {...position, sequence: 2}, 'a', true, first.sessionId)).error).toBe('stale_sequence');
+    release(Response.json({ply: 0, score: {kind: 'cp', value: -999}})); await f.drain();
+    expect((await f.request()).result.score.value).toBe(99);
+  }));
+  it('有料権利・混雑・別端末の結果隔離・全局の利用回数からの独立', async () => fixture(async f => {
+    expect((await f.request('POST', position, 'a', false)).httpStatus).toBe(403);
+    expect(f.calls).toEqual([]);
+    const first = await f.request('POST', position); await f.drain();
+    expect((await f.request('POST', position, 'b')).error).toBe('realtime_busy');
+    const other = await f.request('GET', undefined, 'b');
+    expect(other.sessionId).toBe(null); expect(other.result).toBe(null); expect(other.quota.usedMs).toBe(0);
+    expect((await f.request('DELETE', undefined, 'b', true, first.sessionId)).error).toBe('stale_session');
+    f.advance(1000);
+    expect((await f.request('GET', undefined, 'a', false)).status).toBe('off');
+    expect(f.stops()).toBe(1);
+    expect(f.sql.exec('SELECT * FROM usage').toArray()).toEqual([]);
+  }));
+  it('月300分で自動停止して戻る日時を返し、翌月の局面更新で再開する', async () => fixture(async f => {
+    f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 500);
+    const first = await f.request('POST', position); await f.drain();
+    expect(f.due()).toBe(origin + 500);
+    f.advance(500); await f.expire();
+    const limited = await f.request();
+    expect(limited.status).toBe('limit'); expect(limited.quota.remainingMs).toBe(0);
+    expect(limited.quota.low).toBe(true); expect(limited.quota.resetsAt).toBe(nextMonth(origin));
+    expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).httpStatus).toBe(429);
+    f.time(nextMonth(origin));
+    expect((await f.request()).quota.usedMs).toBe(0);
+    expect((await f.request('PUT', {...position, sequence: 2}, 'a', true, first.sessionId)).httpStatus).toBe(202); await f.drain();
+  }));
+  it('月をまたぐ稼働を両月に分け、DO再生成でも集計を重複しない', async () => fixture(async f => {
+    const boundary = nextMonth(origin); f.time(boundary - 1000);
+    const first = await f.request('POST', position); await f.drain();
+    f.time(boundary + 1000); f.restart();
+    expect((await f.request()).quota.usedMs).toBe(1000);
+    expect(f.sql.exec('SELECT ms FROM rt_usage WHERE month=?', monthStart(origin)).toArray()[0].ms).toBe(1000);
+    expect((await f.request()).quota.usedMs).toBe(1000);
+    await f.request('DELETE', undefined, 'a', true, first.sessionId);
+  }));
+  it('停止後の遅延結果を破棄し、失敗でも稼働済み時間は返却しない', async () => fixture(async f => {
+    let release!: (response: Response) => void;
+    f.backend.analyze = async () => new Promise<Response>(resolve => { release = resolve; });
+    const first = await f.request('POST', position);
+    f.advance(1000); await f.request('DELETE', undefined, 'a', true, first.sessionId);
+    release(Response.json({ply: 0})); await f.drain();
+    expect((await f.request()).result).toBe(null);
+    f.backend.analyze = async () => { f.advance(2000); return new Response('', {status: 422}); };
+    await f.request('POST', position); await f.drain();
+    const failed = await f.request();
+    expect(failed.status).toBe('failed'); expect(failed.error).toBe('invalid_position_or_move');
+    expect(failed.quota.usedMs).toBe(3010); expect(f.stops()).toBe(2);
+  }));
+  it('停止失敗では枠と集計を保持し、再試行で停止する', async () => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    const stop = f.backend.stop;
+    f.backend.stop = async () => { throw new Error('temporary'); };
+    expect((await f.request('DELETE', undefined, 'a', true, first.sessionId)).httpStatus).toBe(503);
+    f.advance(1000); expect((await f.request()).quota.usedMs).toBe(1000);
+    expect((await f.request('POST', position, 'b')).error).toBe('realtime_busy');
+    f.backend.stop = stop;
+    await f.request('DELETE', undefined, 'a', true, first.sessionId);
+    expect(f.stops()).toBe(1);
+  }));
+  it('追加フィールド・不正なsequenceを拒否する', async () => fixture(async f => {
+    expect((await f.request('POST', {...position, mode: 'precise'})).httpStatus).toBe(400);
+    expect((await f.request('POST', {...position, name: '名前'})).httpStatus).toBe(400);
+    const first = await f.request('POST', position); await f.drain();
+    for (const sequence of [-1, 0, 1.5, '1']) {
+      expect((await f.request('PUT', {...position, sequence}, 'a', true, first.sessionId)).httpStatus).toBe(400);
+    }
+    const old = first.sessionId;
+    await f.request('DELETE', undefined, 'a', true, old);
+    await f.request('POST', position); await f.drain();
+    expect((await f.request('DELETE', undefined, 'a', true, old)).error).toBe('stale_session');
+  }));
+});

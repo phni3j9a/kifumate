@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { RealtimeSessions } from './realtime';
 import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
@@ -6,6 +7,8 @@ export interface Env {
   DEVICES: DurableObjectNamespace<Device>;
   STD: DurableObjectNamespace<StandardContainer>;
   PRECISE: DurableObjectNamespace<PreciseContainer>;
+  REALTIME: DurableObjectNamespace<RealtimeContainer>;
+  REALTIME_IDLE_MS?: string;
   ENVIRONMENT: string;
   ALLOW_DEV_PAID: string;
   DEV_PAID_HASHES?: string;
@@ -16,6 +19,52 @@ export class StandardContainer extends Container<Env> {
   enableInternet = false;
 }
 export class PreciseContainer extends StandardContainer {}
+
+export class RealtimeContainer extends StandardContainer {
+  sleepAfter = '60s';
+  private sessions: RealtimeSessions;
+  private boot?: Promise<void>;
+  private lifetime = new AbortController();
+  constructor(ctx: DurableObjectState<{}>, env: Env) {
+    super(ctx, env);
+    const configured = Number(env.REALTIME_IDLE_MS ?? 30_000);
+    const idleMs = Number.isSafeInteger(configured) && configured >= 1000 && configured <= 300_000 ? configured : 30_000;
+    this.sessions = new RealtimeSessions(ctx.storage.sql, {
+      analyze: async (input, sessionId, sequence, signal) => {
+        if (!ctx.container?.running) {
+          // 局面変更では共通の初回起動まで中断しない。明示停止・休止だけが起動を打ち切る。
+          const boot = this.boot ??= this.startAndWaitForPorts(8080, {abort: this.lifetime.signal});
+          try { await boot; } finally { if (this.boot === boot) this.boot = undefined; }
+        }
+        if (signal.aborted) return new Response(null, {status: 409});
+        return this.containerFetch('http://container/realtime', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({...input, ply: input.moves.length, sessionId, sequence}),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]),
+        });
+      },
+      stop: async () => {
+        this.lifetime.abort();
+        await this.boot?.catch(() => {});
+        await this.destroy();
+        await this.stop();
+        this.lifetime = new AbortController();
+      },
+      schedule: async when => {
+        this.deleteSchedules('expireRealtime');
+        await this.schedule(new Date(when), 'expireRealtime');
+      },
+    }, idleMs);
+  }
+  async expireRealtime() { await this.sessions.expire(); }
+  async onActivityExpired() { await this.sessions.expire(); }
+  onStop() { if (!this.boot) this.sessions.disconnected(); }
+  async fetch(request: Request): Promise<Response> {
+    const owner = request.headers.get('X-Realtime-Owner');
+    if (!owner || !/^[a-f0-9]{64}$/.test(owner)) return json({error: 'unauthorized'}, 401);
+    return this.sessions.fetch(request, owner, request.headers.get('X-Dev-Paid') === '1', work => this.ctx.waitUntil(work));
+  }
+}
 
 interface Job {
   id: string; fingerprint: string; payload: string; mode: Mode;
@@ -87,6 +136,14 @@ export class Device extends DurableObject<Env> {
       }
       if (!this.rows('SELECT key FROM meta WHERE key=?', 'registered').length) throw new ApiError(401, 'unauthorized');
       this.ctx.storage.sql.exec("INSERT INTO meta VALUES ('paid',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", request.headers.get('X-Dev-Paid') === '1' ? '1' : '0');
+      if (url.pathname === '/v1/realtime' || /^\/v1\/realtime\/[0-9a-f-]{36}$/.test(url.pathname)) {
+        const headers = new Headers(request.headers);
+        headers.set('X-Realtime-Owner', this.ctx.id.toString());
+        headers.set('X-Dev-Paid', this.paid() ? '1' : '0');
+        // 全局解析と独立した固定2枠。枠内は一端末へ排他的に貸与し、待ち行列を作らない。
+        const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
+        return await this.env.REALTIME.getByName('slot-' + slot).fetch(new Request(request, {headers}));
+      }
       if (url.pathname === '/v1/quota' && request.method === 'GET') return json(this.quota());
       if (url.pathname === '/v1/jobs' && request.method === 'GET') {
         return json({jobs: this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs ORDER BY created,id').map(j => ({...this.view(j, j.cursor), results: undefined})), quota: this.quota()});
@@ -199,7 +256,7 @@ export default {
         if (!registered.ok) throw new ApiError(503, 'registration_unavailable');
         return json({token}, 201);
       }
-      if (!['/v1/jobs', '/v1/quota'].includes(url.pathname) && !/^\/v1\/jobs\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
+      if (!['/v1/jobs', '/v1/quota', '/v1/realtime'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
       const auth = /^Bearer ([0-9a-f]{64})$/.exec(request.headers.get('Authorization') ?? '');
       if (!auth) throw new ApiError(401, 'unauthorized');
       const hash = await sha256(auth[1]);

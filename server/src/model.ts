@@ -10,6 +10,14 @@ export function weekStart(now: number): number {
   const midnight = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
   return midnight - ((jst.getUTCDay() + 6) % 7) * 86400_000 - 9 * 3600_000;
 }
+export function monthStart(now: number): number {
+  const jst = new Date(now + 9 * 3600_000);
+  return Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), 1) - 9 * 3600_000;
+}
+export function nextMonth(now: number): number {
+  const jst = new Date(now + 9 * 3600_000);
+  return Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth() + 1, 1) - 9 * 3600_000;
+}
 export function parseInput(value: unknown): Input {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'invalid_input');
   const x = value as Record<string, unknown>;

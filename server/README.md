@@ -1,6 +1,6 @@
 # 解析サーバー（開発者向け）
 
-Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析を実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
+Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8](https://github.com/phni3j9a/kifumate/issues/8) の分岐中の解析を実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
 
 ## 構成と仕様
 
@@ -71,6 +71,65 @@ Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析を実�
 - 候補がない終局では`candidates: []`。非詰みの終局で探索値がなければ`score: null`です。
 
 主なエラー：400（入力・カーソル）、401（端末未登録／認証）、403（精密に有料権利が必要）、404、413（本文過大）、415（JSON必須）、429（週上限、`quota.resetsAt`付き）。内部の例外やUSIの`id`・`info string`はAPIに返しません。
+
+## 分岐中の解析（有料限定）
+
+### API・アプリ側の接続方法
+
+全局解析と同じ端末トークン・開発用有料判定を使います。全局解析の回数とは独立しています。
+
+| API | 内容 |
+| --- | --- |
+| `GET /v1/realtime` | 現在のセッション・最新結果・月の残りを取得。コンテナを起動せず、休止期限も延長しない |
+| `POST /v1/realtime` | 最初の局面 `{initial,moves}` を送り開始。202 とサーバー生成の `sessionId` を返す |
+| `PUT /v1/realtime/:sessionId` | `{initial,moves,sequence}` で局面を変更・休止から再開。202。`sequence` は1以上の単調増加整数 |
+| `DELETE /v1/realtime/:sessionId` | オフ・分岐を出る・対局を閉じる・アプリのバックグラウンド移行で停止。停止完了後200。休止中でもオフになる |
+
+POST/PUTには`mode`・対局者名など追加キーを渡せません。開始局面とUSI配列・上限は全局解析と同じです。指し手列の**最後の局面だけ**を解析し、`result.ply`はその手数です。セッション中は端末側で`sequence`を増やし、返った`sessionId / sequence`が現在表示中の局面と一致するときだけ結果を表示してください。古い・重複のsequenceは409 `stale_sequence`、停止済み・古いsessionIdは409 `stale_session`です。
+
+応答例（時刻はUnixミリ秒）：
+
+```json
+{
+  "sessionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "sequence": 2,
+  "status": "ready",
+  "result": {"ply":2,"score":{"kind":"cp","value":25},"candidates":[],"mate":null},
+  "error": null,
+  "idleMs": 30000,
+  "quota": {"monthStart":1793458800000,"resetsAt":1796050800000,"limitMs":18000000,"usedMs":12000,"remainingMs":17988000,"low":false}
+}
+```
+
+`result`の実際の候補・評価・詰みの形式は全局解析と共通で、固有名を含みません。最初の準備中や新しい局面の解析中は`result: null`です。
+
+| status | アプリ側の扱い |
+| --- | --- |
+| `preparing` | オン・準備中（初回／休止後） |
+| `analyzing` | オン・解析中 |
+| `ready` | オン・最新結果を表示 |
+| `paused` | オンのまま休止。次のPUTで再開。結果は取得可能 |
+| `off` | オフ。再び指すときPOSTで新規セッション |
+| `limit` | 残り0分。`quota.resetsAt`を案内。翌月のPUTで再開可能 |
+| `failed` | 失敗。理由は`error`。再試行は新規POST |
+
+通信なしはサーバー状態ではなく、アプリが通信エラーから表示します。GETだけは無料端末も利用でき、`paid`を返します。作成／更新は403 `paid_required`、月の上限は429 `monthly_limit`（`quota.resetsAt`付き）です。DELETEは有料権利がなくても可能です。無料への変更を検知した端末の稼働は停止します。
+
+アプリは202の後、前面で結果を待つ間だけ**250〜500ms間隔のGET**を行い、readyで止めます。次の操作では直ちにPUTし、前のHTTP応答を待たないでください。POSTの応答を失った場合はGETでsessionIdを回収します（再POSTは409 `session_exists`）。アプリを裏に回すときはGETを止めてDELETEを試み、通信断などで届かなければ自動休止に任せます。復帰時にGETし、pausedならsequenceを進めてPUT、off/failedならPOSTします。
+
+**HTTPを採用した理由**：1局面250msの探索に短いGETポーリングを足しても連続操作に十分速く、既存の認証・HTTP・Python中継を再利用できます。WebSocketは途中情報をより速く流せますが、モバイルのバックグラウンドで維持できず、切断／再接続と課金寿命の管理が増えます。接続状態ではなく局面操作で寿命を更新するHTTPの方が、通信断でも30秒で休止する仕様を小さく実装できます。
+
+### 探索・休止・時間の数え方
+
+- **250ms / Threads 1 / MultiPV 1 / standard-2（1 vCPU、6 GiB、12 GB）**を採用。分岐では最善手1手と読み筋を素早く返し、精密全局解析の1000ms・3候補と区別します。既存の通常解析と同設定・同イメージを再利用し、費用と探索時間を増やしません。実測・費用は[measurement.md](docs/measurement.md)を参照。
+- 分岐専用の`RealtimeContainer`を2枠追加。全局解析のコンテナとは共有しません。端末DOのIDから固定枠を選び、その枠を一端末へ排他的に貸与します。別端末が使用中なら409 `realtime_busy`で即時拒否し、その端末の時間は減りません。別枠への待ち行列・移動はありません。`shortcut:` 同時利用2枠・ハッシュ衝突で空き枠があっても拒否するstaging構成です。一般公開前に利用実測をもとに枠数・振り分けを更新してください。
+- 局面更新は旧HTTP要求を破棄し、中継は新しい要求を**USIロック取得前**に登録して旧探索に`stop`を送ります。旧bestmoveを読み切ってから新局面へ移り、遅延結果はsessionId・sequenceで破棄します。初回の共通起動は局面変更ではやり直しません。
+- `REALTIME_IDLE_MS`の既定は`30000`（許容1000〜300000ms、不正値は既定へ）。**最後に受理したPOST/PUT**から測ります。探索完了・ポーリング・通信接続は期限を延長しません。永続alarmで休止・上限停止を行い、明示停止はコンテナをdestroyします。停止失敗時は枠と集計を保持し1秒後に再試行します。
+- 数えるのは**コンテナ起動要求から停止完了までの壁時計時間**。準備・探索・結果が出た後の待機・停止処理を含み、局面数やCPU使用時間では数えません。初回要求／手動起動から料金が始まる[公式の説明](https://developers.cloudflare.com/containers/platform/pricing/)に合わせたサーバー時計による集計で、Cloudflare請求メーターとの完全一致を保証するものではありません。
+- 月300分（18,000,000ms）、**JST月初0時**で区切ります。月をまたぐ稼働は両月へ分割。残り時間までのalarmを設定し、使い切ると停止します。利用上限値で集計を丸めるため、alarmの遅延や停止処理の端数を超過請求しません。翌月に勝手に再起動はせず、次の局面更新で再開します。
+- `quota.low`がtrue（残り10%未満）のときだけ残りを知らせ、それ以外では上限・残りを画面に出さないでください。停止・失敗したセッションも実際の稼働時間は返却しません。全局解析の失敗時の回数返却とは別です。
+- 利用量と最新セッションは分岐用Container DOのSQLiteへ永続化し、DOの再生成でも集計を継続。停止済みの局面・結果は最終操作から7日後のアクセス時に削除し、月利用量は当月・前月を保持します。次のセッションで上書きされるため、必要な分岐結果は端末に保存してください。
+- 権利判定はWorkerで最新secretを評価し、Deviceが内部ヘッダーを必ず上書きします。RevenueCat連携時は既存のWorker有料判定とDeviceの`paid()`を差し替え、分岐の時間集計・Pythonには変更不要です。公開前には権利失効の能動通知も必要です（現状は当該端末の次のAPI呼び出し、遅くとも無操作休止で停止）。
 
 ## ローカル開発
 
@@ -162,4 +221,4 @@ npx wrangler secret delete DEV_PAID_HASHES --env staging
 - ストア購入権利検証と端末移行・購入復元の設計。開発許可リストは本番の課金判定ではありません。
 - 多利用者の負荷試験とプール枠／`max_instances`の調整。混雑時の45秒タイムアウト・最大5回再試行は最終的に失敗となり、枠を返却します。
 - Cloudflareの`default` scheduling policyは現在非推奨ですが、今回は要求された`@cloudflare/containers`・`max_instances`による小さなstagingを採用しました。将来の`durable_object` policy移行は別作業です。
-- 分岐中の解析・AIコーチ・アプリ本体はIssue #2の範囲外です。
+- AIコーチ・アプリ本体、RevenueCat連携は今回の範囲外です。分岐用プールの多利用者負荷・請求メーターとの突合は公開前に別途必要です。

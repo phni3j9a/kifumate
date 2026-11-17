@@ -23,6 +23,10 @@ class InvalidInput(ValueError):
     pass
 
 
+class Superseded(Exception):
+    pass
+
+
 def validate_sfen(sfen):
     """C++ パーサへ渡す前に構造と駒数を検査し、不正入力によるクラッシュを防ぐ。"""
     parts = sfen.split(" ")
@@ -219,20 +223,31 @@ class Engine:
         self.process.stdin.write(line + "\n")
         self.process.stdin.flush()
 
-    def until(self, prefix, seconds):
+    def until(self, prefix, seconds, cancel=None):
         deadline = time.monotonic() + seconds
         lines = []
+        stopped = False
         while True:
-            line = self.lines.get(timeout=max(0.001, deadline - time.monotonic()))
+            if cancel is not None and cancel.is_set() and not stopped:
+                self.send('stop')
+                stopped = True
+            try:
+                line = self.lines.get(timeout=min(0.02, max(0.001, deadline - time.monotonic())))
+            except queue.Empty:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('analysis_timeout')
+                continue
             if line is None:
                 raise RuntimeError("analysis_unavailable")
             if line.startswith(prefix):
+                if stopped or (cancel is not None and cancel.is_set()):
+                    raise Superseded()
                 return lines + [line]
             lines.append(line)
             if len(lines) > 10000 or time.monotonic() >= deadline:
                 raise RuntimeError("analysis_timeout")
 
-    def analyze(self, data):
+    def analyze(self, data, cancel=None):
         board, initial, moves, mode, ply = prepare(data)
         ms, threads, multipv = MODES[mode]
         if self.mode != mode:
@@ -242,10 +257,12 @@ class Engine:
             self.until("readyok", 30)
             self.send("usinewgame")
             self.mode = mode
+        if cancel is not None and cancel.is_set():
+            raise Superseded()
         position = "startpos" if initial == "startpos" else "sfen " + initial
         self.send("position " + position + (" moves " + " ".join(moves[:ply]) if ply else ""))
         self.send(f"go movetime {ms}")
-        lines = self.until("bestmove", ms / 1000 + 10)
+        lines = self.until("bestmove", ms / 1000 + 10, cancel)
         candidates = {}
         for line in lines:
             info = parse_info(line, board)
@@ -274,6 +291,23 @@ class Engine:
 
 engine = None
 lock = threading.Lock()
+realtime_lock = threading.Lock()
+realtime_latest = None
+realtime_cancel = None
+
+
+def replace_search(session, sequence):
+    global realtime_latest, realtime_cancel
+    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session) or type(sequence) is not int or sequence < 0:
+        raise InvalidInput()
+    with realtime_lock:
+        if realtime_latest and realtime_latest[0] == session and sequence <= realtime_latest[1]:
+            raise Superseded()
+        if realtime_cancel is not None:
+            realtime_cancel.set()
+        realtime_latest = (session, sequence)
+        realtime_cancel = threading.Event()
+        return realtime_cancel
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -289,29 +323,47 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 局面変更でクライアントが古いHTTP要求を破棄した。
 
     def do_POST(self):
         global engine
-        if self.path != "/analyze":
+        if self.path not in ("/analyze", "/realtime"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 16384:
                 return self.respond(413, {"error": "input_too_large"})
             data = json.loads(self.rfile.read(length))
+            cancel = None
+            if self.path == '/realtime':
+                if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:
+                    raise InvalidInput()
+                session, sequence = data.pop('sessionId'), data.pop('sequence')
+                if data['mode'] != 'std' or data['ply'] != len(data['moves']):
+                    raise InvalidInput()
             prepare(data)
+            if self.path == '/realtime':
+                cancel = replace_search(session, sequence)
             with lock:
                 try:
+                    if cancel is not None and cancel.is_set():
+                        raise Superseded()
                     if engine is None:
                         engine = Engine()
-                    result = engine.analyze(data)
+                    result = engine.analyze(data, cancel)
+                except Superseded:
+                    raise
                 except Exception:
                     if engine is not None:
                         engine.close()
                         engine = None
                     raise
             self.respond(200, result)
+        except Superseded:
+            self.respond(409, {'error': 'superseded'})
         except (InvalidInput, ValueError, TypeError, KeyError):
             self.respond(422, {"error": "invalid_position_or_move"})
         except Exception:
