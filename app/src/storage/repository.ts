@@ -7,7 +7,7 @@ import {
   identity,
   matchNames,
   normalizeName,
-  readKif,
+  readStoredKif,
   resultFor,
   writeKif,
   type Result,
@@ -51,6 +51,8 @@ export async function importGame(
     key,
   );
   if (duplicate) return { id: duplicate.id, duplicate: true };
+  const storedKif = writeKif(record);
+  readStoredKif(storedKif);
   const id = randomUUID(),
     now = new Date().toISOString(),
     info = describe(record);
@@ -59,7 +61,7 @@ export async function importGame(
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     id,
     key,
-    writeKif(record),
+    storedKif,
     info.black,
     info.white,
     info.date,
@@ -118,7 +120,7 @@ export async function saveAliases(db: SQLiteDatabase, names: string[]) {
         : matchNames(game.black, game.white, [...unique.values()]).side;
       const result = game.result_manual
         ? game.result
-        : resultFor(side, gameOutcome(readKif(game.kif)));
+        : resultFor(side, gameOutcome(readStoredKif(game.kif)));
       await db.runAsync(
         "UPDATE games SET self_side=?, result=?, updated_at=? WHERE id=?",
         side,

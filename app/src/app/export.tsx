@@ -40,7 +40,7 @@ export default function Export() {
             "共有はこの端末で利用できません。コピーで書き出してください。",
           );
         const file = new File(Paths.cache, filename);
-        file.write(game!.kif);
+        await file.write(game!.kif);
         await Sharing.shareAsync(file.uri, {
           mimeType: "text/plain",
           dialogTitle: "KIFを保存・共有",

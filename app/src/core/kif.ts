@@ -4,6 +4,7 @@ import {
   exportKIF,
   getBlackPlayerName,
   getWhitePlayerName,
+  handPieceTypes,
   importKIF,
   Move,
   Position,
@@ -13,6 +14,8 @@ import {
   type ImmutablePosition,
   type PieceType,
   Square,
+  stringToNumber,
+  stringToPieceType,
 } from "tsshogi";
 
 export type Side = "black" | "white" | null;
@@ -48,8 +51,13 @@ export function decodeKif(bytes: Uint8Array): string {
 }
 
 export function readKif(input: string): ShogiRecord {
-  if (!input.trim()) throw new Error("KIFの本文を貼り付けてください。");
   if (input.length > MAX_BYTES) throw new Error("KIFは2MB以内にしてください。");
+  return readStoredKif(input);
+}
+
+// 正規化によるCRLFやヘッダーの増分を、外部入力用のサイズ上限で拒否しない。
+export function readStoredKif(input: string): ShogiRecord {
+  if (!input.trim()) throw new Error("KIFの本文を貼り付けてください。");
   const text = input
     .replace(/^\uFEFF/, "")
     .replace(/\r\n?/g, "\n")
@@ -85,6 +93,7 @@ export function readKif(input: string): ShogiRecord {
       "手合割を読めません。平手・駒落ち、または盤面図で指定してください。",
     );
   }
+  validateDiagram(text);
   const rows = [...text.matchAll(/^\s*(\d+)\s+(.+)$/gm)];
   if (rows.length > 10000)
     throw new Error("指し手が多すぎます（上限10000手）。");
@@ -107,7 +116,16 @@ export function readKif(input: string): ShogiRecord {
     last = ply;
     branch = false;
   }
-  const record = importKIF(text);
+  // 不成は入力の意味を別途検証し、パーサーへは成らない手として渡す。
+  const parserText = text
+    .split("\n")
+    .map((line) =>
+      MOVE_NOTATION.exec(line)?.[4] === "不成"
+        ? line.replace("不成", "")
+        : line,
+    )
+    .join("\n");
+  const record = importKIF(parserText);
   if (record instanceof Error)
     throw new Error(
       `KIFを読めません。指し手・駒・座標を確認してください（${record.message}）。`,
@@ -133,8 +151,90 @@ export function readKif(input: string): ShogiRecord {
     throw new Error(
       "読み取れない指し手があります。手数と指し手の書式を確認してください。",
     );
+  validateMoveNotation(record, rows);
   record.goto(0);
+  record.resetAllBranchSelection();
   return record;
+}
+
+const MOVE_NOTATION =
+  /^ *([0-9]+) +[▲△▼▽]?([１２３４５６７８９][一二三四五六七八九]|同\u3000*)(成香|成桂|成銀|[王玉飛龍竜角馬金銀全桂圭香杏歩と])\u3000*(不成|成)?(打|\([1-9][1-9]\))/;
+
+function validateDiagram(text: string): void {
+  const lines = text.split("\n");
+  const rows = lines.filter((line) => line.trimStart().startsWith("|"));
+  if (!rows.length && !/^\+-+\+[ \t]*$/m.test(text)) return;
+  const ranks = new Set<number>();
+  for (const row of rows) {
+    const match = row.match(
+      /^\|(.{18})\|([一二三四五六七八九1-9１-９])[ \t]*$/,
+    );
+    if (!match || ranks.has(stringToNumber(match[2]!))) {
+      throw new Error(
+        "盤面図のマスや段の書き方が正しくありません。各段を重複なく指定してください。",
+      );
+    }
+    const cells = match[1]!;
+    for (let i = 0; i < 18; i += 2) {
+      const side = cells[i],
+        piece = cells[i + 1]!;
+      if (side === " " && piece === "・") continue;
+      if ((side !== " " && side !== "v") || !stringToPieceType(piece)) {
+        throw new Error(
+          "盤面図に読めない駒や向きがあります。空きマスは「 ・」で指定してください。",
+        );
+      }
+    }
+    ranks.add(stringToNumber(match[2]!));
+  }
+  if (rows.length !== 9 || ranks.size !== 9) {
+    throw new Error(
+      "盤面図は一段目から九段目まで、9段すべてを指定してください。",
+    );
+  }
+}
+
+function validateMoveNotation(
+  record: ShogiRecord,
+  rows: RegExpMatchArray[],
+): void {
+  // 入力順に分岐を選び直す。主変化だけでなく、それぞれの移動元の駒を照合する。
+  for (const row of rows) {
+    const notation = MOVE_NOTATION.exec(row[0]);
+    if (!notation) continue;
+    const [, ply, destination, piece, promotion, origin] = notation;
+    record.goto(Number(ply) - 1);
+    const previous = record.current.move;
+    const to = destination!.startsWith("同")
+      ? previous instanceof Move
+        ? previous.to
+        : null
+      : new Square(
+          stringToNumber(destination![0]!),
+          stringToNumber(destination![1]!),
+        );
+    const kind = stringToPieceType(piece!);
+    const from =
+      origin === "打"
+        ? kind
+        : new Square(Number(origin![1]), Number(origin![2]));
+    const move = to && record.position.createMove(from, to);
+    if (
+      !move ||
+      move.pieceType !== kind ||
+      (origin === "打" && !handPieceTypes.includes(kind)) ||
+      (promotion === "不成" && !record.position.isValidMove(move.withPromote()))
+    ) {
+      throw new Error(
+        `${ply}手目の駒の種類や成・不成の表記が、局面と一致しません。`,
+      );
+    }
+    if (!record.append(promotion === "成" ? move.withPromote() : move)) {
+      throw new Error(
+        `${ply}手目の駒の移動・成・不成・打が、合法手ではありません。`,
+      );
+    }
+  }
 }
 
 export function identity(record: ShogiRecord): string {

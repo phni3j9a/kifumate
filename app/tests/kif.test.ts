@@ -185,3 +185,109 @@ test("盤面図・持ち駒・後手番の指定と入力内の変化を保持�
   assert.equal(count, 10);
   assert.equal(identity(readKif(writeKif(branched))), identity(branched));
 });
+
+test("盤面図の未知の駒・向き・欠落段・重複段・短い行を拒否する", () => {
+  const diagram = writeKif(
+    new ShogiRecord(Position.newBySFEN("4k4/9/9/9/9/9/9/9/4K4 b - 1")!),
+  );
+  for (const damaged of [
+    diagram.replace(" 玉", " Ｘ"),
+    diagram.replace("v玉", "x玉"),
+    diagram.replace(" ・", "v・"),
+    diagram.replace(/^\|.*\|九\r?\n/m, ""),
+    diagram.replace("|九", "|八"),
+    diagram.replace(" ・", "・"),
+  ])
+    assert.throws(() => readKif(damaged), /盤面図/, damaged);
+});
+test("指し手に書かれた駒種が移動元と違えば黙って修復せず拒否する", () => {
+  for (const move of [
+    "７六金(77)",
+    "７六と(77)",
+    "７六成銀(77)",
+    "７六馬(77)",
+    "７六龍(77)",
+  ]) {
+    assert.throws(() => readKif(kif.replace("７六歩(77)", move)), /駒/, move);
+  }
+  assert.throws(() => readKif(kif + "\n変化：3手\n3 ２六金(27)\n"), /駒/);
+});
+test("成り駒の表記と別名、成・不成・打を局面に照合する", () => {
+  for (const [sfenPiece, notation, alias] of [
+    ["+L", "成香", "杏"],
+    ["+N", "成桂", "圭"],
+    ["+S", "成銀", "全"],
+    ["+P", "と", "と"],
+    ["+B", "馬", "馬"],
+    ["+R", "龍", "竜"],
+  ]) {
+    const record = new ShogiRecord(
+      Position.newBySFEN(`k8/9/9/4${sfenPiece}4/9/9/9/9/4K4 b - 1`)!,
+    );
+    assert(record.append(record.position.createMoveByUSI("5d5c")!));
+    const text = writeKif(record);
+    assert.equal(
+      identity(readKif(text.replace(notation!, alias!))),
+      identity(record),
+    );
+    assert.throws(
+      () => readKif(text.replace(`５三${notation}`, "５三金")),
+      /駒/,
+    );
+  }
+  const pawn = new ShogiRecord(
+    Position.newBySFEN("k8/9/9/4P4/9/9/9/9/4K4 b - 1")!,
+  );
+  assert(pawn.append(pawn.position.createMoveByUSI("5d5c")!));
+  const text = writeKif(pawn);
+  assert.equal(
+    identity(readKif(text.replace("歩(54)", "歩不成(54)"))),
+    identity(pawn),
+  );
+  assert.notEqual(
+    identity(readKif(text.replace("歩(54)", "歩成(54)"))),
+    identity(pawn),
+  );
+  assert.throws(() => readKif(kif.replace("歩(77)", "歩不成(77)")));
+  const drop = new ShogiRecord(
+    Position.newBySFEN("k8/9/9/9/9/9/9/9/4K4 b P 1")!,
+  );
+  assert(drop.append(drop.position.createMoveByUSI("P*5e")!));
+  const dropText = writeKif(drop);
+  assert.equal(identity(readKif(dropText)), identity(drop));
+  assert.throws(() => readKif(dropText.replace("歩打", "歩成打")));
+  for (const piece of ["と", "成香", "成桂", "成銀", "馬", "龍", "玉"]) {
+    assert.throws(() => readKif(dropText.replace("歩打", `${piece}打`)));
+  }
+});
+
+test("入れ子の変化も入力順の局面で駒種を照合し、本譜とコメントを維持する", () => {
+  const variations =
+    kif +
+    [
+      "",
+      "変化：3手",
+      "3 ２六歩(27)",
+      "4 ８四歩(83)",
+      "5 ７八金(69)",
+      "6 中断",
+      "変化：4手",
+      "4 ８八角成(22)",
+      "5 同　銀(79)",
+      "*分岐のコメント 不成(77)",
+      "6 中断",
+      "変化：2手",
+      "2 ８四歩(83)",
+      "3 ２六歩(27)",
+      "4 中断",
+      "",
+    ].join("\n");
+  const record = readKif(variations);
+  assert.equal(identity(record), identity(readKif(kif)));
+  assert(writeKif(record).includes("分岐のコメント 不成(77)"));
+  assert.equal(writeKif(readKif(writeKif(record))), writeKif(record));
+  assert.throws(
+    () => readKif(variations.replace("同　銀(79)", "同　金(79)")),
+    /駒/,
+  );
+});

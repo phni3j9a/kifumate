@@ -14,12 +14,12 @@ import {
   Page,
   styles,
 } from "../../components/ui";
-import { Branch, legalMoves, readKif } from "../../core/kif";
+import { Branch, legalMoves, readStoredKif } from "../../core/kif";
 import { toggleFavorite } from "../../storage/repository";
 export default function GameScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { game, error, db } = useGame(id);
-  const record = useMemo(() => (game ? readKif(game.kif) : null), [game]);
+  const record = useMemo(() => (game ? readStoredKif(game.kif) : null), [game]);
   const [ply, setPly] = useState(0),
     [branch, setBranch] = useState<Branch | null>(null),
     [, redraw] = useState(0);
