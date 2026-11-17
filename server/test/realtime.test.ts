@@ -40,6 +40,19 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
 }
 
 describe('分岐中の解析', () => {
+  it('本文受信後の外部権利再照会で取消を検知し、コンテナを起動しない', async () => {
+    await runInDurableObject(devices.getByName(crypto.randomUUID()), async (_, state) => {
+      let starts = 0;
+      const rt = new RealtimeSessions(state.storage, {
+        analyze: async () => { starts++; return Response.json({ply: 0}); },
+        stop: async () => {}, schedule: async () => {},
+      });
+      const response = await rt.fetch(new Request('https://device/v1/realtime', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(position),
+      }), 'a', true, () => {}, async () => false);
+      expect(response.status).toBe(403); expect(starts).toBe(0);
+    });
+  });
   it('JST月境界・年越し・うるう年', () => {
     const boundary = Date.parse('2026-11-30T15:00:00Z');
     expect(monthStart(boundary - 1)).toBe(Date.parse('2026-10-31T15:00:00Z'));

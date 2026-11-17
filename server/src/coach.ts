@@ -227,11 +227,13 @@ export class Coach {
         this.storage.sql.exec("UPDATE coach_requests SET status='completed',deadline=? WHERE id=?", Date.now() + 7 * 86400_000, input.requestId);
         this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
         this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,output=? WHERE id=?', JSON.stringify(output), input.requestId);
+        console.log(JSON.stringify({event: 'coach_completed'}));
         return json({requestId: input.requestId, ...output, quota: this.quota()});
       });
     } catch (error) {
       const cancelled = controller.signal.aborted || request?.signal.aborted || this.status(input.requestId)?.status === 'cancelled';
       const failure = cancelled ? new ApiError(409, 'cancelled') : Date.now() >= deadline || signal.aborted ? new ApiError(504, 'coach_timeout') : error instanceof ApiError ? error : new ApiError(502, 'provider_failed');
+      console.warn(JSON.stringify({event: 'coach_failed', error: failure.code}));
       this.storage.sql.exec("UPDATE coach_requests SET status=?,deadline=? WHERE id=? AND status='pending'", cancelled ? 'cancelled' : 'failed', Date.now() + 7 * 86400_000, input.requestId);
       this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,error=? WHERE id=?', failure.code, input.requestId);
       return json({error: failure.code, quota: this.quota()}, failure.status);

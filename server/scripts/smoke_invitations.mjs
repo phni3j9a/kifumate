@@ -55,10 +55,12 @@ for (let i = 0; i < 5; i++) {
 assert.ok(strict);
 console.log('staging: 公式bindingの窓を越えてもDOの15分制限が残ることを確認');
 let apiRejected = false;
-for (let batch = 0; batch < 25 && !apiRejected; batch++) {
-  const results = await Promise.all(Array.from({length: 20}, () => request('/v1/quota', token)));
-  assert.ok(results.every(x => x.status === 200 || x.status === 429));
-  apiRejected = results.some(x => x.status === 429 && x.body.error === 'rate_limited');
+for (let i = 0; i < 800 && !apiRejected; i++) {
+  const result = await request('/v1/quota', token);
+  assert.ok(result.status === 200 || result.status === 429);
+  apiRejected = result.status === 429 && result.body.error === 'rate_limited';
+  // 同期される前の短い並列バーストだけでは、近似カウンターの拒否を観測できない。
+  await new Promise(resolve => setTimeout(resolve, 35));
 }
 assert.ok(apiRejected);
 let registrationRejected = false;

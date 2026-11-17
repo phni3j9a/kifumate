@@ -94,6 +94,7 @@ describe('招待コードの永続権利', () => {
     }
     const response = await SELF.fetch('https://api/v1/invitations/redeem', {method: 'POST', headers: headers(token), body: '{}'});
     expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('900');
     expect(await response.json()).toMatchObject({error: 'invite_rate_limited'});
   });
 });

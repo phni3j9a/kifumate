@@ -6,33 +6,13 @@ Issue [#12](https://github.com/phni3j9a/kifumate/issues/12)。API契約・安全
 
 ## stagingの再現手順
 
-対象は既存の `kifumate-analysis-staging` だけです。購入権利の代替secretと偽の提供元は検証後に削除します。署名鍵は機能に必要な永続secretです（削除すると保存済み証明が使えません）。既存の署名鍵がある場合は上書きしないでください。
+共有stagingでは既存の署名鍵・`DEV_PAID_HASHES`・提供元secretを上書き／削除しないでください。Issue #24以降は[READMEの招待手順](../README.md#stagingデプロイ検証)を使い、測定用端末へ期限付きコードを登録します。確認後はそのコードだけを取り消します。署名鍵は機能に必要な永続secretです（変更すると保存済み証明が使えません）。
 
-```sh
-cd server
-npx wrangler whoami
-npx wrangler secret list --env staging
-# 初回のみ。測定用ではなく永続署名鍵
-openssl rand -hex 32 | npx wrangler secret put COACH_SIGNING_KEY --env staging
-npm run deploy
-URL=https://kifumate-analysis-staging.yuki-nakano-1020.workers.dev
-HASH=$(python3 scripts/measure.py --url "$URL" --register --token-file .local/coach-device.json)
-printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
-printf 'fake\n' | npx wrangler secret put COACH_PROVIDER --env staging
-sleep 30  # エッジへのsecret反映を待つ（短い間隔で試行しない）
-python3 scripts/measure_coach.py --url "$URL" --expect fake
-npx wrangler secret delete COACH_PROVIDER --env staging
-sleep 30  # 削除直後は旧バージョンの偽応答が返る場合がある
-python3 scripts/measure_coach.py --url "$URL" --expect unavailable
-npx wrangler secret delete DEV_PAID_HASHES --env staging
-npx wrangler secret list --env staging
-```
+`measure_coach.py`は偽提供元／提供元未設定の専用スモークです。既存の設定を`secret list`で確認し、他担当と利用時間を調整した環境だけで使ってください。`--expect fake`のために共有stagingの提供元を勝手に変更せず、既存キーがある環境で`--expect unavailable`のために削除もしません。偽提供元の競合・中止・失効はローカルのVitestでも検証できます。
 
-スモークはサンプル先頭6手の精密解析を行い、署名付き全7局面を `.local/coach-request.json`（0600）に保存します。対局者名は抽出しません。偽の提供元で解説・質問各一回、同じIDの二重実行拒否、改ざん拒否、中止IDの遅延送信拒否を確認します。その後提供元未設定503・使用数据え置きを確認します。
+スモークはサンプル先頭6手の精密解析を行い、署名付き全7局面を `.local/coach-request.json`（0600）に保存します。対局者名は抽出しません。偽の提供元で解説・質問各一回、同じIDの二重実行拒否、改ざん拒否、中止IDの遅延送信拒否を確認します。提供元未設定では503・使用数据え置きを確認します。
 
-`request-file` があれば同じ結果を再利用します。新しい端末で再測定する場合は `--request-file` と `--token-file` の両方を別パスにしてください。署名を別端末へ転用することはできません。
-
-測定後は全三つのContainer application（std/precise/realtime）について `wrangler containers instances <ID> --env staging --json` の `inactive` と `wrangler containers info <ID> --env staging` の `active=0 / assigned=0` を確認します。`healthy` は準備済み容量であって利用中とは限りません。他用途のDockerには触れません。
+`request-file`があれば同じ結果を再利用します。新しい端末で再測定する場合は`--request-file`と`--token-file`の両方を別パスにしてください。署名を別端末へ転用することはできません。測定後は全三つのContainer application（std/precise/realtime）の`inactive`と`active=0 / assigned=0`をREADMEの手順で確認します。他担当の処理は停止しません。
 
 ## 実LLMの直接比較
 

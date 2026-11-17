@@ -41,3 +41,16 @@ it('productionで偽提供元が指定されても送信や偽応答をしない
   await expect(complete({ENVIRONMENT: 'production', COACH_PROVIDER: 'fake'}, {} as any, [], new AbortController().signal, transport)).rejects.toThrow('provider_unavailable');
   expect(transport).not.toHaveBeenCalled();
 });
+
+it('productionでも有効な招待は使え、期限・取消が開発フラグと独立して反映される', async () => {
+  const bindings = env as unknown as Env, token = await sha256(crypto.randomUUID()), hash = await sha256(token);
+  const registry = bindings.INVITATIONS.getByName('registry');
+  const codeHash = await sha256(crypto.randomUUID());
+  await registry.create(codeHash, 1, null); await registry.redeem(hash, codeHash);
+  await bindings.DEVICES.getByName(hash).fetch('https://device/register?hash=' + hash, {method: 'POST'});
+  const request = () => new Request('https://api/v1/entitlements', {headers: {Authorization: 'Bearer ' + token}});
+  const configuration = {...bindings, ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false'};
+  expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(true);
+  await registry.revoke(codeHash);
+  expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(false);
+});

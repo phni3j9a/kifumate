@@ -1,11 +1,12 @@
 # 解析サーバー（開発者向け）
 
-Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8](https://github.com/phni3j9a/kifumate/issues/8) の分岐中の解析、Issue [#12](https://github.com/phni3j9a/kifumate/issues/12)・[#20](https://github.com/phni3j9a/kifumate/issues/20) のAIコーチを実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
+全局解析・分岐中の解析・AIコーチに加え、Issue [#24](https://github.com/phni3j9a/kifumate/issues/24) の招待権利・レート制限・本番構成を実装しています。アプリ画面・ストア説明・APIにはエンジン／評価関数の固有名を渡しません。この文書の固有名は、開発・ライセンス・入手手順のための記録です。
 
 ## 構成と仕様
 
 - TypeScript Worker：匿名端末トークンを発行し、SHA-256から利用者別DOを特定。トークン原文・対局者名は保存しません。
 - `Device`：SQLite-backed DO。`jobs`・`results`・`usage`・`meta`を保存し、alarmが1局面ずつ進めます。クライアントの接続維持は不要です。
+- `Invitations`：環境ごとに一つのSQLite DO。招待コードのハッシュ・期限・取消・端末枠と、短期の入力試行数を一元管理します。
 - モード別Container：各2枠の固定プール。端末DOのIDで振り分け、中継のロックがUSI操作を直列化します。別端末の棋譜・結果は混ぜません。局面ごとに開始局面と指し手列を再設定します。
 - Python + cshogi中継：棋譜全体の合法手検証、USI、先手視点の評価値、1手・3手詰めの確認。詰み候補は全応手を再検証し、証明できた手順だけを返します。
 
@@ -25,7 +26,7 @@ Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8
 - 失敗・中止は予約を返却します。再依頼は新しいIDでやり直せます。完了ジョブの重複依頼は再集計しません。
 - 通信断でもalarmで継続。コンテナ障害時は保存済み`cursor`から最大5回まで再試行します。watchdogは60秒、1回のコンテナ呼び出しは45秒で打ち切ります。結果と使用数の確定はSQLiteの同一トランザクションです。
 - 完了7日後にジョブ・結果・指し手列を削除します。失敗・中止も終了7日後に削除。使用数は別テーブルなので結果削除では戻りません。端末には結果を永続保存してください。
-- `sleepAfter = '10s'`。PythonはPID 1でもSIGTERMを処理して終了します。stagingの`max_instances`は各モード2です。
+- `sleepAfter = '10s'`。PythonはPID 1でもSIGTERMを処理して終了します。staging・productionの`max_instances`は各モード2です。
 
 ## API
 
@@ -34,6 +35,8 @@ Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8
 | API | 内容 |
 | --- | --- |
 | `POST /v1/devices` | **空の本文**で発行。201 `{ "token": "64文字のランダムhex" }`。安全な端末ストレージに保存 |
+| `GET /v1/entitlements` | 現在の権利。招待のAPI契約は次節 |
+| `POST /v1/invitations/redeem` | 招待コードを端末へ登録。次節参照 |
 | `GET /v1/quota` | `paid`, `weekStart`, `resetsAt`, `totalRemaining`, `preciseRemaining`, `completed`, `reserved` |
 | `POST /v1/jobs` | ジョブ作成。新規202、重複200。下記本文のみ許可 |
 | `GET /v1/jobs` | 保存中のジョブ一覧（結果本体なし）と`quota` |
@@ -72,11 +75,81 @@ Issue [#2](https://github.com/phni3j9a/kifumate/issues/2) の全局解析と [#8
 
 主なエラー：400（入力・カーソル）、401（端末未登録／認証）、403（精密に有料権利が必要）、404、413（本文過大）、415（JSON必須）、429（週上限、`quota.resetsAt`付き）。内部の例外やUSIの`id`・`info string`はAPIに返しません。
 
+## 招待コード・権利（アプリ契約）
+
+同じ端末トークンのまま、`POST /v1/invitations/redeem` に `Content-Type: application/json` と **`{"code":"配布された64桁の小文字hex"}`** を送ります（本文最大1 KiB・追加キー不可）。成功200：
+
+```json
+{"paid":true,"source":"invite","expiresAt":null}
+```
+
+`GET /v1/entitlements` も同じ形式です。期限付きコードの`expiresAt`はUnixミリ秒、無期限はnull。権利なしは`{"paid":false,"source":null,"expiresAt":null}`。stagingの開発許可リスト経由だけ`source:"development"`です。`GET /v1/quota`など既存の`paid`も連動します。アプリは入力成功後と起動・復帰時に権利を取得し、権利を永続的な購入済みフラグとして固定しないでください。入力コードを解析ログ・クラッシュログへ送らないでください。
+
+| HTTP / error | 扱い |
+| --- | --- |
+| 400 `invalid_input` | 形式・追加キー不正（小文字64桁をそのまま送る） |
+| 400 `invite_invalid` | 不存在・期限切れ・取消を統一。コードを再確認する |
+| 409 `invite_full` | 他の端末で上限到達。発行者へ相談する |
+| 401 `unauthorized` | 端末未登録／トークン不正 |
+| 413 / 415 | 本文上限／JSON以外 |
+| 429 `rate_limited` | 入口の公式レート制限。`Retry-After: 60`秒以上待つ |
+| 429 `invite_rate_limited` | 全拠点共有の総当たり制限。`Retry-After: 900`秒以上待つ |
+| 503 `rate_limit_unavailable` | 制限の設定漏れ。再試行を連打しない |
+
+- コードは暗号学的乱数32バイト。**サーバーに保存・送信する管理情報はSHA-256だけ**です。原文は入力POSTの処理中だけ使い、保存・ログ出力しません。
+- 1コードにつき1〜100端末。期限・取消はコード全体に適用します。同じ端末の再入力は枠を消費しません。使用済み枠は取消・期限後も戻さず、端末交換時は別コードを発行します。複数コードを入力した端末はどれか一つが有効なら有料です。
+- 全局解析は本文受信後、分岐は本文受信後の開始確定前、AIコーチは本文／署名検査後・実行前・成功確定前にもDOの最新権利を確認します。取消・期限は次のAPIで反映。稼働中の分岐は次の分岐API、遅くとも無操作30秒で停止します。受理済みの全局解析・保存済みの結果閲覧は取り消しません。
+- 将来のRevenueCat連携は`Invitations.entitlement`に代わる照会を`Device.refreshEntitlement`と分岐側の再確認へ接続し、同期の`paid()`を入口にします。回数集計・署名・Pythonは独立です。招待権利は購入復元や端末バックアップとは別で、トークン再発行先へ自動移行しません。
+
+### 管理スクリプト（コード原文を表示しない）
+
+`server/`から実行します。管理APIは`INVITE_ADMIN_KEY`専用のBearer認証、端末トークンでは呼べません。発行はハッシュ・上限・期限だけのPOST、取消はハッシュのDELETEです。管理鍵ファイルは0600、コード出力先はgit管理外の`.local/`だけに制限します。**`set -x`・コードのコマンド引数・`cat`・git追加は禁止**。原文ファイルは安全な経路で対象者へ配布し、不要になれば削除してください。管理鍵は安全にバックアップしてください。
+
+```sh
+# staging初回だけ。secret listでINVITE_ADMIN_KEYが既存なら上書きせず既存の鍵ファイルを使う。
+npx wrangler secret list --env staging
+umask 077
+mkdir -p .local
+# 既存ファイルは上書きしない
+(set -C; openssl rand -hex 32 > .local/invite-admin-staging.key)
+npx wrangler secret put INVITE_ADMIN_KEY --env staging < .local/invite-admin-staging.key
+
+node scripts/invitations.mjs issue --env staging --max-devices 3 \
+  --expires-at 2027-01-01T00:00:00+09:00 --out .local/friends.txt
+# 無期限なら --expires-at を省略。期限はISO 8601でタイムゾーンも明示する。
+HASH=$(node -p "JSON.parse(require('fs').readFileSync('.local/friends.txt.json','utf8')).hash")
+node scripts/invitations.mjs revoke --env staging --hash "$HASH"
+# productionも同じ操作の --env production（後述の専用管理鍵を使う）
+```
+
+コード原文は指定ファイル、ハッシュ・上限・期限は隣の`.json`へ0600・上書き不可で保存します。応答消失・途中失敗でも`.json`のハッシュで取消できます。管理鍵の保管先を変える場合は`--key-file <0600のファイル>`を指定してください。発行し直しても既存ハッシュの取消は復活しません。
+
+## レート制限と費用の見張り
+
+2026-11-17に[Cloudflare公式Rate Limiting binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)を確認し、Wranglerの`ratelimits`を採用しました。環境ごとに別namespace IDです。いずれも拒否は429、本文や提供元呼び出しより前に制限します。
+
+| 対象 | キー | 設定 |
+| --- | --- | --- |
+| 端末発行・管理API | IPのSHA-256＋用途 | 10回/60秒（用途ごと） |
+| 全ての端末API（GET/DELETE含む） | 端末ハッシュ | 合計300回/60秒 |
+| POST/PUT等 | 端末ハッシュ＋API種別 | 60回/60秒 |
+| 招待入力 | 端末ハッシュ／IPのSHA-256（別々） | 各5回/60秒 |
+| 招待入力の厳密な追加制限 | DO内で端末／IPごと | 5回／20回/15分 |
+
+公式bindingは**拠点ごとの近似カウンター**で、同期前のバーストや複数拠点では設定値を超え得ます。請求の厳密な上限ではありません。招待の追加制限は単一DOのトランザクションで全拠点共有、形式不正や成功も数えます。窓は最初の試行から15分、古い試行行は次の試行時に削除。端末とIPはハッシュだけを保持します。IP共有のモバイル回線では他人の試行も含むので、正当な入力が拒否された場合も連打せず待ってください。端末の実在性検証は別課題です。
+
+**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed`（公開エラー）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+
+- 配布開始後は毎日、Cloudflare Dashboard → 対象Worker → Observabilityで`coach_completed`・`coach_failed`・`analysis_completed`の件数と429/5xx、端末発行数を前日と比較してください。最初の見直し目安は**AIコーチ成功100件/日、全局解析200局/日、端末発行30台/日、提供元失敗10件/日**。少人数向けの警戒値で、サーバーがこの値で自動停止するものではありません。
+- 月の端末別上限（全局週10/100局、精密20局、分岐月300分、コーチ月100回）・最大6コンテナ・無操作停止・提供元240秒/32768トークンで増加を抑えます。失敗でも提供元費用は発生し得るので、成功数だけでなく失敗数とDeepSeek使用量・Cloudflare Billingも確認します。費用式は[measurement.md](docs/measurement.md)。
+- 異常時は該当招待を取り消し、新規配布を止めます。LLMを緊急停止する場合は`npx wrangler secret delete COACH_API_KEY --env production`（新規要求が503、既に送信済みの要求は止まりません）。全Workerを止める判断は影響を確認してMain／利用者が行います。
+- 自動の課金通知・厳密な月額USD上限・全体の自動遮断は未実装です。通知のための外部サービス追加やアカウント全体設定変更はせず、まず構造化ログ＋既存の利用上限で運用します。
+
 ## 分岐中の解析（有料限定）
 
 ### API・アプリ側の接続方法
 
-全局解析と同じ端末トークン・開発用有料判定を使います。全局解析の回数とは独立しています。
+全局解析と同じ端末トークン・招待権利（stagingでは開発許可リストも）を使います。全局解析の回数とは独立しています。
 
 | API | 内容 |
 | --- | --- |
@@ -122,14 +195,14 @@ POST/PUTには`mode`・対局者名など追加キーを渡せません。開始
 ### 探索・休止・時間の数え方
 
 - **250ms / Threads 1 / MultiPV 1 / standard-2（1 vCPU、6 GiB、12 GB）**を採用。分岐では最善手1手と読み筋を素早く返し、精密全局解析の1000ms・3候補と区別します。既存の通常解析と同設定・同イメージを再利用し、費用と探索時間を増やしません。実測・費用は[measurement.md](docs/measurement.md)を参照。
-- 分岐専用の`RealtimeContainer`を2枠追加。全局解析のコンテナとは共有しません。端末DOのIDから固定枠を選び、その枠を一端末へ排他的に貸与します。別端末が使用中なら409 `realtime_busy`で即時拒否し、その端末の時間は減りません。別枠への待ち行列・移動はありません。`shortcut:` 同時利用2枠・ハッシュ衝突で空き枠があっても拒否するstaging構成です。一般公開前に利用実測をもとに枠数・振り分けを更新してください。
+- 分岐専用の`RealtimeContainer`を2枠追加。全局解析のコンテナとは共有しません。端末DOのIDから固定枠を選び、その枠を一端末へ排他的に貸与します。別端末が使用中なら409 `realtime_busy`で即時拒否し、その端末の時間は減りません。別枠への待ち行列・移動はありません。`shortcut:` 同時利用2枠・ハッシュ衝突で空き枠があっても拒否する構成です。少人数配布でも混雑を観測し、枠数・振り分けを更新してください。
 - 局面更新は旧HTTP要求を破棄し、中継は新しい要求を**USIロック取得前**に登録して旧探索に`stop`を送ります。旧bestmoveを読み切ってから新局面へ移り、遅延結果はsessionId・sequenceで破棄します。初回の共通起動は局面変更ではやり直しません。
 - `REALTIME_IDLE_MS`の既定は`30000`（許容1000〜300000ms、不正値は既定へ）。**最後に受理したPOST/PUT**から測ります。探索完了・ポーリング・通信接続は期限を延長しません。永続alarmで休止・上限停止を行い、明示停止はコンテナをdestroyします。停止失敗時は枠と集計を保持し1秒後に再試行します。
 - 数えるのは**コンテナ起動要求から停止完了までの壁時計時間**。準備・探索・結果が出た後の待機・停止処理を含み、局面数やCPU使用時間では数えません。初回要求／手動起動から料金が始まる[公式の説明](https://developers.cloudflare.com/containers/platform/pricing/)に合わせたサーバー時計による集計で、Cloudflare請求メーターとの完全一致を保証するものではありません。
 - 月300分（18,000,000ms）、**JST月初0時**で区切ります。月をまたぐ稼働は両月へ分割。残り時間までのalarmを設定し、使い切ると停止します。利用上限値で集計を丸めるため、alarmの遅延や停止処理の端数を超過請求しません。翌月に勝手に再起動はせず、次の局面更新で再開します。
 - `quota.low`がtrue（残り10%未満）のときだけ残りを知らせ、それ以外では上限・残りを画面に出さないでください。停止・失敗したセッションも実際の稼働時間は返却しません。全局解析の失敗時の回数返却とは別です。
 - 利用量と最新セッションは分岐用Container DOのSQLiteへ永続化し、DOの再生成でも集計を継続。停止済みの結果は最終操作から7日後のアクセス時に削除し、月利用量は当月・前月を保持します。月上限になったセッションID・sequenceだけは翌月の再開用に最大40日保持します。次のセッションで上書きされるため、必要な分岐結果は端末に保存してください。
-- 権利判定はWorkerで最新secretを評価し、Deviceが内部ヘッダーを必ず上書きします。本文受信中に同じ端末の別の分岐API呼び出しで権利が更新された場合も、解析開始の確定直前に最新の判定を再確認します。RevenueCat連携時は既存のWorker有料判定とDeviceの`paid()`を差し替え、分岐の時間集計・Pythonには変更不要です。公開前には権利失効の能動通知も必要です（現状は当該端末の次の分岐API呼び出し、遅くとも無操作休止で停止）。
+- 内部の権利・端末ヘッダーはDeviceが必ず上書きします。本文待機中の別要求での権利更新に加え、開始確定前にも招待DOを再照会します。稼働中の取消の能動通知は未実装（次の分岐APIか無操作休止で停止）です。
 
 ## AIコーチ（有料限定）
 
@@ -208,7 +281,7 @@ POST本文（追加キー・人名フィールドは拒否）：
 - 端末ごとに同時一件。予約中を除いた `remaining` と `reserved` を返します。失敗・明示中止・タイムアウトは加算しません。DO再生成で処理を失った予約も永続期限後に返却されます。`low` がtrue（残り10%未満）のときだけ残りを案内し、残り0では `resetsAt` を案内します。
 - 本文は実測1 MiB、棋譜512手、学習戦法10個×40文字、目標500文字、質問1000文字、履歴20件×4000文字。既存解析APIの16 KiB上限は変更しません。
 - `COACH_MAX_TOKENS` 既定32768（1〜65536、推論込み）、`COACH_TIMEOUT_MS` 既定240000ms（1〜600000、受理から日本語化・生成・検査までの全体）。JSON応答は1 MiBまで。提供元へのリダイレクトは拒否。入力・応答・APIキーはログに出しません。
-- Workerの最新権利判定とDeviceの`paid()`を再利用し、本文受信・署名検証後と成功確定前に権利を再確認します。提供元・鍵・上限も入口から内部ヘッダーを上書きして渡し、既存DOの古いenv設定を使い続けません（Cloudflare側のsecret更新反映には猶予が必要です）。現在の開発用課金判定は本番で無効です。
+- 本文／署名検査後・生成前・成功確定前に最新招待権利を確認します。開発許可リスト・提供元・鍵・上限はWorkerが内部ヘッダーを上書きして渡し、既存DOの古いenv設定を使い続けません（Cloudflare側のsecret更新反映には猶予が必要です）。開発用課金判定は本番で無効です。
 - LLMにはエンジン名・評価関数名・対局者名フィールドを渡しません。入力自由文と出力からUnicodeの書式文字（一般カテゴリ`Cf`）と既定で不可視の文字（`Default_Ignorable_Code_Point`、ゼロ幅文字等）を共通処理で除去し、NFKC正規化して既知の禁止製品名（エンジン・評価関数・他社サービス等）だけを照合します。LLMへ送る本文とアプリへ返す本文も不可視文字を除去したものです。禁止製品名を含む出力は502にして課金しません。**未知の製品名や全ての意味の正確さまでは判定しません**。日本語事実と参照を照合し、明示的な勝敗・有利側・駒と指した側・詰まされる側・宣言側・観戦の呼称の矛盾を拒否します。正しい回答の過剰拒否を避けるため、否定・仮定・目的を含む文は許可し、主語ごとに確かな断定形だけを検査します。省略・比喩・複数局面をまとめた曖昧な説明まで完全に検証できず、実モデル評価が必要です。
 - 指し手はLLMに自由生成させず、署名済み参照IDのみを選択させます。候補PV・詰みPVは既存Python中継で各手の合法性を検査済み。出力後に参照の存在を照合し、数字・棋譜表記が本文に混ざる場合は失敗とします。「次の一手」「第一歩」などの通常表現は許可します。このため任意の未解析分岐は解説できません（分岐中の解析とは独立）。
 
@@ -216,47 +289,21 @@ POST本文（追加キー・人名フィールドは拒否）：
 
 ### 設定と提供元
 
-キーは `wrangler secret` で保存します。署名鍵はプロバイダーのキーとは別のランダム32バイト以上を用意します。
-
-```sh
-# 永続鍵（ログに表示・gitへ保存しない）
-openssl rand -hex 32 | npx wrangler secret put COACH_SIGNING_KEY --env staging
-# APIキー入手後。標準はOpenAI互換の非ストリーミングChat Completions + JSON出力
-npx wrangler secret put COACH_API_KEY --env staging
-```
-
-| 設定 | 既定 |
+| 設定 | 既定／production |
 | --- | --- |
 | `COACH_PROVIDER` | `openai-compatible` |
 | `COACH_BASE_URL` | `https://api.deepseek.com` |
 | `COACH_MODEL` | `deepseek-flash` |
 | `COACH_TOKEN_PARAMETER` | `max_tokens`（`max_completion_tokens`へ変更可能） |
+| `COACH_MAX_TOKENS` / `COACH_TIMEOUT_MS` | `32768` / `240000` |
 
-`reasoning_effort:max`、`response_format:{type:json_object}`を送ります。キー未設定は503で、既定が偽提供元になることはありません。DeepSeekのモデル・思考モード・料金は[公式仕様](https://api-docs.deepseek.com/api/create-chat-completion/)・[料金](https://api-docs.deepseek.com/quick_start/pricing)を2026-11-17に確認しました。**モデル変更と無関係に署名鍵は維持**してください。
+`reasoning_effort:max`、`response_format:{type:json_object}`を送ります。キー未設定は503で、偽提供元が既定になることはありません。DeepSeekの[公式仕様](https://api-docs.deepseek.com/api/create-chat-completion/)・[料金](https://api-docs.deepseek.com/quick_start/pricing)を確認しています。実測の最大80.669秒に対し、日本語化・ネットワーク・揺らぎを含め240秒を維持します。**モデル変更と無関係に署名鍵は維持**してください。
 
 LLMへ送る根拠は`container/coach_facts.py`で決定的に作る日本語だけです。本譜・候補・読み筋を合法盤面からKIF表記へ変換し、先後記号・同・移動元・成／不成／打、駒名と捕獲駒、あなた／相手（観戦は先手／後手）、形勢・段階・変化・印・詰み確認・宣言可能な側を明示します。cshogiの省略字（杏・圭・全）は成香・成桂・成銀に補完します。形勢は絶対値150未満を互角、500未満をやや有利、1500未満を有利、3000未満を大きく有利、それ以上を勝勢とし、後手視点の不利も反転します。印は指した側の損失200以上を疑問手、500以上を悪手とする目安で、境界値や詰みスコアを数値比較しません。
 
 盤面の詰みは勝者・敗者・終局理由を確定できますが、**既存の署名入力には投了・実際の宣言などの終局記録がありません**。その場合は勝敗・終局理由を不明とし、宣言可能という探索結果から実戦の宣言勝ちを作りません。**サーバーが解析から作る事実**には生USI・SFEN・符号付き評価を含めず、日本語化してLLMへ渡します。利用者が質問・プロフィール・履歴に書いた数値（「評価が＋600なのはなぜ？」など）は、全角・半角や符号を変えずに保持します。これは解析で確認した事実ではなく参考文です。自由文のUSIの既存伏字と、出力本文の数値禁止は維持します。アプリへ返す署名済み`references`のUSI・評価は従来どおりです。
 
-再比較の誤り・偽陽性・速度・費用は[検証記録](docs/ai-coach.md)を参照してください。今回は**stagingへデプロイしていません**。Mainが他作業との統合後に実施する手順：
-
-```sh
-# 既存の署名鍵は変更しない。キー値を引数・ログへ出さず対話入力する。
-npx wrangler secret put COACH_API_KEY --env staging
-# 古いOpenAI設定がsecretに残っていれば、この三項目を更新する。
-printf 'https://api.deepseek.com\n' | npx wrangler secret put COACH_BASE_URL --env staging
-printf 'deepseek-flash\n' | npx wrangler secret put COACH_MODEL --env staging
-printf 'max_tokens\n' | npx wrangler secret put COACH_TOKEN_PARAMETER --env staging
-# 古いCOACH_TIMEOUT_MS / COACH_MAX_TOKENSがsecretなら、削除してvarsの240000 / 32768を使う。
-# 偽提供元を無効化（未設定なら不要）
-npx wrangler secret delete COACH_PROVIDER --env staging
-npm run deploy
-# 反映後に非同期のPOST→画面離脱→GET、中止、回数、権利失効を確認する。
-```
-
-`COACH_PROVIDER=fake` は **local/stagingだけ**に許可し、production等では503にします。既定では偽物を使わず、キー未設定なら503（使用数0増加）です。
-
-staging検証と実モデルの比較手順・実測は [ai-coach.md](docs/ai-coach.md) を参照してください。
+再比較の誤り・偽陽性・速度・費用は[検証記録](docs/ai-coach.md)を参照してください。`COACH_PROVIDER=fake`は**local/stagingのみ**許可し、productionでは503で拒否します。
 
 ## ローカル開発
 
@@ -267,9 +314,10 @@ cd server
 npm ci
 python3 -m venv container/.venv
 container/.venv/bin/pip install -r container/requirements.txt pytest==9.0.2
-npm test                  # 実際のWorkersランタイム・SQLite DO、偽の中継
+npm test                  # Workersランタイム・SQLite DO・公式レート制限、偽の中継
 npm run test:python       # 偽USIプロセス・合法手・評価正規化・詰み
 npm run typecheck
+node scripts/test_invitations.mjs
 npm audit
 ```
 
@@ -315,43 +363,107 @@ npm run dev
 
 CPU確認・探索量比較には、HTTP非公開の`container/benchmark.py`を同じイメージ内で実行します。`--cpu-only`でモデル・flags・自動選択結果、`--sfen '<局面>' --modes std`で互換版/AVX2版の3反復中央値を出力します。各探索は新規プロセス・空ハッシュで、バイナリの順序を反復ごとに入れ替えます。ローカルは`docker run --rm --cpus=1 ... python /app/benchmark.py ...`、精密は2 CPUです。stagingでは公式のContainer実行APIを使用してください。
 
-今回のWrangler SSHは稼働中でもWebSocket 400となったため、一時的なsecret保護・staging限定入口から`ctx.container.exec(['python', '/app/benchmark.py', ...])`で比較しました。任意コマンドは受け付けず、固定ベンチだけを実行しました。比較中だけ停止猶予を90秒へ延長し、終了後に入口・RPC・secretを削除して10秒へ戻しました。診断用HTTP APIは残していません。
+過去のWrangler SSHは稼働中でもWebSocket 400となったため、一時的なsecret保護・staging限定入口から固定ベンチだけを実行しました。終了後に入口・RPC・secretを削除し、停止猶予を10秒へ戻しています。診断用HTTP APIは残していません。
 
-## stagingデプロイ・実測
+## stagingデプロイ・検証
 
-対象は`kifumate-analysis-staging`のみです。既存の別アプリやWorkersプランを変更しません。
+対象は`kifumate-analysis-staging`のみ。既存の別アプリやWorkersプランを変更しません。他の担当が使う`DEV_PAID_HASHES`など、**値を読み出せない既存secretは上書き・削除しない**でください。既存の`COACH_SIGNING_KEY`も保持します。
 
 ```sh
+cd server
 npx wrangler whoami
-# 認証がなければここで停止。対話ログインは自動実行しない。
+# 認証がなければ停止。対話ログインは自動実行しない。
+npx wrangler secret list --env staging
 npm run deploy
+# 初回だけ前述の手順でINVITE_ADMIN_KEYを追加。既存なら追加しない。
+node scripts/smoke_invitations.mjs
 ```
 
-開発有料権利は`ENVIRONMENT=local/staging`かつ`ALLOW_DEV_PAID=true`のときに限り、secret `DEV_PAID_HASHES`（端末トークンのSHA-256、カンマ区切り）で許可します。Workerが最新secretを判定し、内部ヘッダーを必ず上書きします。productionではこの代替手段は無効です。
+スモークはstagingだけに招待を一つ発行し、成功・端末枠・取消反映、公式の招待入力／端末API／発行制限、65秒後も残るDOの15分制限を確認します。**finallyで確認コードを取り消し、コンテナは起動しません**。原文と取消用メタデータは`.local/`へ0600保存。IPの15分窓を消費するため連続再実行せず、15分以上空けてください。公式bindingは近似なので瞬間並列バーストだけで判定せず、端末APIを短い間隔で直列に呼びます。
+
+開発有料権利は`ENVIRONMENT=local/staging`かつ`ALLOW_DEV_PAID=true`のときだけ、secret `DEV_PAID_HASHES`（端末トークンのSHA-256、カンマ区切り）で許可します。Workerが最新secretを判定し、内部ヘッダーを上書きします。productionではフラグやsecretを誤って設定してもこの代替手段は無効です。通常の計測も招待を使えば共有secretを変更せずに行えます。
+
+計測後は全三つのContainer applicationで次を確認します（対象IDは`npx wrangler containers list --env staging`で確認）。`healthy / starting`は準備済み容量で、利用者の実行中とは区別してください。
 
 ```sh
-URL=https://kifumate-analysis-staging.yuki-nakano-1020.workers.dev
-HASH=$(python3 scripts/measure.py --url "$URL" --register)
-printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
-python3 scripts/measure.py --url "$URL"   # 85手、両モード
-# 必要に応じ --modes precise / --plies 6 / --token-file .local/another-device.json
-npx wrangler secret delete DEV_PAID_HASHES --env staging
-
-# 分岐中の解析（新規の計測端末を有料にした後で実行）
-HASH=$(python3 scripts/measure.py --url "$URL" --register --token-file .local/realtime-device.json)
-printf '%s\n' "$HASH" | npx wrangler secret put DEV_PAID_HASHES --env staging
-python3 scripts/measure_realtime.py --url "$URL"
-npx wrangler secret delete DEV_PAID_HASHES --env staging
+for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca73d a03b91a4-eb91-461d-ad69-219e5f5139e6; do
+  npx wrangler containers instances "$ID" --env staging --json  # 使用slotはinactive
+  npx wrangler containers info "$ID" --env staging             # active=0 / assigned=0
+ done
 ```
 
-`.local/`の端末ファイルは権限0600で作られ、gitignoreされています。繰り返しの計測で既存ジョブを再利用すると時間を測れないため、スクリプトは重複時に止まります。新しい端末ファイルか異なる手数を選んでください。
+最新の確認結果は[production.md](docs/production.md)、解析の実測は[measurement.md](docs/measurement.md)、AIコーチの検証は[ai-coach.md](docs/ai-coach.md)を参照。
 
-計測後は`wrangler containers instances <アプリID> --env staging --json`で**inactive**、`containers info`で**active=0 / assigned=0**を確認してください。準備済み容量の`healthy / starting`とは区別します。実測値・費用式・作成資源一覧は[measurement.md](docs/measurement.md)にあります。
+## productionの準備とデプロイ（ユーザー確認後にMainが実行）
 
-## 公開前に必要なこと
+**今回、本番へはデプロイしていません。以下の実デプロイはユーザー確認後だけ実行してください。**
 
-- `shortcut:`：App Attest / Play Integrity、入口の発行・利用レート制限は未実装。匿名トークンを作り直す不正利用は防げません。staging検証用であり、そのまま一般公開しません。
-- ストア購入権利検証と端末移行・購入復元の設計。開発許可リストは本番の課金判定ではありません。
+- Worker名：`kifumate-analysis-production`。DO namespace・レート制限・Containerはstagingとは別。
+- 本番URL：**`https://kifumate-api.quarterlambda.com`**。同じアカウントのactiveなzone `quarterlambda.com` を確認済みです。第1階層のサブドメインで、[Workers Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)としてWranglerがDNSと証明書を構成します。workers.dev・preview URLは無効。既存DNSとの競合は勝手に置換せず停止して確認します。
+- ネイティブアプリ専用。CORSヘッダーを付けず、productionで`Origin`付き要求とOPTIONSは403 `browser_forbidden`。これは端末認証の代わりではなく、HTTPクライアントによる偽装を防ぐものではありません。
+- **数十人の初期配布でもstd 2・precise 2・realtime 2（合計最大6）を維持**します。全局解析は端末別キューで吸収でき、過去の85手実測はstd52秒／precise96秒程度。2枠ずつなら理想条件で毎分約2.3局／1.3局の目安となり、数十人が一斉に全局解析する前提は置きません。分岐は同時2人まで、ハッシュ衝突では空き枠があっても409です。AIコーチの日本語化は精密枠を共有。最大8 vCPU・40 GiBメモリ・80 GBディスクまでに抑え、常時その数を起動しません。混雑の409・再試行・実測を見て、コードの`% 2`と`max_instances`を必ず一緒に変更します。
+- DeepSeek `deepseek-flash` / `reasoning_effort:max`、期限240秒・出力上限32768を採用。偽提供元、`ALLOW_DEV_PAID`・`DEV_PAID_HASHES`による有料化は本番で無効（テストあり）。
+
+必要な**本番専用secret**：
+
+| 名前 | 用途 |
+| --- | --- |
+| `COACH_SIGNING_KEY` | 新規ランダム32バイト以上。**stagingからコピーしない**。発行済み証明を守るため以後は維持 |
+| `INVITE_ADMIN_KEY` | 招待発行・取消用。署名鍵／staging管理鍵とも別の新規乱数 |
+| `COACH_API_KEY` | `~/.config/kifumate/llm.env`の`DEEPSEEK_API_KEY` |
+
+初回準備（値を表示せず、git管理外の0600 JSONへ保存。以下は`server/`から）：
+
+```sh
+npm ci
+npm test && npm run typecheck && npm run test:python
+node scripts/test_invitations.mjs
+npx wrangler whoami
+# 本番の既存secretがあれば、読めない値を上書きせずここで停止・確認する。
+npx wrangler secret list --env production
+# 初回でWorker未作成のエラーなら想定内。認証／権限エラーの場合は停止する。
+
+set +x
+set -a
+. "$HOME/.config/kifumate/llm.env"
+set +a
+node --input-type=module <<'JS'
+import {randomBytes} from 'node:crypto';
+import {mkdirSync, writeFileSync} from 'node:fs';
+if (!process.env.DEEPSEEK_API_KEY) throw new Error('DeepSeekキーが未設定です');
+mkdirSync('.local', {recursive:true, mode:0o700});
+const secrets = {
+  COACH_SIGNING_KEY: randomBytes(32).toString('hex'),
+  INVITE_ADMIN_KEY: randomBytes(32).toString('hex'),
+  COACH_API_KEY: process.env.DEEPSEEK_API_KEY,
+};
+writeFileSync('.local/production-secrets.json', JSON.stringify(secrets), {mode:0o600, flag:'wx'});
+writeFileSync('.local/invite-admin-production.key', secrets.INVITE_ADMIN_KEY+'\n', {mode:0o600, flag:'wx'});
+JS
+unset DEEPSEEK_API_KEY OPENAI_API_KEY
+# ローカルだけの検査（Dockerビルドあり、リモートへのアップロードなし）
+npx wrangler deploy --env production --dry-run
+```
+
+`.local/production-secrets.json`と管理鍵を安全な保管先にバックアップし、出力・git追加しないでください。途中で失敗した場合も生成済みの署名鍵を無断で再生成しません。既存本番の更新では初回生成を繰り返さず、同じ鍵を維持します。以後のDeepSeekキー更新だけなら`set +x; set -a; . "$HOME/.config/kifumate/llm.env"; set +a`の後、`printf '%s' "$DEEPSEEK_API_KEY" | npx wrangler secret put COACH_API_KEY --env production`で入れ、`unset DEEPSEEK_API_KEY OPENAI_API_KEY`します。
+
+**承認後の実デプロイ**（Wrangler 4.163.0の`--secrets-file`で初回から鍵込みでアップロード。既存の他secretは削除しません）：
+
+```sh
+npx wrangler deploy --env production --secrets-file .local/production-secrets.json
+npx wrangler secret list --env production
+curl --fail --silent --show-error -X POST https://kifumate-api.quarterlambda.com/v1/devices -o /dev/null
+# ブラウザ経由が403、Access-Control-Allow-Originがないこと
+curl --silent --show-error -i -X OPTIONS https://kifumate-api.quarterlambda.com/v1/devices \
+  -H 'Origin: https://example.com'
+```
+
+初回は少数の期限付き招待から配布し、`GET /v1/entitlements`・AIコーチの実提供元・ログ・Cloudflare/DeepSeek使用量を確認してください。確認用コードは取消し、Containerがinactive・active=0/assigned=0になったことを確認してから終了します。本番の証明書発行・DNS伝播・本番実LLMのスモークは承認後の残作業です。
+
+## 一般公開前に必要なこと
+
+- `shortcut:` App Attest / Play Integrityは未実装。匿名トークンの再発行・IP変更による無料枠の回避を完全には防げません。今回は知人向けの少人数配布で、一般公開の安全性を保証しません。
+- ストア購入権利検証と端末移行・購入復元の設計。招待はRevenueCatの購入状態とは別です。
 - 多利用者の負荷試験とプール枠／`max_instances`の調整。混雑時の45秒タイムアウト・最大5回再試行は最終的に失敗となり、枠を返却します。
-- Cloudflareの`default` scheduling policyは現在非推奨ですが、今回は要求された`@cloudflare/containers`・`max_instances`による小さなstagingを採用しました。将来の`durable_object` policy移行は別作業です。
-- アプリ本体、RevenueCat連携は今回の範囲外です。分岐用プールの多利用者負荷・請求メーターとの突合は公開前に別途必要です。
+- Cloudflareの`default` scheduling policyは現在非推奨ですが、既存の固定プールを維持しました。将来の`durable_object` policy移行は別作業です。
+- アプリ本体、RevenueCat連携、能動的な失効通知、全体予算の自動停止、請求メーターとの突合は範囲外です。

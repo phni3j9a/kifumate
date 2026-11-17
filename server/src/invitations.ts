@@ -11,7 +11,7 @@ export class Invitations extends DurableObject<unknown> {
       CREATE TABLE IF NOT EXISTS attempts (key TEXT PRIMARY KEY, started INTEGER NOT NULL, count INTEGER NOT NULL);`);
   }
   create(hash: string, maxDevices: number, expiresAt: number | null) {
-    if (!/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(maxDevices) || maxDevices < 1 || maxDevices > 100
+    if (typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(maxDevices) || maxDevices < 1 || maxDevices > 100
       || (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()))) return {error: 'invalid_invite'};
     if (this.ctx.storage.sql.exec('SELECT hash FROM invites WHERE hash=?', hash).toArray().length) return {error: 'invite_exists'};
     this.ctx.storage.sql.exec('INSERT INTO invites (hash,max_devices,expires) VALUES (?,?,?)', hash, maxDevices, expiresAt);

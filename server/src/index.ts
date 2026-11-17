@@ -281,6 +281,7 @@ export class Device extends DurableObject<Env> {
           this.ctx.storage.sql.exec('INSERT OR IGNORE INTO results VALUES (?,?,?)', job.id, job.cursor, JSON.stringify(result));
           const completed = job.cursor === input.moves.length;
           this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,status=?,terminal=? WHERE id=?', completed ? 'completed' : 'running', completed ? completedAt : null, job.id);
+          if (completed) console.log(JSON.stringify({event: 'analysis_completed', mode: job.mode}));
           if (completed && proof) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO coach_proofs VALUES (?,?)', job.id, JSON.stringify(proof));
           if (completed) this.ctx.storage.sql.exec('INSERT INTO usage VALUES (?,1,?) ON CONFLICT(week) DO UPDATE SET total=total+1,precise=precise+excluded.precise', job.week, job.mode === 'precise' ? 1 : 0);
         });
@@ -338,6 +339,7 @@ export default {
         const hash = await sha256(token);
         const registered = await env.DEVICES.getByName(hash).fetch('https://device/register?hash=' + hash, {method: 'POST'});
         if (!registered.ok) throw new ApiError(503, 'registration_unavailable');
+        console.log(JSON.stringify({event: 'device_created'}));
         return json({token}, 201);
       }
       if (!['/v1/jobs', '/v1/quota', '/v1/realtime', '/v1/coach', '/v1/entitlements', '/v1/invitations/redeem'].includes(url.pathname) && !/^\/v1\/(?:jobs|realtime|coach)\/[0-9a-f-]{36}$/.test(url.pathname)) throw new ApiError(404, 'not_found');
@@ -358,8 +360,11 @@ export default {
         && (env.DEV_PAID_HASHES ?? '').split(',').map(x => x.trim()).includes(hash);
       headers.set('X-Dev-Paid', paid ? '1' : '0');
       headers.set('X-Coach-Config', JSON.stringify(coachConfiguration(env)));
-      const response = await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
-      if (response.status === 429 && family === 'invitations') response.headers.set('Retry-After', '900');
+      let response = await env.DEVICES.getByName(hash).fetch(new Request(request, {headers}));
+      if (response.status === 429 && family === 'invitations') {
+        response = new Response(response.body, response);
+        response.headers.set('Retry-After', '900');
+      }
       console.log(JSON.stringify({event: 'api', family, method: request.method, status: response.status}));
       return response;
     } catch (error) {
