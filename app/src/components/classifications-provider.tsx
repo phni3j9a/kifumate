@@ -1,3 +1,5 @@
+import { useAppData } from "./data-provider";
+import { dataPaused, registerDataDrain } from "../storage/maintenance";
 import {
   createContext,
   useContext,
@@ -13,6 +15,7 @@ const Context = createContext({ revision: 0, pending: false });
 export const useClassifications = () => useContext(Context);
 export function ClassificationsProvider({ children }: PropsWithChildren) {
   const db = useSQLiteContext();
+  const { revision: dataRevision } = useAppData();
   const [revision, setRevision] = useState(0);
   const [pending, setPending] = useState(true);
   useEffect(() => {
@@ -27,12 +30,18 @@ export function ClassificationsProvider({ children }: PropsWithChildren) {
         if (!disposed) setRevision((r) => r + 1);
       }, 100);
     };
+    let work: Promise<void> = Promise.resolve();
     const run = async () => {
-      if (disposed || running || !active) return;
+      if (disposed || running || !active || dataPaused) return;
       running = true;
       setPending(true);
       try {
-        await reclassifyGames(db, changed, () => disposed || !active);
+        work = reclassifyGames(
+          db,
+          changed,
+          () => disposed || !active || dataPaused,
+        );
+        await work;
       } catch {
         if (!disposed)
           toast("分類を保存できませんでした。次に開いたときにもう一度試します");
@@ -46,6 +55,12 @@ export function ClassificationsProvider({ children }: PropsWithChildren) {
         if (!disposed) setPending(false);
       }
     };
+    const unregister = registerDataDrain(
+      () => work.catch(() => {}),
+      () => {
+        void work.catch(() => {}).then(run);
+      },
+    );
     void run();
     const sub = AppState.addEventListener("change", (state) => {
       active = state === "active";
@@ -53,10 +68,11 @@ export function ClassificationsProvider({ children }: PropsWithChildren) {
     });
     return () => {
       disposed = true;
+      unregister();
       clearTimeout(timer);
       sub.remove();
     };
-  }, [db]);
+  }, [db, dataRevision]);
   return (
     <Context.Provider value={{ revision, pending }}>
       {children}

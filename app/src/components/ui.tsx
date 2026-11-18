@@ -23,6 +23,16 @@ import { colors, font, line, mono, radius, shadow } from "./theme";
 
 // マスコット（mock/assets/mascot）。RN は height だけでは幅が決まらないので縦横比を持つ。
 export const mascots = {
+  "onb-1": { source: require("../assets/onb-1.webp"), ratio: 387 / 600 },
+  "onb-2": { source: require("../assets/onb-2.webp"), ratio: 391 / 600 },
+  "onb-3": { source: require("../assets/onb-3.webp"), ratio: 573 / 600 },
+  "onb-4": { source: require("../assets/onb-4.webp"), ratio: 571 / 600 },
+  "onb-6": { source: require("../assets/onb-6.webp"), ratio: 477 / 600 },
+  "onb-7": { source: require("../assets/onb-7.webp"), ratio: 523 / 600 },
+  "sys-backup": {
+    source: require("../assets/sys-backup.webp"),
+    ratio: 317 / 320,
+  },
   "chat-default": { source: require("../assets/chat-default.webp"), ratio: 1 },
   "chat-listening": {
     source: require("../assets/chat-listening.webp"),

@@ -1,3 +1,4 @@
+import { dataPaused } from "../storage/maintenance";
 import {
   AnalysisClient,
   AnalysisConfigurationError,
@@ -162,8 +163,12 @@ export class AnalysisController {
         });
     }).then(() => this.sync());
   }
+  idle() {
+    return this.serial(async () => {});
+  }
   private syncing: Promise<void> | undefined;
   sync(): Promise<void> {
+    if (dataPaused) return Promise.resolve();
     return (this.syncing ??= this.serial(async () => {
       this.snapshot.problem = "";
       try {

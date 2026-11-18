@@ -159,12 +159,14 @@ test("応答不明から7日経った依頼は自動再送せず、確認して�
 }) => {
   const fake = await fakeAnalysis(page);
   await importOne(page);
+  await page.clock.pauseAt(new Date());
   fake.loseCreateResponse = true;
   await button(page, "解析する").click();
   await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();
   const sent = fake.requests.length;
   await page.clock.setSystemTime(new Date(Date.now() + 7 * 86400000));
   await page.reload();
+  await page.clock.resume();
   await expect(button(page, "依頼を確認")).toBeVisible();
   expect(fake.requests.length).toBe(sent);
   await button(page, "依頼を確認").click();
@@ -186,6 +188,7 @@ test("精密依頼の応答喪失後に失効しても、再起動で結果を�
   const fake = await fakeAnalysis(page);
   fake.loseCreateResponse = true;
   await importOne(page);
+  await page.clock.pauseAt(new Date());
   await button(page, "解析する").click();
   await expect.poll(() => fake.requests.length).toBe(1);
   await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();
@@ -193,6 +196,7 @@ test("精密依頼の応答喪失後に失効しても、再起動で結果を�
   fake.loseCreateResponse = false;
   fake.complete = true;
   await page.reload();
+  await page.clock.resume();
   await expect(button(page, "3位")).toBeVisible();
   expect(fake.requests).toHaveLength(2);
   expect(fake.requests[1]).toEqual(fake.requests[0]);

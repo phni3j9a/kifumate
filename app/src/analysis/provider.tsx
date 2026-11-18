@@ -1,3 +1,5 @@
+import { useAppData } from "../components/data-provider";
+import { registerDataDrain } from "../storage/maintenance";
 import { API_URL, ALLOW_DEVELOPMENT_ACCESS } from "./environment";
 import {
   EntitlementsProvider,
@@ -25,6 +27,7 @@ import { RealtimeController } from "./realtime-controller";
 const RealtimeContext = createContext<RealtimeController | null>(null);
 const Context = createContext<AnalysisController | null>(null);
 export function AnalysisProvider({ children }: PropsWithChildren) {
+  const { revision } = useAppData();
   const db = useSQLiteContext(),
     path = usePathname();
   const client = useMemo(
@@ -42,6 +45,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
     [client, db],
   );
   const realtime = useMemo(() => new RealtimeController(client), [client]);
+  useEffect(() => registerDataDrain(() => controller.idle()), [controller]);
   useEffect(() => {
     let paid = client.access.snapshot.entitlement.paid;
     return client.access.subscribe(() => {
@@ -118,7 +122,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
       clearTimeout(timer);
       sub.remove();
     };
-  }, [controller]);
+  }, [controller, revision]);
   return (
     <Context.Provider value={controller}>
       <RealtimeContext.Provider value={realtime}>

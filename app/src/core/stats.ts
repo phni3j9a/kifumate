@@ -80,12 +80,15 @@ export function hasTag(tags: Tags, kind: TagKind, id: string) {
   return tags[kind].includes(id);
 }
 export function matchesGame(game: Game, filter: GameFilter, now = Date.now()) {
-  if (filter.scope === "self" && !game.self_side) return false;
-  if (filter.scope === "other" && game.self_side) return false;
+  if (filter.scope === "self" && (!game.self_side || game.is_sample))
+    return false;
+  if (filter.scope === "other" && game.self_side && !game.is_sample)
+    return false;
   if (filter.side && filter.side !== game.self_side) return false;
   if (
     filter.result &&
     (!game.self_side ||
+      game.is_sample ||
       (filter.result === "decided"
         ? !["win", "loss"].includes(game.result)
         : game.result !== filter.result))
@@ -108,7 +111,7 @@ export function matchesGame(game: Game, filter: GameFilter, now = Date.now()) {
   }
   for (const dim of ["myst", "opst", "mycs"] as const) {
     if (!filter[dim]) continue;
-    if (!game.self_side) return false;
+    if (!game.self_side || game.is_sample) return false;
     const tags = tagsOf(
       game,
       dim === "opst" ? opposite(game.self_side) : game.self_side,
@@ -120,7 +123,9 @@ export function matchesGame(game: Game, filter: GameFilter, now = Date.now()) {
 }
 export function tally(games: readonly Game[]) {
   const own = [
-    ...new Map(games.filter((g) => g.self_side).map((g) => [g.id, g])).values(),
+    ...new Map(
+      games.filter((g) => g.self_side && !g.is_sample).map((g) => [g.id, g]),
+    ).values(),
   ];
   const count = (r: Game["result"]) => own.filter((g) => g.result === r).length;
   const w = count("win"),
@@ -143,7 +148,7 @@ export function matchesStatRow(
   id: string,
   family?: Tags["family"],
 ) {
-  if (!game.self_side) return false;
+  if (!game.self_side || game.is_sample) return false;
   const tags = tagsOf(
     game,
     dimension === "opst" ? opposite(game.self_side) : game.self_side,
@@ -155,7 +160,7 @@ export function matchesStatRow(
 }
 export function statRows(games: Game[], dimension: Dimension) {
   const kind = dimension === "mycs" ? "castles" : "strategies";
-  const own = games.filter((g) => g.self_side);
+  const own = games.filter((g) => g.self_side && !g.is_sample);
   const tags = (g: Game) =>
     tagsOf(g, dimension === "opst" ? opposite(g.self_side!) : g.self_side!);
   const rows: {

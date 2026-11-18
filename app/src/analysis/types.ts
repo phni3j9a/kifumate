@@ -61,6 +61,8 @@ export interface Attempt extends Input {
   cancel: boolean;
 }
 export interface Saved extends Input {
+  /** 中断した解析から持ち出した、再送しない閲覧用の途中結果。 */
+  partial?: boolean;
   results: AnalysisResult[];
   coachProof: unknown;
   jobId: string;
@@ -85,3 +87,7 @@ export const active = (a?: Analysis) =>
   !!a?.attempt &&
   !needsRetryConfirmation(a.attempt) &&
   (!a.attempt.job || ["queued", "running"].includes(a.attempt.job.status));
+
+export const partialSaved = (saved?: Saved | null) =>
+  !!saved &&
+  (saved.partial === true || saved.results.length < saved.moves.length + 1);

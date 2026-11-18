@@ -1,3 +1,4 @@
+import { partialSaved } from "../analysis/types";
 import { useRef, useState, type ComponentRef } from "react";
 import {
   KeyboardAvoidingView,
@@ -96,7 +97,8 @@ export function CoachSheet({
         ? "lock"
         : analysis?.attempt || !saved
           ? "need"
-          : saved.mode !== "precise" ||
+          : partialSaved(saved) ||
+              saved.mode !== "precise" ||
               !saved.coachProof ||
               r?.error?.includes("精密解析の証明")
             ? "redo"
@@ -118,6 +120,7 @@ export function CoachSheet({
     }
     if (
       !saved ||
+      partialSaved(saved) ||
       saved.mode !== "precise" ||
       !saved.coachProof ||
       analysis?.attempt

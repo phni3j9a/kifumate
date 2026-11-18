@@ -56,7 +56,7 @@ async function run(width: number, height: number) {
     errors.push(e.message);
     console.error("ページエラー:", e.message);
   });
-  const fake = await fakeAnalysis(a);
+  const fake = await fakeAnalysis(a, { onboarding: true });
   fake.paid = false;
   fake.remaining = 10;
   await m.goto(MOCK);
@@ -70,7 +70,9 @@ async function run(width: number, height: number) {
   await m.waitForTimeout(1300);
   // モックの説明欄を消して、画面を左上にぴったり置く（半端な位置だと線がにじみ、差に出る）
   await m.addStyleTag({ content: ".pg-head,.notes{display:none!important}" });
-  await a.getByText("まだ棋譜がありません").waitFor({ timeout: 120000 });
+  await a.getByText("kifumateへ ようこそ").waitFor({ timeout: 120000 });
+  await a.getByRole("button", { name: "スキップ", exact: true }).click();
+  await a.getByText("まだ棋譜がありません").waitFor();
   await a.evaluate(() => document.fonts.ready);
   const dir = `${OUT}/${width}x${height}`;
   for (const d of [dir, `${dir}/mock`, `${dir}/app`])
@@ -705,8 +707,9 @@ async function run(width: number, height: number) {
   });
   // quotaの更新を明示的に待つ（画面の再読み込みでも永続outboxから復帰する）。
   await a.goto(APP + "/settings");
-  await pause(700);
+  await a.getByText("有料プラン", { exact: true }).waitFor();
   await a.goto(gameUrl);
+  await tap("精密解析");
   // 期限切れの応答不明は新しい解析を始めず、モックの共通ask部品と確認画面を比べる。
   fake.loseCreateResponse = true;
   await tap("解析する");
@@ -726,7 +729,10 @@ async function run(width: number, height: number) {
   await tap("依頼を確認");
   await tap("もう一度解析する");
   fake.complete = true;
-  await pause(5500);
+  await a
+    .getByRole("button", { name: "中止", exact: true })
+    .waitFor({ state: "hidden" });
+  await a.getByRole("button", { name: "3位", exact: true }).waitFor();
   await m.evaluate(() => {
     (window as any).__compare("CUR.an='pre'; CUR.err=false; renderGame();");
   });
@@ -964,6 +970,67 @@ async function run(width: number, height: number) {
   await act("tagedit", "s:cs");
   await tap("先手の囲いを修正");
   await shot("stats-edit-castle");
+  await closeSheet();
+  await tap("閉じる");
+  // 初回の7場面。製品に検証入口を設けず、検証用DBを空にして通常の初回起動へ。
+  await a.evaluate(async () => {
+    const require = (globalThis as any).__r;
+    const entry = [...require.getModules().entries()].find(
+      ([, m]: any) =>
+        m.verboseName === "node_modules/expo-sqlite/build/index.js",
+    ) as any;
+    const db = await require(entry[0]).openDatabaseAsync("kifumate.db");
+    await db.execAsync(
+      "DELETE FROM games;DELETE FROM aliases;DELETE FROM settings;DELETE FROM coach_meta;DELETE FROM analysis_meta;",
+    );
+  });
+  await a.goto(APP);
+  await a.getByText("kifumateへ ようこそ").waitFor();
+  await ctl('.jump [data-jump="onb"]');
+  for (let i = 0; i < 7; i++) {
+    await shot(`onboarding-${i + 1}`);
+    if (i < 6) {
+      await act("onbnext");
+      await tap(i === 0 ? "はじめる" : "次へ");
+    }
+  }
+  await act("onbalt");
+  await tap("あとで");
+  await act("sample");
+  await tap("見本の対局で試してみる");
+  await act("step", "first");
+  await tap("最初へ");
+  await shot("sample-game"); // モックの合成値ではなく、実探索の同梱値を表示する差を残す。
+  await act("back");
+  await tap("戻る");
+  await shot("sample-list");
+  await act("tab", "set");
+  await tab("設定");
+  await act("nav", "backup");
+  await a.getByText("バックアップと復元", { exact: true }).click();
+  await shot("backup");
+  await tap("書き出す");
+  const downloading = a.waitForEvent("download");
+  await tap("ファイルに保存");
+  const download = await downloading,
+    backupPath = path.resolve(`.local/backup-compare-${width}.kifumate`);
+  await download.saveAs(backupPath);
+  const chooser = a.waitForEvent("filechooser");
+  await tap("ファイルを選ぶ");
+  await (await chooser).setFiles(backupPath);
+  await a.getByText("バックアップの内容", { exact: true }).waitFor();
+  await m.evaluate(() =>
+    (window as any).__compare(
+      "openSheet('バックアップの内容', '<div style=\"text-align:center\">'+pic('sys-backup','empi')+'</div><b>バックアップの内容</b><p class=\"hint\">棋譜 1局・重複 1局。復元する方法を選んでください。</p><button class=\"bt pri wide\">既存データと統合する</button><button class=\"bt wide\" style=\"margin-top:10px\">すべて置きかえる</button>', {auto:true})",
+    ),
+  );
+  await shot("backup-restore-choice");
+  await closeSheet();
+  await act("bkin");
+  await tap("すべて置きかえる");
+  await shot("backup-restore-confirm");
+  await act("dlgno");
+  await tap("やめる");
   await browser.close();
   console.log(`${width}x${height}: ${n}場面 → ${dir}`);
   if (errors.length)

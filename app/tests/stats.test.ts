@@ -230,7 +230,7 @@ test("v3から移行して既存棋譜を逐次分類、再実行とCASCADE", as
       false,
     );
     sql.exec(
-      "DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
+      "ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
     );
     await migrate(db);
     await migrate(db);
@@ -306,7 +306,7 @@ test("v4移行の失敗はv3の棋譜・解析・版を保持してロールバ�
       false,
     );
     sql.exec(
-      "DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
+      "ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches; DROP TABLE coach_meta; DROP TABLE classifications; PRAGMA user_version=3",
     );
     const original = db.execAsync.bind(db);
     db.execAsync = async (query) => {
@@ -449,4 +449,16 @@ test("集計行の条件と元の条件のANDで、自分/相手の戦法・囲�
       }
     }
   }
+});
+
+test("先後を手動変更した見本も自分以外に表示し、勝敗や集計へ混ぜない", () => {
+  const sample = {
+    ...game("sample", "black", "win"),
+    is_sample: 1,
+    side_manual: 1,
+  };
+  assert.equal(matchesGame(sample, { scope: "self" }), false);
+  assert.equal(matchesGame(sample, { scope: "other" }), true);
+  assert.equal(matchesGame(sample, { result: "win" }), false);
+  assert.equal(tally([sample]).n, 0);
 });

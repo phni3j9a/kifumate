@@ -12,7 +12,26 @@ import type {
   Quota,
   Reply,
 } from "../../src/analysis/types";
-export async function fakeAnalysis(page: Page) {
+export async function fakeAnalysis(page: Page, { onboarding = false } = {}) {
+  if (!onboarding) {
+    await page.addInitScript(() => {
+      (globalThis as any).__testEntry = location.pathname + location.search;
+    });
+    await page.addLocatorHandler(
+      page.getByText("kifumateへ ようこそ", { exact: true }),
+      async () => {
+        const entry = await page.evaluate(
+          () => (globalThis as any).__testEntry as string,
+        );
+        await page
+          .getByRole("button", { name: "スキップ", exact: true })
+          .click();
+        await page.getByText("まだ棋譜がありません").waitFor();
+        if (entry && entry !== "/" && entry !== "/onboarding")
+          await page.goto(entry);
+      },
+    );
+  }
   const state = {
     errors: [] as string[],
     online: true,

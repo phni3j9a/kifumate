@@ -25,6 +25,12 @@ export function loadWithMocks<T>(
     {
       exports,
       Error,
+      TextEncoder,
+      TextDecoder,
+      ReadableStream,
+      setTimeout,
+      clearTimeout,
+      URL,
       require: (id: string) => (id in mocks ? mocks[id] : nativeRequire(id)),
     },
     { filename: path },

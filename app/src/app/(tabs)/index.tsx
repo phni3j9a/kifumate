@@ -1,3 +1,5 @@
+import { randomUUID } from "expo-crypto";
+import { addSampleGame } from "../../storage/sample";
 import {
   GameTags,
   TagFilterGroups,
@@ -47,7 +49,7 @@ import {
 } from "../../components/ui";
 import { dateParts, dateShort } from "../../core/format";
 import { useAnalysis } from "../../analysis/provider";
-import { needsRetryConfirmation } from "../../analysis/types";
+import { needsRetryConfirmation, partialSaved } from "../../analysis/types";
 import { cp } from "../../analysis/display";
 import Svg, { Path } from "react-native-svg";
 import {
@@ -127,7 +129,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
   }>();
   const { revision } = useClassifications();
   const db = useSQLiteContext();
-  const { records, offline, quota } = useAnalysis();
+  const { records, offline, quota, controller } = useAnalysis();
   const [games, setGames] = useState<Game[] | null>(null),
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
@@ -203,7 +205,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         <EmptyState
           image="sys-empty"
           title="まだ棋譜がありません"
-          detail="指した将棋のKIFを取り込むと、ここに並びます。盤に並べて、振り返りを始めましょう。"
+          detail="指した将棋のKIFを取り込むと、ここに並びます。解析して、振り返りを始めましょう。"
         >
           <Button
             kind="pri"
@@ -213,6 +215,18 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
           >
             棋譜を取り込む
           </Button>
+          <TextButton
+            onPress={() => {
+              void addSampleGame(db, randomUUID)
+                .then(async (id) => {
+                  await controller.init();
+                  router.push(`/game/${id}`);
+                })
+                .catch(() => toast("見本の対局を開けませんでした"));
+            }}
+          >
+            見本の対局で試してみる
+          </TextButton>
           <View style={{ marginTop: 2 }}>
             <KifHelpLink />
           </View>
@@ -237,11 +251,16 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         .includes(q)
     )
       return false;
-    if (quick === "none" && records[g.id]?.saved) return false;
+    if (
+      quick === "none" &&
+      records[g.id]?.saved &&
+      !partialSaved(records[g.id]?.saved)
+    )
+      return false;
     if (quick === "favorite" && !g.favorite) return false;
     if (
       (quick === "win" || quick === "loss") &&
-      !(g.self_side && g.result === quick)
+      !(g.self_side && !g.is_sample && g.result === quick)
     )
       return false;
     if (!matchesGame(g, filter, today)) return false;
@@ -265,11 +284,8 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
     ),
     query.trim() && `「${query.trim()}」`,
   ].filter(Boolean);
-  const own = visible.filter((g) => g.self_side);
-  const count = (r: Game["result"]) => own.filter((g) => g.result === r).length;
-  const tally = own.length
-    ? `（${count("win")}勝${count("loss")}敗${count("draw") ? `${count("draw")}分` : ""}）`
-    : "";
+  const total = tallyStats(visible);
+  const tally = total.n ? `（${winLoss(total)}）` : "";
   return (
     <Screen>
       {drilldown ? (
@@ -466,9 +482,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                             : `${g.black} 対 ${g.white}`}
                       </Text>
                       <Text style={font(700, 11, 1, colors.ink2)}>
-                        {g.self_side
-                          ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
-                          : "自分以外の対局"}
+                        {g.is_sample
+                          ? "サンプル"
+                          : g.self_side
+                            ? `あなたは${g.self_side === "black" ? "☗先手" : "☖後手"}`
+                            : "自分以外の対局"}
                       </Text>
                     </View>
                     <View style={s.tg}>
@@ -476,9 +494,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                     </View>
                     <Text style={font(500, 11, 1.2, colors.ink2)}>
                       {dateShort(g.played_at)}・{g.plies}手
-                      {records[g.id]?.saved?.mode === "precise"
-                        ? "　精密解析"
-                        : ""}
+                      {partialSaved(records[g.id]?.saved)
+                        ? "　途中まで解析"
+                        : records[g.id]?.saved?.mode === "precise"
+                          ? "　精密解析"
+                          : ""}
                     </Text>
                   </View>
                   <View style={s.gx}>
@@ -505,9 +525,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                     ) : records[g.id]?.saved ? (
                       <View
                         accessibilityLabel={
-                          records[g.id]!.saved!.mode === "precise"
-                            ? "精密解析済み"
-                            : "解析済み"
+                          partialSaved(records[g.id]?.saved)
+                            ? "途中まで解析"
+                            : records[g.id]!.saved!.mode === "precise"
+                              ? "精密解析済み"
+                              : "解析済み"
                         }
                       >
                         <Svg width={62} height={28}>

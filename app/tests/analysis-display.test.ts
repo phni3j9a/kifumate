@@ -121,3 +121,25 @@ test("悪手は指した側の勝率低下で判定し、初めて開くと自�
   assert.equal(startPly(noSelf), 33);
   assert.equal(startPly(pointsFor(r, [], Color.BLACK)), 0);
 });
+
+test("復元した途中結果は解析済み扱いにせず、結果のない局面は未解析と分かる", async () => {
+  const { partialSaved } = await import("../src/analysis/types");
+  const saved = {
+    initial: "startpos",
+    moves: ["7g7f"],
+    mode: "precise" as const,
+    results: [result(0, 0)],
+    coachProof: null,
+    jobId: "",
+    partial: true,
+  };
+  assert.equal(partialSaved(saved), true);
+  assert.equal(
+    partialSaved({
+      ...saved,
+      partial: undefined,
+      results: [result(0, 0), result(1, 0)],
+    }),
+    false,
+  );
+});

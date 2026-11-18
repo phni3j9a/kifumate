@@ -438,7 +438,9 @@ test("プロフィールとスタイル保存は順番を守り、無料・オ�
 });
 test("v4→v5移行は棋譜を保持し、再実行・CASCADE・プロフィールを確認", async () => {
   const s = await setup();
-  s.sql.exec("DROP TABLE coaches;DROP TABLE coach_meta;PRAGMA user_version=4");
+  s.sql.exec(
+    "ALTER TABLE games DROP COLUMN is_sample; DROP TABLE settings; DROP TABLE coaches;DROP TABLE coach_meta;PRAGMA user_version=4",
+  );
   await migrate(s.db);
   await migrate(s.db);
   assert.equal(
@@ -576,3 +578,20 @@ for (const method of ["createCoach", "getCoach"] as const) {
     s.sql.close();
   });
 }
+
+test("プロフィール保存失敗は呼出元へ通知し、回復後のバックアップ待機を妨げない", async () => {
+  const { c, storage, sql } = await setup();
+  try {
+    storage.saveProfile = async () => {
+      throw Error("容量不足");
+    };
+    await assert.rejects(
+      c.setProfile({ ...defaultProfile, goal: "失敗" }),
+      /容量不足/,
+    );
+    assert.equal(c.snapshot.profile.goal, "");
+    await assert.doesNotReject(c.idle());
+  } finally {
+    sql.close();
+  }
+});

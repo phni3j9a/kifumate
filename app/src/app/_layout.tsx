@@ -1,7 +1,12 @@
 import { Suspense, useEffect } from "react";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
-import { Stack, type ErrorBoundaryProps } from "expo-router";
+import {
+  Stack,
+  router,
+  usePathname,
+  type ErrorBoundaryProps,
+} from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -14,6 +19,7 @@ import { Button, Problem, Screen } from "../components/ui";
 import { AnalysisProvider } from "../analysis/provider";
 import { ClassificationsProvider } from "../components/classifications-provider";
 import { migrate } from "../storage/schema";
+import { DataProvider, useAppData } from "../components/data-provider";
 void SplashScreen.preventAutoHideAsync();
 export const unstable_settings = { anchor: "(tabs)" };
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
@@ -49,26 +55,58 @@ export default function Layout() {
         }
       >
         <SQLiteProvider databaseName="kifumate.db" onInit={migrate} useSuspense>
-          <ClassificationsProvider>
-            <AnalysisProvider>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: colors.bg },
-                }}
-              >
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen
-                  name="import"
-                  options={{ animation: "slide_from_bottom" }}
-                />
-              </Stack>
-            </AnalysisProvider>
-          </ClassificationsProvider>
+          <DataProvider>
+            <DataRoutes />
+          </DataProvider>
         </SQLiteProvider>
       </Suspense>
       <ToastHost />
       <DialogHost />
     </SafeAreaProvider>
+  );
+}
+function DataRoutes() {
+  const { completed } = useAppData();
+  const path = usePathname();
+  useEffect(() => {
+    if (!completed && path !== "/onboarding" && path !== "/backup")
+      router.replace("/onboarding");
+  }, [completed, path]);
+  return (
+    <ClassificationsProvider>
+      <AnalysisProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bg },
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          {[
+            "about",
+            "legal",
+            "licenses",
+            "names",
+            "profile",
+            "info",
+            "invitation",
+            "plan",
+            "records",
+            "game/[id]",
+          ].map((name) => (
+            <Stack.Screen key={name} name={name} />
+          ))}
+          <Stack.Screen
+            name="import"
+            options={{ animation: "slide_from_bottom" }}
+          />
+          <Stack.Screen
+            name="onboarding"
+            options={{ gestureEnabled: false, animation: "none" }}
+          />
+          <Stack.Screen name="backup" />
+        </Stack>
+      </AnalysisProvider>
+    </ClassificationsProvider>
   );
 }

@@ -7,6 +7,7 @@ import { useAnalysis } from "../analysis/provider";
 import { cp, percent, type CandidateRow } from "../analysis/display";
 import {
   needsRetryConfirmation,
+  partialSaved,
   type Analysis,
   type Mode,
   type Score,
@@ -76,6 +77,7 @@ export function AnalysisPanel({
   u,
   start,
   ending,
+  received = true,
   realtime,
   retryRealtime,
   toggleRealtime,
@@ -92,6 +94,7 @@ export function AnalysisPanel({
   u: number;
   start: (mode: Mode) => void;
   ending?: string;
+  received?: boolean;
   realtime?: RealtimeState;
   retryRealtime?: () => void;
   toggleRealtime?: () => void;
@@ -275,6 +278,14 @@ export function AnalysisPanel({
         }
       >
         中止
+      </Button>
+    );
+  } else if (partialSaved(saved) && !received) {
+    title = "この局面は未解析です";
+    sub = "途中までの結果だけを復元しています";
+    action = (
+      <Button size="sm" onPress={() => start(saved!.mode)}>
+        解析し直す
       </Button>
     );
   } else if (saved && row) {

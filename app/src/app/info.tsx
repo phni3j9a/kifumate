@@ -27,7 +27,7 @@ import {
 } from "../core/kif";
 import { setSelfSide, setWinner } from "../storage/repository";
 
-import { needsRetryConfirmation } from "../analysis/types";
+import { needsRetryConfirmation, partialSaved } from "../analysis/types";
 import { useAnalysis } from "../analysis/provider";
 export default function Info() {
   const { records, offline } = useAnalysis();
@@ -94,11 +94,13 @@ export default function Info() {
                     : records[id]?.attempt?.job?.status === "queued"
                       ? "解析待ち"
                       : "解析中"
-                : records[id]?.saved?.mode === "precise"
-                  ? "精密解析ずみ"
-                  : records[id]?.saved
-                    ? "解析ずみ"
-                    : "まだ解析していません",
+                : partialSaved(records[id]?.saved)
+                  ? "途中まで解析"
+                  : records[id]?.saved?.mode === "precise"
+                    ? "精密解析ずみ"
+                    : records[id]?.saved
+                      ? "解析ずみ"
+                      : "まだ解析していません",
             ],
           ].map(([label, value]) => (
             <View key={label} style={{ flexDirection: "row", gap: 12 }}>

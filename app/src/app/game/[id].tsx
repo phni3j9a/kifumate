@@ -493,7 +493,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         : analysis.attempt.job?.status === "queued"
           ? "解析待ち"
           : "解析中"
-    : analysis?.saved
+    : analysis?.saved && shown
       ? "解析済み"
       : "未解析";
   const advantage = over
@@ -823,6 +823,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             setCoachOpen(true);
           }}
           analysis={analysis}
+          received={!!shown}
           branch={!!branch}
           branchRow={branchRow}
           realtime={rt}
