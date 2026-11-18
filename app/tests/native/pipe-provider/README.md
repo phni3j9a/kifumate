@@ -12,7 +12,9 @@
 
 ```sh
 adb -s emulator-5562 install -r .local/pipe-provider/provider.apk
-adb -s emulator-5562 shell am start -n 'com.quarterlambda.kifumate.pipevalidation/.PipeProvider$SetupActivity'
+adb -s emulator-5562 shell 'am start -n com.quarterlambda.kifumate.pipevalidation/.PipeProvider\$SetupActivity'
 ```
 
 ログは `adb -s emulator-5562 logcat -d -s KifumatePipe:I '*:S'`。START/ENDのミリ秒時刻と、JSの読み終わり時刻でコピー/読み込み時間を確認できます。検証後はこのパッケージを削除し、エミュレータを停止します。
+
+Fabricの連続イベントで通常のuiautomatorがidleを待てない場合は、検証専用の `.PipeProvider\$Dump` Instrumentationで現在のアクセシビリティ階層を取得できます（パイプ転送中には起動しないこと）。
