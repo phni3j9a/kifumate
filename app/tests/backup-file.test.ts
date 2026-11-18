@@ -89,6 +89,7 @@ test("iOSの共有シート終了は保存成功と区別する", async () => {
 test("非シークURIはコピーしてから読み込み、取消・検証失敗も含め一時ファイルを回収する", async () => {
   const deleted: string[] = [],
     copied: string[] = [];
+  let malformed = false;
   class LocalFile {
     uri = "file:///cache/import.kifumate";
     size = 12;
@@ -98,7 +99,11 @@ test("非シークURIはコピーしてから読み込み、取消・検証失�
     readableStream() {
       return new ReadableStream({
         start(c) {
-          c.enqueue(new TextEncoder().encode("first\nlast\n"));
+          c.enqueue(
+            malformed
+              ? new Uint8Array([0xff])
+              : new TextEncoder().encode("first\nlast\n"),
+          );
           c.close();
         },
       });
@@ -128,6 +133,16 @@ test("非シークURIはコピーしてから読み込み、取消・検証失�
   assert.deepEqual(values, ["first", "last"]);
   assert.equal(copied.length, 1);
   assert.equal(deleted.length, 1);
+  for await (const line of (await api.pickBackup())!) {
+    assert.equal(line, "first");
+    break;
+  }
+  assert.equal(deleted.length, 2);
+  malformed = true;
+  await assert.rejects(async () => {
+    for await (const line of (await api.pickBackup())!) assert.fail(line);
+  }, /encoded|utf-8/i);
+  assert.equal(deleted.length, 3);
 });
 
 test("取消した出力はすぐ削除し、共有先の読み取り中は保持して期限後に回収する", async () => {

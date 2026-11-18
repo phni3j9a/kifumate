@@ -135,6 +135,8 @@ test("見本の対局→ファイル保存→空の別端末へ復元、統合�
     await expect(b(target, "矢倉")).toHaveAttribute("aria-selected", "true");
     await b(target, "戻る").click();
     await target.getByRole("tab", { name: "棋譜" }).click();
+    await expect(target).toHaveURL(/\/$/);
+    await expect(target.getByText("サンプル", { exact: true })).toBeVisible();
     await target.reload();
     await expect(target.getByText("サンプル", { exact: true })).toBeVisible();
     await target.getByRole("tab", { name: "設定" }).click();
