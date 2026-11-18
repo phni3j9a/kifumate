@@ -47,7 +47,7 @@ Web の本番用バンドル：`npx expo export --platform web`。配信時は S
 
 ## Androidの配布APKビルド
 
-**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-15-arm64-latest.apk`（表示版0.1.0、`versionCode=15`、arm64-v8a専用、42,202,578byte）。隣の `.sha256` で照合できます。旧版は同じフォルダーで `old` と明記しています。製品コードは `2da3fd8`、署名・上書き確認と詳細は末尾のPR #36の記録を参照してください。
+**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-17-arm64-latest.apk`（表示版0.1.0、`versionCode=17`、arm64-v8a専用、42,239,134byte）。隣の `.sha256` で照合できます。旧版は同じフォルダーで `old` と明記しています。ビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
 
 EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）です。ビルドとAndroid署名鍵をEASで管理します。表示名はモックと同じ **kifumate**、表示用の版は **0.1.0**。`android/`・`ios/`は生成物でコミットしません。
 
@@ -122,7 +122,7 @@ EAS上の鍵とバックアップを両方失うと、配布済みアプリを�
 
 ### #33 の配布確認（2026-11-17）
 
-- 初回の配布確認に使った版5は **旧版**として `~/kifumate-releases/kifumate-0.1.0-5-old-universal.apk` へ改名しました（112.84MB／107.61MiB、表示版0.1.0／`versionCode=5`、4ABI）。版6を経て、現在の配布の正本は下記の版16です。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
+- 初回の配布確認に使った版5は **旧版**として `~/kifumate-releases/kifumate-0.1.0-5-old-universal.apk` へ改名しました（112.84MB／107.61MiB、表示版0.1.0／`versionCode=5`、4ABI）。以降の配布版は「Androidの配布APKビルド」冒頭を参照してください。検証専用の版4は `~/.cache/kifumate/build-validation/` に隔離しています。
 - 今回は**クラウド無料枠の待ち時間のためEASローカルビルドで代用**しました。クラウド1件（番号2）は約39分未開始で取消済み。ローカルは3回：番号3はJava21がJREのみだったため約4分51秒で失敗、JDK17へ直した番号4は18分44秒、配布用番号5は15分18秒で成功。番号の欠番はそのまま残し、EAS管理の同じ署名鍵と連番を使っています。クラウドのコンパイル完了は未確認です。
 - Pixel 3 `8AFX0S69E`／Android 11：版4の起動・KIF取り込み（通常入力欄へ検証用UiAutomatorで日本語を入力）・保存・再起動・再生・合法分岐・本番ふつう解析1局を確認。期限1時間／1端末の招待を入力し、精密解析1局（どちらも1手・2局面）、分岐中の解析1セッション、AIコーチ解説1回（総合・かんたん、追加質問なし）が成功しました。
 - 招待を取消し、コード原文と取消メタデータを削除。無料への復帰と、保存した精密候補・解説の閲覧を確認。15:57 UTCに本番の全3 Container・全slotがinactive、`active=0 / assigned=0`を確認。secret・serverソースは変更せず、`wrangler tail`も使用していません。
@@ -184,6 +184,8 @@ EAS上の鍵とバックアップを両方失うと、配布済みアプリを�
 これ以外の実行依存は Expo の標準機能・Router とその必須パッケージ・アイコンです。別の状態管理・DBラッパー・UIキットは追加していません。マスコットはこのリポジトリの `mock/assets/mascot/` から使用分のみ取り込んでいます。
 
 ## 検証
+
+npm監査の結果とAPKでの到達性は[依存ライブラリの脆弱性精査](docs/dependency-audit.md)を参照してください。
 
 ```sh
 npm run check    # 単体テスト・禁止名称検査・型検査・lint
@@ -494,6 +496,6 @@ P1の2件・P2の8件と、登録名の順序（P3）を、先に再現テスト
 SDKの制約：コピー途中には256MiB上限を指定できません。形式の絞り込みで動画などの誤選択を緩和しますが、巨大なバイナリ等のキャッシュ消費は防げません。Androidの固定版SDKはクラウド等のコピーもUIスレッドで同期実行します。通常サイズのローカル/模擬提供元ではコピー自体は短時間（前回4MiB約0.1秒・16MiB約0.3秒）でしたが、クラウドが遅延すれば入力停止やANRの可能性が残ります。Expo Goの共有キャッシュを読めない経路も未対応です。Expo Goは開発用であり、配布APKにはこの読取範囲問題はありません。
 
 
-最終確認：`npm run check` **205件・禁止名称・型・lint**、Web E2E **78件（360/393/430px）**が通過。今回の見た目比較と追加ベンチマークは省略しました（前回の比較は96場面×2幅）。現在の正本は **版16**：`~/kifumate-releases/kifumate-0.1.0-16-arm64-latest.apk`（42,203,042byte、表示版0.1.0、本番ID、arm64のみ、同じ署名、配布バンドルの禁止名称なし）。SHA256：`8457d27f6074f7871b9f8667c62f17437973c8eb5571bae4b299ce28257d9cfa`。隣の `.sha256` で照合済み、版15は `old` に改名しました。
+最終確認：`npm run check` **205件・禁止名称・型・lint**、Web E2E **78件（360/393/430px）**が通過。今回の見た目比較と追加ベンチマークは省略しました（前回の比較は96場面×2幅）。この時の配布版（現在は旧版）は **版16**：`~/kifumate-releases/kifumate-0.1.0-16-old-before-audit.apk`（42,203,042byte、表示版0.1.0、本番ID、arm64のみ、同じ署名、配布バンドルの禁止名称なし）。SHA256：`8457d27f6074f7871b9f8667c62f17437973c8eb5571bae4b299ce28257d9cfa`。隣の `.sha256` で照合済み、版15は `old` に改名しました。
 
 PiMateが実機を使用していないことを確認し、通信を止めてPixel 3を**版15→16へ1回だけ上書き・起動確認**しました。初回インストール日時・既存1局・お気に入り・精密解析を保持。実機で復元/削除/見本追加はせず、アプリ停止・通信ON/ONへ復帰済みです。今回のビルドも1回のみで、自分のMetro・専用エミュレータ・ビルドは終了、テストProviderは削除済みです。往復ファイルは `.local/finalreview-emulator-backups/`、ログは `.local/issue35-finalreview-*`、画像は `.local/screenshots/android/issue35-finalreview-*`（gitignore）です。

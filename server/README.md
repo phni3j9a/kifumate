@@ -312,6 +312,8 @@ LLMへ送る根拠は`container/coach_facts.py`で決定的に作る日本語だ
 
 ## ローカル開発
 
+npm・解析コンテナのPython依存の監査結果は[依存ライブラリの脆弱性精査](docs/dependency-audit.md)を参照してください。
+
 必要：Node.js 22以降、Python 3.12、Docker（linux/amd64）。ホストへのsudo操作は不要です。Dockerfileのapt操作はビルドコンテナ内だけです。
 
 ```sh
@@ -421,7 +423,7 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 
 DNS読み取り権限のある経路（Cloudflare Dashboard → `quarterlambda.com` → DNS → Records、DNS readを持つAPIトークン、またはMCP）でDNS一覧を開き、`kifumate-api.quarterlambda.com`を検索します。別用途のA・AAAA・CNAME等がないことを確認し、Workers & Pages → `kifumate-analysis-production` → Settings → Domains & Routesでも、このホストが同WorkerのCustom Domainであることを確認してください。初回は未登録、通常更新では既存の本番Workerへの関連付けだけを許可します。競合・別Workerへの関連付け・確認できない状態ならデプロイせず停止します。Wranglerの現在のOAuth権限ではDNS一覧APIは403になるため、これだけで確認済みとは扱いません。既存の同WorkerへのCustom Domainの紐付けとWranglerの変更内容（`domains/changeset`の競合・追加・削除）も補助として照合しますが、DNS一覧の確認の代わりにはしません。確認のために認証権限を勝手に変更しないでください。
 
-**非TTY（エージェント・CI・出力のリダイレクトを含む）では、Wrangler 4.163.0はCustom Domainの`override_existing_origin`と`override_existing_dns_record`を自動的に有効にし、既存DNSの置換を確認しません。** 対話確認に頼らず、必ず上記の一覧を事前確認してください。これは追加オプションを指定しなくても起きる挙動です（[公式Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、インストール済みWranglerの`publishCustomDomains`実装で確認）。
+**非TTY（エージェント・CI・出力のリダイレクトを含む）では、Wrangler 4.164.0はCustom Domainの`override_existing_origin`と`override_existing_dns_record`を自動的に有効にし、既存DNSの置換を確認しません。** 対話確認に頼らず、必ず上記の一覧を事前確認してください。これは追加オプションを指定しなくても起きる挙動です（[公式Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、インストール済みWranglerの`publishCustomDomains`実装で確認）。
 
 ### 初回登録の前提確認
 
