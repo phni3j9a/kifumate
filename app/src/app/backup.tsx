@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -58,6 +58,7 @@ export default function Backup() {
     [error, setError] = useState(""),
     [preview, setPreview] = useState<BackupPreview | null>(null),
     [output, setOutput] = useState<BackupFile | null>(null);
+  const delivering = useRef(false);
   const allowNavigation = usePreventRemove(!!busy);
   useEffect(() => {
     clearExpiredBackups();
@@ -118,7 +119,8 @@ export default function Backup() {
     }
   }
   async function deliver(save: boolean) {
-    if (!output) return;
+    if (!output || delivering.current) return;
+    delivering.current = true;
     try {
       const confirmed = await (save ? saveBackup(output) : shareBackup(output));
       if (!confirmed) {
@@ -139,6 +141,8 @@ export default function Backup() {
     } catch (e) {
       setOutput(null);
       fail(e);
+    } finally {
+      delivering.current = false;
     }
   }
   async function pick() {

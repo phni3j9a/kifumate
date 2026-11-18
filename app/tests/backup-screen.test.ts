@@ -11,6 +11,8 @@ function elements(e: any): any[] {
 }
 function screen() {
   let index = 0;
+  const ref = { current: false },
+    deliveries: string[] = [];
   const state: any[] = [],
     dialogs: any[] = [],
     writes: string[] = [],
@@ -30,6 +32,7 @@ function screen() {
           ];
         },
         useEffect: () => {},
+        useRef: () => ref,
       },
       "react-native": {
         Platform: { OS: "ios" },
@@ -86,8 +89,14 @@ function screen() {
       "../storage/backup-file": {
         clearExpiredBackups: () => {},
         discardBackup: () => {},
-        shareBackup: async () => false,
-        saveBackup: async () => false,
+        shareBackup: async () => {
+          deliveries.push("share");
+          return false;
+        },
+        saveBackup: async () => {
+          deliveries.push("save");
+          return false;
+        },
       },
       "../storage/maintenance": {
         dataPaused: false,
@@ -108,7 +117,7 @@ function screen() {
     assert(node, name);
     node.props.onPress();
   }
-  return { state, dialogs, writes, routes, press };
+  return { state, dialogs, writes, routes, press, deliveries };
 }
 test("初回復元の成功は紹介を含む履歴全体を一覧へ置き換える", async () => {
   const h = screen();
@@ -130,4 +139,13 @@ test("共有を閉じただけでは最終バックアップ日時を更新し�
     assert.deepEqual(h.writes, []);
     assert.equal(h.state[1], "");
   }
+});
+
+test("保存・共有の連打は1回だけ実行し、進行中の一時ファイルを閉じない", async () => {
+  const h = screen();
+  h.state[6] = { filename: "backup", file: { uri: "file:///cache" } };
+  h.press("共有する");
+  h.press("ファイルに保存");
+  await setImmediate();
+  assert.deepEqual(h.deliveries, ["share"]);
 });
