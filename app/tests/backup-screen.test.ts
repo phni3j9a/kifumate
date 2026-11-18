@@ -87,6 +87,7 @@ function screen() {
         restoreBackup: async () => ({ added: 1, skipped: 0 }),
       },
       "../storage/backup-file": {
+        pickBackup: () => new Promise(() => {}),
         clearExpiredBackups: () => {},
         discardBackup: () => {},
         shareBackup: async () => {
@@ -148,4 +149,11 @@ test("保存・共有の連打は1回だけ実行し、進行中の一時ファ�
   h.press("ファイルに保存");
   await setImmediate();
   assert.deepEqual(h.deliveries, ["share"]);
+});
+
+test("OS選択とキャッシュ読み込みの待機中にも進行表示を出す", async () => {
+  const h = screen();
+  h.press("ファイルを選ぶ");
+  assert.match(h.state[2], /読み込/);
+  await setImmediate();
 });

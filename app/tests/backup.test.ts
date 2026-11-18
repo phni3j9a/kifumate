@@ -537,7 +537,7 @@ test("統合後の名前で既存・追加の自動先後を再照合し、手�
   try {
     await seed(source.db);
     await source.db.runAsync(
-      "UPDATE games SET side_manual=0, self_side='white'",
+      "UPDATE games SET side_manual=0, result_manual=0, self_side='white'",
     );
     await source.db.runAsync("DELETE FROM aliases");
     const game = source.sql.prepare("SELECT black,white FROM games").get()!;
@@ -601,6 +601,65 @@ test("同時刻の登録名はUUID順ではなく挿入順で書き出す", asyn
       "先の名前",
       "後の名前",
     ]);
+  } finally {
+    sql.close();
+  }
+});
+
+test("統合して名前を再照合しても、旧版の先後不明・手動引き分けを保持する", async () => {
+  const { db, sql } = await database();
+  try {
+    await seed(db);
+    await db.runAsync(
+      "UPDATE games SET self_side=NULL,side_manual=0,result='draw',result_manual=1,winner=NULL",
+    );
+    const p = await prepare(db, await text(db));
+    await restoreBackup(db, p, "merge", randomUUID);
+    const game = sql
+      .prepare("SELECT result,result_manual,winner FROM games")
+      .get()!;
+    assert.equal(game.result, "draw");
+    assert.equal(game.result_manual, 1);
+    assert.equal(game.winner, null);
+  } finally {
+    sql.close();
+  }
+});
+
+test("完了結果は保持し、途中結果同士の再解析では多く受信したほうを書き出す", async () => {
+  const { db, sql } = await database();
+  try {
+    const id = await seed(db);
+    const full = JSON.parse(
+      (await db.getFirstAsync<{ document: string }>(
+        "SELECT document FROM analyses WHERE game_id=?",
+        id,
+      ))!.document,
+    );
+    for (const [oldCount, freshCount, expected] of [
+      [3, 20, 20],
+      [20, 3, 20],
+      [86, 20, 86],
+    ] as const) {
+      const a = structuredClone(full);
+      a.saved.results = full.saved.results.slice(0, oldCount);
+      a.saved.partial = oldCount < 86;
+      a.attempt = {
+        ...full.saved,
+        results: full.saved.results.slice(0, freshCount),
+        job: null,
+        cancel: false,
+      };
+      await db.runAsync(
+        "UPDATE analyses SET document=? WHERE game_id=?",
+        JSON.stringify(a),
+        id,
+      );
+      const exported = JSON.parse((await text(db)).split("\n")[2]!).analysis;
+      assert.equal(exported.saved.results.length, expected);
+      assert.equal(exported.attempt, null);
+      if (expected < 86) assert.equal(exported.saved.partial, true);
+    }
   } finally {
     sql.close();
   }

@@ -42,6 +42,7 @@ import {
   shareBackup,
   writeBackupFile,
   type BackupFile,
+  type BackupInput,
 } from "../storage/backup-file";
 import { dataPaused, pauseData, resumeData } from "../storage/maintenance";
 export default function Backup() {
@@ -147,16 +148,22 @@ export default function Backup() {
   }
   async function pick() {
     if (busy) return;
+    let lines: BackupInput | null = null;
+    setBusy("バックアップファイルを読み込んでいます");
+    setProgress(0);
     try {
       setError("");
-      const lines = await pickBackup();
+      lines = await pickBackup();
       if (!lines) return;
       const p = await exclusive("バックアップの中身を確かめています", () =>
-        prepareBackup(db, lines, setProgress),
+        prepareBackup(db, lines!, setProgress),
       );
       if (p) setPreview(p);
     } catch (e) {
       fail(e);
+    } finally {
+      lines?.dispose();
+      setBusy("");
     }
   }
   useEffect(() => {

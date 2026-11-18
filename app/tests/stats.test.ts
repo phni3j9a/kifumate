@@ -450,3 +450,15 @@ test("集計行の条件と元の条件のANDで、自分/相手の戦法・囲�
     }
   }
 });
+
+test("先後を手動変更した見本も自分以外に表示し、勝敗や集計へ混ぜない", () => {
+  const sample = {
+    ...game("sample", "black", "win"),
+    is_sample: 1,
+    side_manual: 1,
+  };
+  assert.equal(matchesGame(sample, { scope: "self" }), false);
+  assert.equal(matchesGame(sample, { scope: "other" }), true);
+  assert.equal(matchesGame(sample, { result: "win" }), false);
+  assert.equal(tally([sample]).n, 0);
+});

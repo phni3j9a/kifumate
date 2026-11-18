@@ -260,7 +260,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
     if (quick === "favorite" && !g.favorite) return false;
     if (
       (quick === "win" || quick === "loss") &&
-      !(g.self_side && g.result === quick)
+      !(g.self_side && !g.is_sample && g.result === quick)
     )
       return false;
     if (!matchesGame(g, filter, today)) return false;
@@ -284,11 +284,8 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
     ),
     query.trim() && `「${query.trim()}」`,
   ].filter(Boolean);
-  const own = visible.filter((g) => g.self_side);
-  const count = (r: Game["result"]) => own.filter((g) => g.result === r).length;
-  const tally = own.length
-    ? `（${count("win")}勝${count("loss")}敗${count("draw") ? `${count("draw")}分` : ""}）`
-    : "";
+  const total = tallyStats(visible);
+  const tally = total.n ? `（${winLoss(total)}）` : "";
   return (
     <Screen>
       {drilldown ? (

@@ -4,39 +4,63 @@ import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { backupLimit, textLines } from "./backup";
 
-export async function pickBackup(): Promise<AsyncIterable<string> | null> {
-  if (Platform.OS === "web") {
+export type BackupInput = AsyncIterable<string> & { dispose: () => void };
+export async function pickBackup(): Promise<BackupInput | null> {
+  const previous = new Set(pickerCacheFiles().map((f) => f.uri));
+  try {
     const picked = await DocumentPicker.getDocumentAsync({
       type: "*/*",
       base64: false,
+      copyToCacheDirectory: true,
     });
     if (picked.canceled) return null;
     const asset = picked.assets[0]!;
-    if ((asset.size ?? 0) > backupLimit)
-      throw new Error("バックアップは256MB以内にしてください。");
-    return textLines(decodeChunks(asset.file!.stream()));
-  }
-  const picked = await File.pickFileAsync({ mimeTypes: ["*/*"] });
-  if (picked.canceled) return null;
-  if (picked.result.size > backupLimit)
-    throw new Error("バックアップは256MB以内にしてください。");
-  return readPickedBackup(picked.result);
-}
-async function* readPickedBackup(source: File) {
-  const local = new File(
-    Paths.cache,
-    `kifumate-import-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
-  );
-  try {
-    // DocumentsProviderのパイプはシークできない。copyは入力ストリームで転送する。
-    await source.copy(local);
-    if (local.size > backupLimit)
-      throw new Error("バックアップは256MB以内にしてください。");
-    yield* textLines(decodeChunks(local.readableStream()));
-  } finally {
+    if (Platform.OS === "web") {
+      if ((asset.size ?? 0) > backupLimit)
+        throw new Error("バックアップは256MB以内にしてください。");
+      return Object.assign(textLines(decodeChunks(asset.file!.stream())), {
+        dispose() {},
+      });
+    }
+    const file = new File(asset.uri);
+    const dispose = () => {
+      try {
+        if (file.exists) file.delete();
+      } catch {}
+    };
     try {
-      local.delete();
-    } catch {}
+      if (file.size > backupLimit)
+        throw new Error("バックアップは256MB以内にしてください。");
+      async function* lines() {
+        try {
+          yield* textLines(decodeChunks(file.readableStream()));
+        } finally {
+          dispose();
+        }
+      }
+      return Object.assign(lines(), { dispose });
+    } catch (e) {
+      dispose();
+      throw e;
+    }
+  } catch (e) {
+    // OSコピー自体が失敗してURIを受け取れなかった場合も、今回できたキャッシュだけを回収する。
+    for (const file of pickerCacheFiles())
+      if (!previous.has(file.uri))
+        try {
+          file.delete();
+        } catch {}
+    throw e;
+  }
+}
+function pickerCacheFiles(): File[] {
+  if (Platform.OS === "web") return [];
+  try {
+    return new Directory(Paths.cache, "DocumentPicker")
+      .list()
+      .filter((f): f is File => f instanceof File);
+  } catch {
+    return [];
   }
 }
 

@@ -86,63 +86,99 @@ test("iOSの共有シート終了は保存成功と区別する", async () => {
   assert.equal(await api.saveBackup(file), false);
 });
 
-test("非シークURIはコピーしてから読み込み、取消・検証失敗も含め一時ファイルを回収する", async () => {
-  const deleted: string[] = [],
-    copied: string[] = [];
-  let malformed = false;
-  class LocalFile {
-    uri = "file:///cache/import.kifumate";
-    size = 12;
-    delete() {
-      deleted.push(this.uri);
-    }
-    readableStream() {
-      return new ReadableStream({
-        start(c) {
-          c.enqueue(
-            malformed
-              ? new Uint8Array([0xff])
-              : new TextEncoder().encode("first\nlast\n"),
-          );
-          c.close();
-        },
-      });
-    }
-    static pickFileAsync = async () => ({
-      canceled: false,
-      result: {
-        size: 12,
-        readableStream: () => assert.fail("非シークURIを直接読むべきでない"),
-        copy: async (destination: LocalFile) => {
-          copied.push(destination.uri);
-        },
-      },
-    });
-  }
-  const backup = await import("../src/storage/backup");
+test("非シーク提供元は公式DocumentPickerのストリームコピーを使い、失敗・取消もキャッシュを回収する", async () => {
+  let malformed = false,
+    disposed = 0;
   const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
     "react-native": { Platform: { OS: "android" } },
-    "expo-file-system": { File: LocalFile, Paths: { cache: "cache" } },
-    "expo-document-picker": {},
+    "expo-document-picker": {
+      getDocumentAsync: async (options: any) => {
+        assert.equal(options.copyToCacheDirectory, true);
+        return {
+          canceled: false,
+          assets: [
+            { uri: "file:///cache/DocumentPicker/copied.kifumate", size: null },
+          ],
+        };
+      },
+    },
+    "expo-file-system": {
+      File: class {
+        exists = true;
+        size = 12;
+        constructor(uri: string) {
+          assert.equal(uri, "file:///cache/DocumentPicker/copied.kifumate");
+        }
+        delete() {
+          if (this.exists) {
+            this.exists = false;
+            disposed++;
+          }
+        }
+        readableStream() {
+          return new ReadableStream({
+            start(c) {
+              c.enqueue(
+                malformed
+                  ? new Uint8Array([255])
+                  : new TextEncoder().encode("first\nlast\n"),
+              );
+              c.close();
+            },
+          });
+        }
+      },
+    },
     "expo-sharing": {},
-    "./backup": backup,
+    "./backup": await import("../src/storage/backup"),
   });
-  const lines = await api.pickBackup();
-  const values: string[] = [];
-  for await (const line of lines!) values.push(line);
+  const first = await api.pickBackup();
+  const values = [];
+  for await (const line of first!) values.push(line);
   assert.deepEqual(values, ["first", "last"]);
-  assert.equal(copied.length, 1);
-  assert.equal(deleted.length, 1);
-  for await (const line of (await api.pickBackup())!) {
+  assert.equal(disposed, 1);
+  const canceled = await api.pickBackup();
+  for await (const line of canceled!) {
     assert.equal(line, "first");
     break;
   }
-  assert.equal(deleted.length, 2);
+  assert.equal(disposed, 2);
   malformed = true;
   await assert.rejects(async () => {
     for await (const line of (await api.pickBackup())!) assert.fail(line);
   }, /encoded|utf-8/i);
-  assert.equal(deleted.length, 3);
+  assert.equal(disposed, 3);
+  const unused = await api.pickBackup();
+  unused!.dispose();
+  assert.equal(disposed, 4);
+});
+test("提供元のサイズが不明でも、キャッシュの実サイズで拒否し直ちに削除する", async () => {
+  let removed = false;
+  const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
+    "react-native": { Platform: { OS: "android" } },
+    "expo-document-picker": {
+      getDocumentAsync: async () => ({
+        canceled: false,
+        assets: [{ uri: "file:///cache/copied", size: null }],
+      }),
+    },
+    "expo-file-system": {
+      File: class {
+        size = 9;
+        exists = true;
+        delete() {
+          removed = true;
+        }
+        readableStream() {
+          assert.fail("上限超過は読む前に拒否");
+        }
+      },
+    },
+    "expo-sharing": {},
+    "./backup": { backupLimit: 8 },
+  });
+  await assert.rejects(api.pickBackup(), /256MB/);
+  assert(removed);
 });
 
 test("取消した出力はすぐ削除し、共有先の読み取り中は保持して期限後に回収する", async () => {
@@ -212,4 +248,37 @@ test("期限切れのキャッシュだけを走査で回収し、共有開始�
     "kifumate-backup-old.kifumate",
     "kifumate-import-old.tmp",
   ]);
+});
+
+test("OSのコピー中に容量不足で失敗しても今回の部分キャッシュを回収する", async () => {
+  const files: any[] = [];
+  let removed = false;
+  class File {
+    uri = "file:///cache/DocumentPicker/partial";
+    delete() {
+      removed = true;
+    }
+  }
+  const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
+    "react-native": { Platform: { OS: "android" } },
+    "expo-file-system": {
+      File,
+      Paths: { cache: "cache" },
+      Directory: class {
+        list() {
+          return files;
+        }
+      },
+    },
+    "expo-document-picker": {
+      getDocumentAsync: async () => {
+        files.push(new File());
+        throw Error("容量不足");
+      },
+    },
+    "expo-sharing": {},
+    "./backup": {},
+  });
+  await assert.rejects(api.pickBackup(), /容量不足/);
+  assert(removed);
 });

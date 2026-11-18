@@ -15,7 +15,7 @@ import {
   type Profile,
   type CoachRecord,
 } from "../coach/types";
-import type { Analysis, Saved } from "../analysis/types";
+import { partialSaved, type Analysis, type Saved } from "../analysis/types";
 
 export const backupVersion = 1;
 export const backupLimit = 256 * 1024 * 1024;
@@ -299,7 +299,13 @@ function portableAnalysis(a: Analysis): Analysis {
     : null;
   return {
     gameId: a.gameId,
-    saved: a.saved ?? partial,
+    saved:
+      partial &&
+      (!a.saved ||
+        (partialSaved(a.saved) &&
+          partial.results.length > a.saved.results.length))
+        ? partial
+        : a.saved,
     attempt: null,
     error: a.error,
   };

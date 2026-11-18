@@ -31,7 +31,6 @@ export function ClassificationsProvider({ children }: PropsWithChildren) {
       }, 100);
     };
     let work: Promise<void> = Promise.resolve();
-    const unregister = registerDataDrain(() => work);
     const run = async () => {
       if (disposed || running || !active || dataPaused) return;
       running = true;
@@ -56,6 +55,12 @@ export function ClassificationsProvider({ children }: PropsWithChildren) {
         if (!disposed) setPending(false);
       }
     };
+    const unregister = registerDataDrain(
+      () => work.catch(() => {}),
+      () => {
+        void work.catch(() => {}).then(run);
+      },
+    );
     void run();
     const sub = AppState.addEventListener("change", (state) => {
       active = state === "active";
