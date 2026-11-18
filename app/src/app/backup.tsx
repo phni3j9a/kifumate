@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { randomUUID } from "expo-crypto";
 import { useAnalysis } from "../analysis/provider";
@@ -37,7 +37,7 @@ import {
   writeBackupFile,
   type BackupFile,
 } from "../storage/backup-file";
-import { pauseData, resumeData } from "../storage/maintenance";
+import { dataPaused, pauseData, resumeData } from "../storage/maintenance";
 export default function Backup() {
   const db = useSQLiteContext(),
     { restore } = useLocalSearchParams<{ restore?: string }>();
@@ -51,6 +51,7 @@ export default function Backup() {
     [error, setError] = useState(""),
     [preview, setPreview] = useState<BackupPreview | null>(null),
     [output, setOutput] = useState<BackupFile | null>(null);
+  const allowNavigation = usePreventRemove(!!busy);
   useEffect(() => {
     void db
       .getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM games")
@@ -77,14 +78,17 @@ export default function Backup() {
     );
   }
   async function exclusive<T>(label: string, run: () => Promise<T>) {
+    if (dataPaused) throw new Error("別のデータ操作が終わるまでお待ちください");
     setBusy(label);
+    let paused = false;
     setProgress(0);
     setError("");
     try {
       await pauseData();
+      paused = true;
       return await run();
     } finally {
-      resumeData();
+      if (paused) resumeData();
       setBusy("");
     }
   }
@@ -112,6 +116,7 @@ export default function Backup() {
       setOutput(null);
       toast("バックアップを書き出しました");
     } catch (e) {
+      setOutput(null);
       fail(e);
     }
   }
@@ -149,9 +154,13 @@ export default function Backup() {
         mode === "replace"
           ? "このバックアップで置きかえますか"
           : "このバックアップを統合しますか",
+      lead:
+        mode === "replace"
+          ? `${new Date(p.createdAt).toLocaleDateString("ja-JP", { dateStyle: "long" })}のバックアップ（棋譜 ${p.games}局）`
+          : undefined,
       text:
         mode === "replace"
-          ? `${new Date(p.createdAt).toLocaleDateString("ja-JP")}のバックアップ（棋譜 ${p.games}局）\nいまこの端末にある棋譜 ${count}局と設定は消えて、この内容に置きかわります。元には戻せません。`
+          ? `いまこの端末にある棋譜 ${count}局と設定は消えて、この内容に置きかわります。元には戻せません。`
           : `棋譜 ${p.games}局を取り込みます。同じ開始局面・指し手の棋譜は重複として省き、この端末の修正・解析・解説を保ちます。登録名は追加し、設定・学習プロフィールはこの端末の内容を優先します。`,
       ok: mode === "replace" ? "置きかえる" : "統合する",
       image: "sys-backup",
@@ -170,8 +179,12 @@ export default function Backup() {
               throw new Error(
                 "解析・AIコーチの依頼が残っています。完了か中止を確認してから復元してください。",
               );
-            const r = await restoreBackup(db, p, mode, randomUUID, setProgress);
+            return restoreBackup(db, p, mode, randomUUID, setProgress);
+          },
+        )
+          .then(async (r) => {
             await app.reload();
+            allowNavigation();
             router.replace("/");
             ask({
               title: "復元しました",
@@ -180,8 +193,8 @@ export default function Backup() {
               single: true,
               image: "sys-backup",
             });
-          },
-        ).catch(fail);
+          })
+          .catch(fail);
       },
     });
   }
@@ -189,9 +202,21 @@ export default function Backup() {
     <Screen>
       <PageHeader title="バックアップと復元" />
       <PageScroll>
-        <Card style={{ padding: 14, gap: 10, marginBottom: 12 }}>
+        <Card
+          style={{
+            paddingTop: 12,
+            paddingHorizontal: 14,
+            paddingBottom: 14,
+            marginBottom: 12,
+          }}
+        >
           <Text style={font(900, 14, 1.4)}>バックアップを書き出す</Text>
-          <Text style={font(500, 12.5, 1.7, colors.ink2)}>
+          <Text
+            style={[
+              font(500, 11.5, 1.65, colors.ink2),
+              { marginTop: 4, marginBottom: 12 },
+            ]}
+          >
             棋譜 {count}
             局、解析結果、戦法と囲いの修正、AIコーチの解説と質問の履歴、学習プロフィール、設定を、1つのファイルにまとめます。
           </Text>
@@ -205,16 +230,26 @@ export default function Backup() {
             書き出す
           </Button>
           <Text
-            style={[font(500, 11, 1.5, colors.ink2), { textAlign: "center" }]}
+            style={[
+              font(500, 11, 1.4, colors.ink2),
+              { textAlign: "center", marginTop: 8 },
+            ]}
           >
             {last
-              ? `最後に書き出した日：${new Date(last).toLocaleDateString("ja-JP")}`
+              ? `最後に書き出した日：${new Date(last).toLocaleDateString("ja-JP", { dateStyle: "long" })}`
               : "まだ書き出していません"}
           </Text>
         </Card>
-        <Card style={{ padding: 14, gap: 10 }}>
+        <Card
+          style={{ paddingTop: 12, paddingHorizontal: 14, paddingBottom: 14 }}
+        >
           <Text style={font(900, 14, 1.4)}>バックアップから復元する</Text>
-          <Text style={font(500, 12.5, 1.7, colors.ink2)}>
+          <Text
+            style={[
+              font(500, 11.5, 1.65, colors.ink2),
+              { marginTop: 4, marginBottom: 12 },
+            ]}
+          >
             書き出したファイルを選ぶと、中身を確かめてから、この端末のデータを置きかえます。iPhone
             と Android の間でも、棋譜や設定を移せます。
           </Text>

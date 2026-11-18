@@ -182,6 +182,7 @@ function validateItem(v: unknown): asserts v is Item {
       object(c) &&
         c.gameId === g.id &&
         c.attempt === null &&
+        (c.failedQuestion === undefined || str(c.failedQuestion)) &&
         Array.isArray(c.answers) &&
         nullable(c.error),
     );
@@ -388,6 +389,7 @@ export async function prepareBackup(
         check(
           v.version === backupVersion &&
             Number.isInteger(v.schemaVersion) &&
+            v.schemaVersion > 0 &&
             str(v.createdAt) &&
             Number.isFinite(Date.parse(v.createdAt)),
         );
@@ -531,13 +533,15 @@ export async function restoreBackup(
       progress(++added);
       await tick();
     }
-    for (const name of preview.aliases)
+    const aliasTime = Date.now();
+    for (const [index, name] of preview.aliases.entries())
       await db.runAsync(
         "INSERT INTO aliases VALUES (?,?,?,?) ON CONFLICT(normalized) DO NOTHING",
         uuid(),
         name,
         normalizeName(name),
-        new Date().toISOString(),
+        // 同じミリ秒に復元しても、再生成したUUID順に並び替わらないようにする。
+        new Date(aliasTime + index).toISOString(),
       );
     // 統合では既存の設定・プロフィールを保つ。重複棋譜の修正・解析・履歴も上書きしない。
     await db.runAsync(
@@ -552,15 +556,26 @@ export async function restoreBackup(
   return { added, skipped };
 }
 export async function* textLines(chunks: AsyncIterable<string>) {
-  let pending = "";
+  let parts: string[] = [],
+    size = 0;
   for await (const chunk of chunks) {
-    pending += chunk;
-    check(pending.length <= 32 * 1024 * 1024);
-    let at: number;
-    while ((at = pending.indexOf("\n")) >= 0) {
-      yield pending.slice(0, at);
-      pending = pending.slice(at + 1);
+    let start = 0,
+      at: number;
+    while ((at = chunk.indexOf("\n", start)) >= 0) {
+      const part = chunk.slice(start, at);
+      check(size + part.length <= 32 * 1024 * 1024);
+      parts.push(part);
+      yield parts.join("");
+      parts = [];
+      size = 0;
+      start = at + 1;
+    }
+    if (start < chunk.length) {
+      const tail = chunk.slice(start);
+      parts.push(tail);
+      size += tail.length;
+      check(size <= 32 * 1024 * 1024);
     }
   }
-  if (pending) yield pending;
+  if (parts.length) yield parts.join("");
 }

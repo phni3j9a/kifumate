@@ -365,3 +365,65 @@ test("v5の移行は既存の棋譜・署名を保ち、利用中なら初回紹
     s.sql.close();
   }
 });
+
+test("空の旧DBにも紹介を割り込ませず、完全な新規DBだけ未完了になる", async () => {
+  const s = await database();
+  try {
+    assert.equal(
+      await s.db.getFirstAsync(
+        "SELECT * FROM settings WHERE key='onboardingCompleted'",
+      ),
+      null,
+    );
+    s.sql.exec(
+      "DROP TABLE settings;ALTER TABLE games DROP COLUMN is_sample;PRAGMA user_version=5",
+    );
+    await migrate(s.db);
+    assert.equal(
+      (await s.db.getFirstAsync<{ value: string }>(
+        "SELECT * FROM settings WHERE key='onboardingCompleted'",
+      ))!.value,
+      "true",
+    );
+  } finally {
+    s.sql.close();
+  }
+});
+
+test("長い1行を小さいチャンクで渡しても、行の途中と末尾を欠かさず分割する", async () => {
+  const long = "棋譜と質問".repeat(200000);
+  const lines: string[] = [];
+  for await (const line of textLines(chunks(`\n${long}\n次の行\n末尾`)))
+    lines.push(line);
+  assert.deepEqual(lines, ["", long, "次の行", "末尾"]);
+});
+
+test("登録名が複数あっても、復元後の再出力で順序が変わらない", async () => {
+  const source = await database(),
+    target = await database();
+  try {
+    await source.db.runAsync(
+      "INSERT INTO aliases VALUES ('first','先の名前','先の名前','2026-11-01')",
+    );
+    await source.db.runAsync(
+      "INSERT INTO aliases VALUES ('second','後の名前','後の名前','2026-11-02')",
+    );
+    const p = await prepare(target.db, await text(source.db));
+    let n = 0;
+    await restoreBackup(target.db, p, "replace", () => (n++ ? "a" : "z"));
+    const rows = await target.db.getAllAsync<{
+      name: string;
+      created_at: string;
+    }>("SELECT * FROM aliases ORDER BY created_at,id");
+    assert.deepEqual(
+      rows.map((r) => r.name),
+      ["先の名前", "後の名前"],
+    );
+    assert(rows[0]!.created_at < rows[1]!.created_at);
+    const exported = JSON.parse((await text(target.db)).split("\n")[1]!);
+    assert.deepEqual(exported.aliases, p.aliases);
+  } finally {
+    source.sql.close();
+    target.sql.close();
+  }
+});

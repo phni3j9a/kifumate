@@ -94,5 +94,6 @@ export async function shareBackup(file: BackupFile) {
 export async function saveBackup(file: BackupFile) {
   if (Platform.OS !== "android") return shareBackup(file);
   const dir = await Directory.pickDirectoryAsync();
-  await file.file!.copy(new File(dir, file.filename));
+  // content:// の子URIを文字列で組み立てず、OSが返したフォルダーへコピーする。
+  await file.file!.copy(dir);
 }

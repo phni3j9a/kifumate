@@ -19,5 +19,5 @@ const kif = exportKIF(record);
 if (kif instanceof Error) throw kif;
 writeFileSync(
   "src/assets/sample-game.json",
-  JSON.stringify({ kif, saved }, null, 2) + "\n",
+  JSON.stringify({ kif, saved }) + "\n",
 );

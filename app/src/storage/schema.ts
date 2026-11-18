@@ -64,8 +64,6 @@ CREATE TABLE coach_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   String.raw`
 ALTER TABLE games ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0 CHECK(is_sample IN (0,1));
 CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
--- 更新前から使っている人には初回の紹介を割り込ませない。
-INSERT INTO settings SELECT 'onboardingCompleted','true' WHERE EXISTS(SELECT 1 FROM games) OR EXISTS(SELECT 1 FROM aliases);
 `,
 ];
 
@@ -86,6 +84,11 @@ export async function migrate(db: MigrationDatabase): Promise<void> {
   await db.withTransactionAsync(async () => {
     for (let i = version; i < migrations.length; i++) {
       await db.execAsync(migrations[i]!);
+      // 既存DBの更新には、棋譜が0局でも初回の紹介を割り込ませない。
+      if (i === 5 && version > 0)
+        await db.execAsync(
+          "INSERT OR IGNORE INTO settings VALUES ('onboardingCompleted','true');",
+        );
       await db.execAsync(`PRAGMA user_version = ${i + 1};`);
     }
   });

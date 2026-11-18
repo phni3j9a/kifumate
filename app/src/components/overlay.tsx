@@ -268,6 +268,7 @@ export function MenuRow({
 /* ---------- 確認ダイアログ（.dlg / .dlb）。モックの ask() と同じ引数 ---------- */
 type Ask = {
   title: string;
+  lead?: string;
   text: string;
   ok: string;
   onOk?: () => void;
@@ -333,8 +334,18 @@ export function DialogHost() {
             <Text accessibilityRole="header" style={font(900, 15, 1.4)}>
               {a.title}
             </Text>
+            {a.lead && (
+              <Text
+                style={[font(900, 15, 1.4), { marginTop: 6, marginBottom: 6 }]}
+              >
+                {a.lead}
+              </Text>
+            )}
             <Text
-              style={[font(500, 12.5, 1.65, colors.ink2), { marginTop: 6 }]}
+              style={[
+                font(500, 12.5, 1.65, colors.ink2),
+                { marginTop: a.lead ? 0 : 6 },
+              ]}
             >
               {a.text}
             </Text>
