@@ -1,3 +1,4 @@
+import { reconcileAliases } from "./aliases";
 import {
   classificationSelect,
   classifyForStorage,
@@ -10,10 +11,8 @@ import {
   describe,
   gameOutcome,
   identity,
-  matchNames,
   normalizeName,
   readStoredKif,
-  resultFor,
   writeKif,
   type Result,
   type Side,
@@ -58,7 +57,9 @@ export const listGameSummaries = (db: SQLiteDatabase) =>
 export const getGame = (db: SQLiteDatabase, id: string) =>
   db.getFirstAsync<Game>(`${classificationSelect} WHERE games.id=?`, id);
 export const listAliases = (db: SQLiteDatabase) =>
-  db.getAllAsync<Alias>("SELECT id, name FROM aliases ORDER BY created_at");
+  db.getAllAsync<Alias>(
+    "SELECT id, name FROM aliases ORDER BY created_at,rowid",
+  );
 /** 同じ開始局面・同じ指し手の棋譜がすでにあれば、その id */
 export async function findDuplicate(
   db: SQLiteDatabase,
@@ -166,25 +167,6 @@ export async function saveAliases(db: SQLiteDatabase, names: string[]) {
         new Date().toISOString(),
       );
     }
-    for (const game of await listGames(db)) {
-      const side = game.side_manual
-        ? game.self_side
-        : matchNames(game.black, game.white, [...unique.values()]).side;
-      const result = resultFor(
-        side,
-        !game.winner
-          ? gameOutcome(readStoredKif(game.kif))
-          : game.winner === "unknown"
-            ? null
-            : game.winner,
-      );
-      await db.runAsync(
-        "UPDATE games SET self_side=?, result=?, updated_at=? WHERE id=?",
-        side,
-        result,
-        new Date().toISOString(),
-        game.id,
-      );
-    }
+    await reconcileAliases(db, [...unique.values()]);
   });
 }

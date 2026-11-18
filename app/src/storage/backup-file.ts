@@ -5,7 +5,6 @@ import * as Sharing from "expo-sharing";
 import { backupLimit, textLines } from "./backup";
 
 export async function pickBackup(): Promise<AsyncIterable<string> | null> {
-  let stream: ReadableStream<Uint8Array>;
   if (Platform.OS === "web") {
     const picked = await DocumentPicker.getDocumentAsync({
       type: "*/*",
@@ -15,16 +14,32 @@ export async function pickBackup(): Promise<AsyncIterable<string> | null> {
     const asset = picked.assets[0]!;
     if ((asset.size ?? 0) > backupLimit)
       throw new Error("バックアップは256MB以内にしてください。");
-    stream = asset.file!.stream();
-  } else {
-    const picked = await File.pickFileAsync({ mimeTypes: ["*/*"] });
-    if (picked.canceled) return null;
-    if (picked.result.size > backupLimit)
-      throw new Error("バックアップは256MB以内にしてください。");
-    stream = picked.result.readableStream();
+    return textLines(decodeChunks(asset.file!.stream()));
   }
-  return textLines(decodeChunks(stream));
+  const picked = await File.pickFileAsync({ mimeTypes: ["*/*"] });
+  if (picked.canceled) return null;
+  if (picked.result.size > backupLimit)
+    throw new Error("バックアップは256MB以内にしてください。");
+  return readPickedBackup(picked.result);
 }
+async function* readPickedBackup(source: File) {
+  const local = new File(
+    Paths.cache,
+    `kifumate-import-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+  );
+  try {
+    // DocumentsProviderのパイプはシークできない。copyは入力ストリームで転送する。
+    await source.copy(local);
+    if (local.size > backupLimit)
+      throw new Error("バックアップは256MB以内にしてください。");
+    yield* textLines(decodeChunks(local.readableStream()));
+  } finally {
+    try {
+      local.delete();
+    } catch {}
+  }
+}
+
 async function* decodeChunks(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader(),
     decoder = new TextDecoder("utf-8", { fatal: true });
@@ -45,11 +60,47 @@ async function* decodeChunks(stream: ReadableStream<Uint8Array>) {
     reader.releaseLock();
   }
 }
+const shared = new WeakSet<BackupFile>();
+const shareLifetime = 60 * 60 * 1000;
+export function clearExpiredBackups() {
+  if (Platform.OS === "web") return;
+  try {
+    for (const entry of Paths.cache.list())
+      if (
+        entry instanceof File &&
+        /^(kifumate-backup-|kifumate-import-)/.test(entry.name)
+      ) {
+        const sharedAt = entry.name.match(/-shared-(\d+)\.kifumate$/)?.[1];
+        const time = sharedAt ? Number(sharedAt) : entry.modificationTime;
+        if (time !== null && time < Date.now() - shareLifetime)
+          try {
+            entry.delete();
+          } catch {}
+      }
+  } catch {}
+}
+export function discardBackup(file: BackupFile) {
+  if (!file.file) return;
+  const remove = () => {
+    try {
+      file.file!.delete();
+    } catch {}
+  };
+  if (shared.has(file)) {
+    // 共有シート終了後も受取先が読むことがある。再起動時は上の期限走査で回収する。
+    const timer = setTimeout(remove, shareLifetime);
+    timer.unref?.();
+  } else remove();
+}
 export async function writeBackupFile(lines: AsyncIterable<string>) {
+  clearExpiredBackups();
   const filename = `kifumate-backup-${new Date()
     .toISOString()
     .replace(/[-:]/g, "")
-    .replace(/\.\d+Z$/, "")}.kifumate`;
+    .replace(
+      /\.\d+Z$/,
+      "",
+    )}-${Math.random().toString(36).slice(2, 8)}.kifumate`;
   if (Platform.OS === "web") {
     const chunks: BlobPart[] = [];
     for await (const line of lines) chunks.push(line);
@@ -81,19 +132,25 @@ export async function shareBackup(file: BackupFile) {
     a.download = file.filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return;
+    return false;
   }
   if (!(await Sharing.isAvailableAsync()))
     throw new Error("共有を使えません。「ファイルに保存」をお試しください。");
+  await file.file!.rename(
+    file.filename.replace(/\.kifumate$/, `-shared-${Date.now()}.kifumate`),
+  );
+  shared.add(file);
   await Sharing.shareAsync(file.file!.uri, {
     mimeType: "application/octet-stream",
     UTI: "public.data",
     dialogTitle: "バックアップを保存・共有",
   });
+  return false;
 }
 export async function saveBackup(file: BackupFile) {
   if (Platform.OS !== "android") return shareBackup(file);
   const dir = await Directory.pickDirectoryAsync();
   // content:// の子URIを文字列で組み立てず、OSが返したフォルダーへコピーする。
   await file.file!.copy(dir);
+  return true;
 }

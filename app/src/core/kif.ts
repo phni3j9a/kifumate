@@ -56,7 +56,10 @@ export function readKif(input: string): ShogiRecord {
 }
 
 // 正規化によるCRLFやヘッダーの増分を、外部入力用のサイズ上限で拒否しない。
+export const storedKifLimit = 2 * MAX_BYTES + 65536;
 export function readStoredKif(input: string): ShogiRecord {
+  if (input.length > storedKifLimit)
+    throw new Error("保存したKIFの本文が大きすぎます。");
   if (!input.trim()) throw new Error("KIFの本文を貼り付けてください。");
   const text = input
     .replace(/^\uFEFF/, "")

@@ -148,7 +148,7 @@ export class CoachController {
   }
   async idle() {
     await this.working;
-    await this.profileWrites;
+    await this.profileWrites.catch(() => {});
   }
   sync = (): Promise<void> => {
     if (dataPaused) return Promise.resolve();

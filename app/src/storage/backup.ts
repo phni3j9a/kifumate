@@ -1,5 +1,11 @@
+import { reconcileAliases } from "./aliases";
 import type { SQLiteDatabase, SQLiteBindValue } from "expo-sqlite";
-import { identity, normalizeName, readStoredKif } from "../core/kif";
+import {
+  identity,
+  normalizeName,
+  readStoredKif,
+  storedKifLimit,
+} from "../core/kif";
 import { migrations } from "./schema";
 import {
   defaultProfile,
@@ -78,6 +84,21 @@ export function validateProfile(p: unknown): asserts p is Profile {
       details.includes(p.style.detail),
   );
 }
+function validatePreferences(v: any) {
+  check(
+    object(v) &&
+      v.type === "preferences" &&
+      strings(v.aliases) &&
+      v.aliases.every((n) => normalizeName(n).length > 0) &&
+      object(v.settings),
+  );
+  validateProfile(v.profile);
+  check(
+    Object.entries(v.settings).every(
+      ([k, value]) => k === "onboardingCompleted" && value === "true",
+    ),
+  );
+}
 function score(v: any) {
   check(
     v === null ||
@@ -96,7 +117,8 @@ function results(saved: any, key: string) {
       saved.moves.length <= 10000 &&
       Array.isArray(saved.results) &&
       saved.results.length <= saved.moves.length + 1 &&
-      str(saved.jobId),
+      str(saved.jobId) &&
+      (saved.partial === undefined || typeof saved.partial === "boolean"),
   );
   const initial =
     saved.initial === "startpos"
@@ -155,7 +177,10 @@ function validateItem(v: unknown): asserts v is Item {
   ])
     check(str(g[c]));
   check(
-    g.id.length > 0 &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      g.id,
+    ) &&
+      g.kif.length <= storedKifLimit &&
       [null, "black", "white"].includes(g.self_side) &&
       ["win", "loss", "draw", "unknown"].includes(g.result) &&
       [null, "black", "white", "draw", "unknown"].includes(g.winner),
@@ -269,6 +294,7 @@ function portableAnalysis(a: Analysis): Analysis {
         results: a.attempt.results,
         coachProof: null,
         jobId: "",
+        partial: true,
       }
     : null;
   return {
@@ -305,7 +331,7 @@ async function* backupLines(db: SQLiteDatabase, progress: (n: number) => void) {
   yield JSON.stringify(header) + "\n";
   const aliases = (
     await db.getAllAsync<{ name: string }>(
-      "SELECT name FROM aliases ORDER BY created_at,id",
+      "SELECT name FROM aliases ORDER BY created_at,rowid",
     )
   ).map((a) => a.name);
   const profile = await db.getFirstAsync<{ value: string }>(
@@ -318,14 +344,15 @@ async function* backupLines(db: SQLiteDatabase, progress: (n: number) => void) {
       )
     ).map((r) => [r.key, r.value]),
   );
-  yield (
-    JSON.stringify({
-      type: "preferences",
-      aliases,
-      profile: profile ? JSON.parse(profile.value) : defaultProfile,
-      settings,
-    }) + "\n"
-  );
+  const preferences = {
+    type: "preferences",
+    aliases,
+    profile: profile ? JSON.parse(profile.value) : defaultProfile,
+    settings,
+  };
+  validatePreferences(preferences);
+  yield JSON.stringify(preferences) + "\n";
+
   let after = "",
     n = 0;
   while (true) {
@@ -348,25 +375,25 @@ async function* backupLines(db: SQLiteDatabase, progress: (n: number) => void) {
       after,
     );
     const coach: CoachRecord | null = c ? JSON.parse(c.document) : null;
-    yield (
-      JSON.stringify({
-        type: "game",
-        game: Object.fromEntries(columns.map((c) => [c, game[c]])),
-        analysis: a ? portableAnalysis(JSON.parse(a.document)) : null,
-        coach: coach
-          ? {
-              gameId: coach.gameId,
-              answers: coach.answers,
-              attempt: null,
-              error: coach.error,
-              ...(coach.failedQuestion === undefined
-                ? {}
-                : { failedQuestion: coach.failedQuestion }),
-            }
-          : null,
-        classification,
-      }) + "\n"
-    );
+    const item = {
+      type: "game",
+      game: Object.fromEntries(columns.map((c) => [c, game[c]])),
+      analysis: a ? portableAnalysis(JSON.parse(a.document)) : null,
+      coach: coach
+        ? {
+            gameId: coach.gameId,
+            answers: coach.answers,
+            attempt: null,
+            error: coach.error,
+            ...(coach.failedQuestion === undefined
+              ? {}
+              : { failedQuestion: coach.failedQuestion }),
+          }
+        : null,
+      classification,
+    };
+    validateItem(item);
+    yield JSON.stringify(item) + "\n";
     progress(++n);
     await tick();
   }
@@ -412,18 +439,7 @@ export async function prepareBackup(
         continue;
       }
       if (!preferences) {
-        check(
-          v.type === "preferences" &&
-            strings(v.aliases) &&
-            v.aliases.every((n) => n.trim().length > 0 && n.length <= 100) &&
-            object(v.settings),
-        );
-        validateProfile(v.profile);
-        check(
-          Object.entries(v.settings).every(
-            ([k, value]) => k === "onboardingCompleted" && value === "true",
-          ),
-        );
+        validatePreferences(v);
         preferences = v;
         continue;
       }
@@ -555,6 +571,13 @@ export async function restoreBackup(
         normalizeName(name),
         // 同じミリ秒に復元しても、再生成したUUID順に並び替わらないようにする。
         new Date(aliasTime + index).toISOString(),
+      );
+    if (mode === "merge")
+      await reconcileAliases(
+        db,
+        (
+          await db.getAllAsync<{ name: string }>("SELECT name FROM aliases")
+        ).map((a) => a.name),
       );
     // 統合では既存の設定・プロフィールを保つ。重複棋譜の修正・解析・履歴も上書きしない。
     await db.runAsync(

@@ -823,6 +823,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             setCoachOpen(true);
           }}
           analysis={analysis}
+          received={!!shown}
           branch={!!branch}
           branchRow={branchRow}
           realtime={rt}

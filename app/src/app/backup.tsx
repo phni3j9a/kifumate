@@ -6,7 +6,11 @@ import {
   Text,
   View,
 } from "react-native";
-import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
+import {
+  useNavigation,
+  useLocalSearchParams,
+  usePreventRemove,
+} from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { randomUUID } from "expo-crypto";
 import { useAnalysis } from "../analysis/provider";
@@ -31,6 +35,8 @@ import {
   type BackupPreview,
 } from "../storage/backup";
 import {
+  clearExpiredBackups,
+  discardBackup,
   pickBackup,
   saveBackup,
   shareBackup,
@@ -40,7 +46,8 @@ import {
 import { dataPaused, pauseData, resumeData } from "../storage/maintenance";
 export default function Backup() {
   const db = useSQLiteContext(),
-    { restore } = useLocalSearchParams<{ restore?: string }>();
+    { restore } = useLocalSearchParams<{ restore?: string }>(),
+    navigation = useNavigation();
   const analysis = useAnalysis(),
     coach = useCoach(),
     app = useAppData();
@@ -53,6 +60,7 @@ export default function Backup() {
     [output, setOutput] = useState<BackupFile | null>(null);
   const allowNavigation = usePreventRemove(!!busy);
   useEffect(() => {
+    clearExpiredBackups();
     void db
       .getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM games")
       .then((r) => setCount(r?.n ?? 0));
@@ -65,6 +73,12 @@ export default function Backup() {
       void clearPreparedBackup(db).catch(() => {});
     };
   }, [db]);
+  useEffect(
+    () => () => {
+      if (output) discardBackup(output);
+    },
+    [output],
+  );
   useEffect(() => {
     if (!busy) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
@@ -106,7 +120,14 @@ export default function Backup() {
   async function deliver(save: boolean) {
     if (!output) return;
     try {
-      await (save ? saveBackup(output) : shareBackup(output));
+      const confirmed = await (save ? saveBackup(output) : shareBackup(output));
+      if (!confirmed) {
+        setOutput(null);
+        toast(
+          "保存・共有は未確認です。保存先にファイルがあるか確かめてください",
+        );
+        return;
+      }
       const now = new Date().toISOString();
       await db.runAsync(
         "INSERT INTO settings VALUES ('lastBackupAt',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -185,7 +206,14 @@ export default function Backup() {
           .then(async (r) => {
             await app.reload();
             allowNavigation();
-            router.replace("/");
+            navigation.dispatch({
+              type: "RESET",
+              payload: {
+                ...navigation.getState(),
+                index: 0,
+                routes: [{ name: "(tabs)", key: randomUUID() }],
+              },
+            });
             ask({
               title: "復元しました",
               text: `棋譜 ${r.added}局を復元しました。同じ棋譜 ${r.skipped}局は省きました。\n招待コードの権利・購入情報は引き継がれません。精密解析の署名は保持しますが、端末が変わると新しいAI解説には精密解析のやり直しが必要です。保存済みの結果・解説は読めます。`,

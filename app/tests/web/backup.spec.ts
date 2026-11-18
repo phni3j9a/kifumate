@@ -76,6 +76,12 @@ test("見本の対局→ファイル保存→空の別端末へ復元、統合�
   await page.getByRole("tab", { name: "戦績" }).click();
   await expect(page.getByText("まだ集計できる対局がありません")).toBeVisible();
   await page.getByRole("tab", { name: "設定" }).click();
+  await b(page, "学習プロフィール").click();
+  await b(page, "矢倉").click();
+  await page
+    .getByRole("textbox", { name: "目標", exact: true })
+    .fill("復元した目標を守る");
+  await b(page, "戻る").click();
   await b(page, "バックアップと復元").click();
   await b(page, "書き出す").click();
   const download = page.waitForEvent("download");
@@ -92,6 +98,10 @@ test("見本の対局→ファイル保存→空の別端末へ復元、統合�
   try {
     await target.goto("/");
     await b(target, "バックアップから復元する").click();
+    await b(target, "やめる").click();
+    await b(target, "戻る").click();
+    await expect(target.getByText("kifumateへ ようこそ")).toBeVisible();
+    await b(target, "バックアップから復元する").click();
     await choose(target, path);
     await expect(
       target.getByText("棋譜 1局・重複 0局。復元する方法を選んでください。"),
@@ -106,6 +116,25 @@ test("見本の対局→ファイル保存→空の別端末へ復元、統合�
     ).toBeVisible();
     await b(target, "OK").click();
     await expect(target.getByText("サンプル", { exact: true })).toBeVisible();
+    expect(
+      await target.evaluate(() => {
+        const require = (globalThis as any).__r;
+        const entry = [...require.getModules().entries()].find(
+          ([, m]: any) =>
+            m.verboseName ===
+            "node_modules/expo-router/build/imperative-api.js",
+        ) as any;
+        return require(entry[0]).router.canGoBack();
+      }),
+    ).toBe(false);
+    await target.getByRole("tab", { name: "設定" }).click();
+    await b(target, "学習プロフィール").click();
+    await expect(
+      target.getByRole("textbox", { name: "目標", exact: true }),
+    ).toHaveValue("復元した目標を守る");
+    await expect(b(target, "矢倉")).toHaveAttribute("aria-selected", "true");
+    await b(target, "戻る").click();
+    await target.getByRole("tab", { name: "棋譜" }).click();
     await target.reload();
     await expect(target.getByText("サンプル", { exact: true })).toBeVisible();
     await target.getByRole("tab", { name: "設定" }).click();

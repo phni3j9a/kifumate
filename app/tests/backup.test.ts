@@ -251,7 +251,7 @@ test("ファイル内の同一指し手も取り込みと同じキーで重複�
     await seed(source.db);
     const lines = (await text(source.db)).trimEnd().split("\n"),
       duplicate = JSON.parse(lines[2]!);
-    duplicate.game.id = "別UUID";
+    duplicate.game.id = randomUUID();
     duplicate.game.black = "日付/名前は重複判定に使わない";
     duplicate.analysis.gameId = duplicate.game.id;
     duplicate.coach.gameId = duplicate.game.id;
@@ -321,6 +321,7 @@ test("未完了の通信依頼と権利は持ち出さず、受信済みの途�
       doc = JSON.parse(b.trimEnd().split("\n")[2]!).analysis;
     assert.equal(doc.attempt, null);
     assert.equal(doc.saved.results.length, 3);
+    assert.equal(doc.saved.partial, true);
     assert.equal(doc.saved.coachProof, null);
     assert(!b.includes("再送してはいけない"));
   } finally {
@@ -465,5 +466,142 @@ test("復元の上限を超えるファイルを、書き出し成功として�
     );
   } finally {
     s.sql.close();
+  }
+});
+
+test("長い登録名も往復でき、同時刻の登録名は画面と同じ挿入順を保つ", async () => {
+  const { db, sql } = await database();
+  try {
+    const names = ["名前".repeat(101), "後の名前"];
+    for (const [i, name] of names.entries())
+      await db.runAsync(
+        "INSERT INTO aliases VALUES (?,?,?,?)",
+        i ? "a" : "z",
+        name,
+        name,
+        "same-time",
+      );
+    const p = await prepare(db, await text(db));
+    assert.deepEqual(p.aliases, names);
+    await restoreBackup(db, p, "replace", randomUUID);
+    assert.deepEqual((await prepare(db, await text(db))).aliases, names);
+  } finally {
+    sql.close();
+  }
+});
+test("書き出しも読み込みと同じ条件を検証し、復元不能なプロフィールを成功扱いにしない", async () => {
+  const { db, sql } = await database();
+  try {
+    await db.runAsync(
+      "INSERT INTO coach_meta VALUES ('profile',?)",
+      JSON.stringify({ ...defaultProfile, goal: "a".repeat(201) }),
+    );
+    await assert.rejects(text(db), /バックアップ/);
+  } finally {
+    sql.close();
+  }
+});
+test("経路に使えないゲームIDと正規化増分を超えた本文は復元前に拒否する", async () => {
+  const { db, sql } = await database();
+  try {
+    await seed(db);
+    const rows = (await text(db))
+      .trim()
+      .split("\n")
+      .map((s) => JSON.parse(s));
+    for (const change of [
+      (g: any) => {
+        g.id = "unsafe/path";
+      },
+      (g: any) => {
+        g.kif = "*\n".repeat(2 * 1024 * 1024 + 65536);
+      },
+    ]) {
+      const broken = structuredClone(rows);
+      change(broken[2].game);
+      broken[2].analysis.gameId = broken[2].game.id;
+      broken[2].coach.gameId = broken[2].game.id;
+      await assert.rejects(
+        prepare(db, broken.map((r) => JSON.stringify(r)).join("\n")),
+        /バックアップ/,
+      );
+      assert.equal(sql.prepare("SELECT count(*) AS n FROM games").get()!.n, 1);
+    }
+  } finally {
+    sql.close();
+  }
+});
+test("統合後の名前で既存・追加の自動先後を再照合し、手動先後と勝ち側は保持する", async () => {
+  const source = await database(),
+    target = await database();
+  try {
+    await seed(source.db);
+    await source.db.runAsync(
+      "UPDATE games SET side_manual=0, self_side='white'",
+    );
+    await source.db.runAsync("DELETE FROM aliases");
+    const game = source.sql.prepare("SELECT black,white FROM games").get()!;
+    await source.db.runAsync(
+      "INSERT INTO aliases VALUES ('b',?,?, '')",
+      game.white as string,
+      game.white as string,
+    );
+    const backup = await text(source.db);
+    await target.db.runAsync(
+      "INSERT INTO aliases VALUES ('a',?,?, '')",
+      game.black as string,
+      game.black as string,
+    );
+    await restoreBackup(
+      target.db,
+      await prepare(target.db, backup),
+      "merge",
+      randomUUID,
+    );
+    let row = target.sql.prepare("SELECT * FROM games").get()!;
+    assert.equal(row.self_side, null);
+    assert.equal(row.result, "unknown");
+    await target.db.runAsync(
+      "UPDATE games SET self_side='black',result='win',side_manual=0",
+    );
+    await restoreBackup(
+      target.db,
+      await prepare(target.db, backup),
+      "merge",
+      randomUUID,
+    );
+    row = target.sql.prepare("SELECT * FROM games").get()!;
+    assert.equal(row.self_side, null);
+    await target.db.runAsync(
+      "UPDATE games SET self_side='white',result='loss',side_manual=1",
+    );
+    await restoreBackup(
+      target.db,
+      await prepare(target.db, backup),
+      "merge",
+      randomUUID,
+    );
+    row = target.sql.prepare("SELECT * FROM games").get()!;
+    assert.equal(row.self_side, "white");
+    assert.equal(row.result, "loss");
+    assert.equal(row.winner, "black");
+  } finally {
+    source.sql.close();
+    target.sql.close();
+  }
+});
+
+test("同時刻の登録名はUUID順ではなく挿入順で書き出す", async () => {
+  const { db, sql } = await database();
+  try {
+    await db.runAsync(
+      "INSERT INTO aliases VALUES ('z','先の名前','先の名前','same'),('a','後の名前','後の名前','same')",
+    );
+    assert.deepEqual((await prepare(db, await text(db))).aliases, [
+      "先の名前",
+      "後の名前",
+    ]);
+  } finally {
+    sql.close();
   }
 });

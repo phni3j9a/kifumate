@@ -49,7 +49,7 @@ import {
 } from "../../components/ui";
 import { dateParts, dateShort } from "../../core/format";
 import { useAnalysis } from "../../analysis/provider";
-import { needsRetryConfirmation } from "../../analysis/types";
+import { needsRetryConfirmation, partialSaved } from "../../analysis/types";
 import { cp } from "../../analysis/display";
 import Svg, { Path } from "react-native-svg";
 import {
@@ -251,7 +251,12 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         .includes(q)
     )
       return false;
-    if (quick === "none" && records[g.id]?.saved) return false;
+    if (
+      quick === "none" &&
+      records[g.id]?.saved &&
+      !partialSaved(records[g.id]?.saved)
+    )
+      return false;
     if (quick === "favorite" && !g.favorite) return false;
     if (
       (quick === "win" || quick === "loss") &&
@@ -492,9 +497,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                     </View>
                     <Text style={font(500, 11, 1.2, colors.ink2)}>
                       {dateShort(g.played_at)}・{g.plies}手
-                      {records[g.id]?.saved?.mode === "precise"
-                        ? "　精密解析"
-                        : ""}
+                      {partialSaved(records[g.id]?.saved)
+                        ? "　途中まで解析"
+                        : records[g.id]?.saved?.mode === "precise"
+                          ? "　精密解析"
+                          : ""}
                     </Text>
                   </View>
                   <View style={s.gx}>
@@ -521,9 +528,11 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                     ) : records[g.id]?.saved ? (
                       <View
                         accessibilityLabel={
-                          records[g.id]!.saved!.mode === "precise"
-                            ? "精密解析済み"
-                            : "解析済み"
+                          partialSaved(records[g.id]?.saved)
+                            ? "途中まで解析"
+                            : records[g.id]!.saved!.mode === "precise"
+                              ? "精密解析済み"
+                              : "解析済み"
                         }
                       >
                         <Svg width={62} height={28}>
