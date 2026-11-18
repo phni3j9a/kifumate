@@ -9,31 +9,35 @@ export async function pickBackup(): Promise<BackupInput | null> {
   const previous = new Set(pickerCacheFiles().map((f) => f.uri));
   try {
     const picked = await DocumentPicker.getDocumentAsync({
-      type: "*/*",
+      type:
+        Platform.OS === "web"
+          ? [
+              ".kifumate",
+              "application/x-kifumate-backup",
+              "application/octet-stream",
+            ]
+          : ["application/x-kifumate-backup", "application/octet-stream"],
       base64: false,
       copyToCacheDirectory: true,
     });
     if (picked.canceled) return null;
     const asset = picked.assets[0]!;
-    if (Platform.OS === "web") {
-      if ((asset.size ?? 0) > backupLimit)
-        throw new Error("バックアップは256MB以内にしてください。");
-      return Object.assign(textLines(decodeChunks(asset.file!.stream())), {
-        dispose() {},
-      });
-    }
-    const file = new File(asset.uri);
+    const file = Platform.OS === "web" ? null : new File(asset.uri);
     const dispose = () => {
       try {
-        if (file.exists) file.delete();
+        if (file?.exists) file.delete();
       } catch {}
     };
     try {
-      if (file.size > backupLimit)
+      if (!asset.name.toLowerCase().endsWith(".kifumate"))
+        throw new Error("拡張子が.kifumateのバックアップを選んでください。");
+      if ((file?.size ?? asset.size ?? 0) > backupLimit)
         throw new Error("バックアップは256MB以内にしてください。");
       async function* lines() {
         try {
-          yield* textLines(decodeChunks(file.readableStream()));
+          yield* textLines(
+            decodeChunks(file ? file.readableStream() : asset.file!.stream()),
+          );
         } finally {
           dispose();
         }
@@ -88,21 +92,27 @@ const shared = new WeakSet<BackupFile>();
 const shareLifetime = 60 * 60 * 1000;
 export function clearExpiredBackups() {
   if (Platform.OS === "web") return;
+  const files = pickerCacheFiles();
   try {
-    for (const entry of Paths.cache.list())
-      if (
-        entry instanceof File &&
-        /^(kifumate-backup-|kifumate-import-)/.test(entry.name)
-      ) {
-        const sharedAt = entry.name.match(/-shared-(\d+)\.kifumate$/)?.[1];
-        const time = sharedAt ? Number(sharedAt) : entry.modificationTime;
-        if (time !== null && time < Date.now() - shareLifetime)
-          try {
-            entry.delete();
-          } catch {}
-      }
+    files.push(
+      ...Paths.cache
+        .list()
+        .filter(
+          (entry): entry is File =>
+            entry instanceof File &&
+            /^(kifumate-backup-|kifumate-import-)/.test(entry.name),
+        ),
+    );
   } catch {}
+  for (const entry of files) {
+    try {
+      const sharedAt = entry.name.match(/-shared-(\d+)\.kifumate$/)?.[1];
+      const time = sharedAt ? Number(sharedAt) : entry.modificationTime;
+      if (time !== null && time < Date.now() - shareLifetime) entry.delete();
+    } catch {}
+  }
 }
+
 export function discardBackup(file: BackupFile) {
   if (!file.file) return;
   const remove = () => {

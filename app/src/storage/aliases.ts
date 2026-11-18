@@ -15,10 +15,11 @@ export async function reconcileAliases(db: SQLiteDatabase, names: string[]) {
     const side = game.side_manual
       ? game.self_side
       : matchNames(game.black, game.white, names).side;
-    const winner = game.result_manual
+    const legacyResult = game.result_manual && game.winner === null;
+    const winner = legacyResult
       ? null
       : (game.winner ?? gameOutcome(readStoredKif(game.kif)));
-    const result = game.result_manual
+    const result = legacyResult
       ? game.result
       : resultFor(side, winner === "unknown" ? null : winner);
     if (side !== game.self_side || result !== game.result)

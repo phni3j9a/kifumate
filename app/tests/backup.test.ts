@@ -664,3 +664,77 @@ test("完了結果は保持し、途中結果同士の再解析では多く受�
     sql.close();
   }
 });
+
+test("手動の勝ち側がある局は、名前変更後の先後から勝敗を再計算する", async () => {
+  const { db, sql } = await database();
+  try {
+    await seed(db);
+    await db.runAsync(
+      "UPDATE games SET self_side='black',side_manual=0,result='win',result_manual=1,winner='black'",
+    );
+    const g = sql.prepare("SELECT white FROM games").get()!;
+    const { reconcileAliases } = await import("../src/storage/aliases");
+    await reconcileAliases(db, [g.white as string]);
+    const updated = sql
+      .prepare("SELECT self_side,result,winner FROM games")
+      .get()!;
+    assert.equal(updated.self_side, "white");
+    assert.equal(updated.result, "loss");
+    assert.equal(updated.winner, "black");
+  } finally {
+    sql.close();
+  }
+});
+
+test("途中結果は同モードの進捗増だけを採用し、異モードなら精密を優先する", async () => {
+  const { db, sql } = await database();
+  try {
+    const id = await seed(db);
+    const full = JSON.parse(
+      (await db.getFirstAsync<{ document: string }>(
+        "SELECT document FROM analyses WHERE game_id=?",
+        id,
+      ))!.document,
+    );
+    for (const [
+      oldMode,
+      oldCount,
+      newMode,
+      newCount,
+      expectedMode,
+      expectedCount,
+    ] of [
+      ["precise", 3, "std", 4, "precise", 3],
+      ["std", 20, "precise", 3, "precise", 3],
+      ["std", 3, "std", 4, "std", 4],
+      ["precise", 4, "precise", 3, "precise", 4],
+      ["std", 86, "precise", 20, "std", 86],
+      ["precise", 86, "std", 20, "precise", 86],
+    ] as const) {
+      const a = structuredClone(full);
+      a.saved = {
+        ...full.saved,
+        mode: oldMode,
+        results: full.saved.results.slice(0, oldCount),
+        partial: oldCount < 86,
+      };
+      a.attempt = {
+        ...full.saved,
+        mode: newMode,
+        results: full.saved.results.slice(0, newCount),
+        job: null,
+        cancel: false,
+      };
+      await db.runAsync(
+        "UPDATE analyses SET document=? WHERE game_id=?",
+        JSON.stringify(a),
+        id,
+      );
+      const saved = JSON.parse((await text(db)).split("\n")[2]!).analysis.saved;
+      assert.equal(saved.mode, expectedMode);
+      assert.equal(saved.results.length, expectedCount);
+    }
+  } finally {
+    sql.close();
+  }
+});

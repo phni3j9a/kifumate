@@ -1,3 +1,4 @@
+import { clearExpiredBackups } from "../storage/backup-file";
 import {
   createContext,
   useCallback,
@@ -27,6 +28,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     setCompleted(r?.value === "true");
   }, [db]);
   useEffect(() => {
+    clearExpiredBackups();
     void db
       .getFirstAsync<{ value: string }>(
         "SELECT value FROM settings WHERE key='onboardingCompleted'",

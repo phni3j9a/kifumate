@@ -303,7 +303,9 @@ function portableAnalysis(a: Analysis): Analysis {
       partial &&
       (!a.saved ||
         (partialSaved(a.saved) &&
-          partial.results.length > a.saved.results.length))
+          (partial.mode === a.saved.mode
+            ? partial.results.length > a.saved.results.length
+            : partial.mode === "precise")))
         ? partial
         : a.saved,
     attempt: null,

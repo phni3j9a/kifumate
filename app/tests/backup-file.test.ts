@@ -97,7 +97,11 @@ test("非シーク提供元は公式DocumentPickerのストリームコピーを
         return {
           canceled: false,
           assets: [
-            { uri: "file:///cache/DocumentPicker/copied.kifumate", size: null },
+            {
+              uri: "file:///cache/DocumentPicker/copied.kifumate",
+              name: "copied.kifumate",
+              size: null,
+            },
           ],
         };
       },
@@ -159,7 +163,9 @@ test("提供元のサイズが不明でも、キャッシュの実サイズで�
     "expo-document-picker": {
       getDocumentAsync: async () => ({
         canceled: false,
-        assets: [{ uri: "file:///cache/copied", size: null }],
+        assets: [
+          { uri: "file:///cache/copied", name: "backup.kifumate", size: null },
+        ],
       }),
     },
     "expo-file-system": {
@@ -281,4 +287,119 @@ test("OSのコピー中に容量不足で失敗しても今回の部分キャッ
   });
   await assert.rejects(api.pickBackup(), /容量不足/);
   assert(removed);
+});
+
+test("強制終了でDocumentPickerに残った古いキャッシュも回収し、直近と他のファイルは保つ", () => {
+  const now = Date.now(),
+    removed: string[] = [];
+  class File {
+    constructor(
+      public name: string,
+      public modificationTime: number,
+    ) {}
+    delete() {
+      removed.push(this.name);
+    }
+  }
+  const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
+    "react-native": { Platform: { OS: "android" } },
+    "expo-file-system": {
+      File,
+      Paths: { cache: { list: () => [new File("unrelated", 1)] } },
+      Directory: class {
+        list() {
+          return [
+            new File("orphan.kifumate", now - 3600001),
+            new File("in-progress.kifumate", now),
+          ];
+        }
+      },
+    },
+    "expo-document-picker": {},
+    "expo-sharing": {},
+    "./backup": {},
+  });
+  api.clearExpiredBackups();
+  assert.deepEqual(removed, ["orphan.kifumate"]);
+});
+
+test("起動時に期限切れバックアップを掃除する", () => {
+  let cleaned = 0;
+  const api = loadWithMocks<{ DataProvider: (p: object) => unknown }>(
+    "src/components/data-provider.tsx",
+    {
+      react: {
+        createContext: () => ({ Provider: "Provider" }),
+        useContext: () => ({}),
+        useCallback: (f: any) => f,
+        useState: (v: any) => [v, () => {}],
+        useEffect: (f: () => void) => f(),
+      },
+      "expo-sqlite": {
+        useSQLiteContext: () => ({
+          getFirstAsync: async () => ({ value: "true" }),
+        }),
+      },
+      "./ui": { Problem: "Problem", Screen: "Screen" },
+      "../storage/backup-file": {
+        clearExpiredBackups: () => {
+          cleaned++;
+        },
+      },
+    },
+  );
+  api.DataProvider({});
+  assert.equal(cleaned, 1);
+});
+
+test("バックアップ選択はMIMEを絞り、Webでは拡張子も指定する", async () => {
+  for (const platform of ["android", "web"]) {
+    let types: string[] = [];
+    const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
+      "react-native": { Platform: { OS: platform } },
+      "expo-file-system": {},
+      "expo-sharing": {},
+      "./backup": {},
+      "expo-document-picker": {
+        getDocumentAsync: async (options: any) => {
+          types = options.type;
+          return { canceled: true };
+        },
+      },
+    });
+    assert.equal(await api.pickBackup(), null);
+    assert(types.includes("application/octet-stream"));
+    assert(types.includes("application/x-kifumate-backup"));
+    assert(!types.includes("*/*"));
+    assert(!types.some((t) => t.startsWith("video/")));
+    assert.equal(types.includes(".kifumate"), platform === "web");
+  }
+});
+test("形式を偽った選択も拡張子で拒否しキャッシュを回収する", async () => {
+  let deleted = false;
+  const api = loadWithMocks<typeof Files>("src/storage/backup-file.ts", {
+    "react-native": { Platform: { OS: "android" } },
+    "expo-sharing": {},
+    "./backup": { backupLimit: 100 },
+    "expo-file-system": {
+      File: class {
+        exists = true;
+        size = 1;
+        delete() {
+          deleted = true;
+        }
+        readableStream() {
+          assert.fail("動画を読まない");
+        }
+      },
+    },
+    "expo-document-picker": {
+      getDocumentAsync: async () => ({
+        canceled: false,
+        assets: [{ name: "video.mp4", uri: "file:///cache/video", size: 1 }],
+      }),
+    },
+  });
+  await assert.rejects(api.pickBackup(), /\.kifumate/);
+  assert(deleted);
 });
