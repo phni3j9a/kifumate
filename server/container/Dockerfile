@@ -17,7 +17,8 @@ RUN cd /src/source && make clean && make -j2 COMPILER=clang++ TARGET_CPU=AVX2 \
 FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --only-binary=:all: pip==26.3 \
+ && python -m pip install --no-cache-dir --only-binary=:all: -r requirements.txt
 COPY --from=build /engine /app/engine-compatible
 COPY --from=build /engine-avx2 /app/engine-avx2
 COPY eval/nn.bin /app/eval/nn.bin
