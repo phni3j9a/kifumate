@@ -25,6 +25,33 @@ public class PipeProvider extends DocumentsProvider {
       finish();
     }
   }
+  public static class Dump extends android.app.Instrumentation {
+    public void onCreate(android.os.Bundle args) { super.onCreate(args); start(); }
+    public void onStart() {
+      android.os.Bundle result = new android.os.Bundle();
+      try {
+        org.xmlpull.v1.XmlSerializer xml = android.util.Xml.newSerializer();
+        java.io.StringWriter writer = new java.io.StringWriter(); xml.setOutput(writer);
+        xml.startDocument("UTF-8", true); xml.startTag(null, "hierarchy");
+        android.app.UiAutomation automation = getUiAutomation();
+        android.view.accessibility.AccessibilityNodeInfo root = null;
+        for (int i=0;i<20 && root==null;i++) { Thread.sleep(100); root=automation.getRootInActiveWindow(); }
+        node(xml, root);
+        xml.endTag(null, "hierarchy"); xml.endDocument(); result.putString("stream", writer.toString());
+      } catch (Exception e) { result.putString("stream", e.toString()); }
+      finish(android.app.Activity.RESULT_OK, result);
+    }
+    private void node(org.xmlpull.v1.XmlSerializer xml, android.view.accessibility.AccessibilityNodeInfo n) throws Exception {
+      if (n == null) return;
+      android.graphics.Rect r = new android.graphics.Rect(); n.getBoundsInScreen(r);
+      xml.startTag(null, "node");
+      xml.attribute(null, "text", n.getText() == null ? "" : n.getText().toString());
+      xml.attribute(null, "content-desc", n.getContentDescription() == null ? "" : n.getContentDescription().toString());
+      xml.attribute(null, "bounds", "["+r.left+","+r.top+"]["+r.right+","+r.bottom+"]");
+      for (int i=0;i<n.getChildCount();i++) node(xml,n.getChild(i));
+      xml.endTag(null,"node");
+    }
+  }
   private static final String[] DOCS = {Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME,
       Document.COLUMN_MIME_TYPE, Document.COLUMN_FLAGS, Document.COLUMN_SIZE, Document.COLUMN_LAST_MODIFIED};
   private static final String[] IDS = {"backup", "bench4", "bench16", "bench32", "oversize"};
@@ -61,11 +88,27 @@ public class PipeProvider extends DocumentsProvider {
               byte[] buffer = new byte[65536]; int n;
               while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
             }
-          } else {
-            long count = (id.equals("oversize") ? 256 : Integer.parseInt(id.substring(5))) * 1024L * 1024L;
-            if (id.equals("oversize")) count++;
+          } else if (id.equals("oversize")) {
+            long count = 256L * 1024L * 1024L + 1;
             byte[] buffer = new byte[65536]; Arrays.fill(buffer, (byte)'a');
             while (count > 0) { int n = (int)Math.min(count, buffer.length); out.write(buffer, 0, n); count -= n; }
+          } else {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (InputStream in = getContext().getAssets().open("backup.kifumate")) {
+              byte[] buffer = new byte[65536]; int n;
+              while ((n = in.read(buffer)) != -1) bytes.write(buffer, 0, n);
+            }
+            String[] lines = new String(bytes.toByteArray(), "UTF-8").split("\n");
+            byte[] header = (lines[0] + "\n" + lines[1] + "\n").getBytes("UTF-8");
+            byte[] game = (lines[2] + "\n").getBytes("UTF-8");
+            int target = Integer.parseInt(id.substring(5)) * 1024 * 1024;
+            int games = (target - header.length - 64) / game.length;
+            byte[] end = ("{\"type\":\"end\",\"games\":" + games + "}\n").getBytes("UTF-8");
+            out.write(header);
+            for (int i = 0; i < games; i++) out.write(game);
+            int padding = target - header.length - games * game.length - end.length;
+            for (int i = 0; i < padding - 1; i++) out.write(' ');
+            out.write('\n'); out.write(end);
           }
           Log.i("KifumatePipe", "END " + id + " " + System.currentTimeMillis());
         } catch (Exception e) { Log.e("KifumatePipe", "WRITE " + id, e); }

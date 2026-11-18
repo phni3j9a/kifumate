@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.quarterlambda.kifumate.pipevalidation">
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="28" />
+  <instrumentation android:name=".PipeProvider$Dump" android:targetPackage="com.quarterlambda.kifumate.pipevalidation" />
   <application android:label="Kifumate pipe validation" android:allowBackup="false">
     <activity android:name=".PipeProvider$SetupActivity" android:exported="true" />
     <provider android:name=".PipeProvider" android:authorities="com.quarterlambda.kifumate.pipevalidation.documents" android:exported="true" android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
