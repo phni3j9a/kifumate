@@ -448,3 +448,22 @@ test("同じUUIDの同一棋譜が重なっていても、指し手の重複と�
     target.sql.close();
   }
 });
+
+test("復元の上限を超えるファイルを、書き出し成功として渡さない", async () => {
+  const s = await database();
+  try {
+    await s.db.runAsync(
+      "INSERT INTO aliases VALUES ('large',?,'large','2026-11-18')",
+      "x".repeat(32 * 1024 * 1024),
+    );
+    await assert.rejects(text(s.db), /バックアップが大きすぎます/);
+    assert.equal(
+      (await s.db.getFirstAsync<{ n: number }>(
+        "SELECT count(*) AS n FROM aliases",
+      ))!.n,
+      1,
+    );
+  } finally {
+    s.sql.close();
+  }
+});

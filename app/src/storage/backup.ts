@@ -13,6 +13,7 @@ import type { Analysis, Saved } from "../analysis/types";
 
 export const backupVersion = 1;
 export const backupLimit = 256 * 1024 * 1024;
+const lineLimit = 32 * 1024 * 1024;
 const columns = [
   "id",
   "identity",
@@ -281,6 +282,20 @@ export async function* exportBackup(
   db: SQLiteDatabase,
   progress: (n: number) => void = () => {},
 ) {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  for await (const line of backupLines(db, progress)) {
+    if (
+      line.length - 1 > lineLimit ||
+      (bytes += encoder.encode(line).byteLength) > backupLimit
+    )
+      throw new Error(
+        "バックアップが大きすぎます。1ファイル256MB、1局32Mi文字までです。端末のデータは変更していません。",
+      );
+    yield line;
+  }
+}
+async function* backupLines(db: SQLiteDatabase, progress: (n: number) => void) {
   const header = {
     format: "kifumate-backup",
     version: backupVersion,
@@ -376,7 +391,7 @@ export async function prepareBackup(
   try {
     for await (const line of lines) {
       bytes += line.length;
-      check(bytes <= backupLimit && line.length <= 32 * 1024 * 1024);
+      check(bytes <= backupLimit && line.length <= lineLimit);
       if (!line.trim()) continue;
       const v = JSON.parse(line);
       check(object(v) && !end);
@@ -561,7 +576,7 @@ export async function* textLines(chunks: AsyncIterable<string>) {
       at: number;
     while ((at = chunk.indexOf("\n", start)) >= 0) {
       const part = chunk.slice(start, at);
-      check(size + part.length <= 32 * 1024 * 1024);
+      check(size + part.length <= lineLimit);
       parts.push(part);
       yield parts.join("");
       parts = [];
@@ -572,7 +587,7 @@ export async function* textLines(chunks: AsyncIterable<string>) {
       const tail = chunk.slice(start);
       parts.push(tail);
       size += tail.length;
-      check(size <= 32 * 1024 * 1024);
+      check(size <= lineLimit);
     }
   }
   if (parts.length) yield parts.join("");
