@@ -27,7 +27,7 @@
       "package": "com.quarterlambda.kifumate",
       "adaptiveIcon": {
         "foregroundImage": "./src/assets/adaptive-icon.png",
-        "backgroundColor": "#FFD23F"
+        "backgroundColor": "#FEBF02"
       },
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
