@@ -420,8 +420,6 @@ export async function prepareBackup(
       check(v.type === "game");
       validateItem(v);
       games++;
-      check(!seenIds.has(v.game.id as string));
-      seenIds.add(v.game.id as string);
       const exists = await db.getFirstAsync(
         "SELECT identity FROM backup_stage WHERE identity=?",
         v.game.identity,
@@ -430,6 +428,8 @@ export async function prepareBackup(
         duplicates++;
         continue;
       }
+      check(!seenIds.has(v.game.id as string));
+      seenIds.add(v.game.id as string);
       if (
         await db.getFirstAsync(
           "SELECT id FROM games WHERE identity=?",
@@ -473,8 +473,7 @@ export async function restoreBackup(
   uuid: () => string,
   progress: (n: number) => void = () => {},
 ) {
-  let added = 0,
-    skipped = 0;
+  let added = 0;
   await db.withTransactionAsync(async () => {
     if (mode === "replace") {
       await db.runAsync("DELETE FROM games");
@@ -501,7 +500,6 @@ export async function restoreBackup(
           g.identity,
         )
       ) {
-        skipped++;
         continue;
       }
       if (await db.getFirstAsync("SELECT id FROM games WHERE id=?", g.id))
@@ -553,7 +551,7 @@ export async function restoreBackup(
     );
   });
   await clearPreparedBackup(db);
-  return { added, skipped };
+  return { added, skipped: preview.games - added };
 }
 export async function* textLines(chunks: AsyncIterable<string>) {
   let parts: string[] = [],

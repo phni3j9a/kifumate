@@ -114,7 +114,7 @@ export default function Backup() {
       );
       setLast(now);
       setOutput(null);
-      toast("バックアップを書き出しました");
+      toast("バックアップを書き出しました。保存先のファイルを確かめてください");
     } catch (e) {
       setOutput(null);
       fail(e);
@@ -320,7 +320,7 @@ export default function Backup() {
         onClose={() => setOutput(null)}
       >
         <Hint>
-          1つのファイルにまとめました。保存先か共有先を選んでください。
+          1つのファイルにまとめました。保存先か共有先を選んでください。共有画面を閉じるだけでは保存されないことがあります。アプリを削除する前に、保存先にファイルがあるか確かめてください。
         </Hint>
         <View style={{ gap: 10 }}>
           <Button

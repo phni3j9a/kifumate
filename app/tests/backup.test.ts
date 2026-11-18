@@ -259,7 +259,8 @@ test("ファイル内の同一指し手も取り込みと同じキーで重複�
     lines[4] = JSON.stringify({ type: "end", games: 2 });
     const p = await prepare(target.db, lines.join("\n"));
     assert.equal(p.duplicates, 1);
-    await restoreBackup(target.db, p, "replace", randomUUID);
+    const result = await restoreBackup(target.db, p, "replace", randomUUID);
+    assert.deepEqual(result, { added: 1, skipped: 1 });
     assert.equal(dump(target.sql, "games").length, 1);
   } finally {
     source.sql.close();
@@ -422,6 +423,26 @@ test("登録名が複数あっても、復元後の再出力で順序が変わ�
     assert(rows[0]!.created_at < rows[1]!.created_at);
     const exported = JSON.parse((await text(target.db)).split("\n")[1]!);
     assert.deepEqual(exported.aliases, p.aliases);
+  } finally {
+    source.sql.close();
+    target.sql.close();
+  }
+});
+
+test("同じUUIDの同一棋譜が重なっていても、指し手の重複として1局にまとめる", async () => {
+  const source = await database(),
+    target = await database();
+  try {
+    await seed(source.db);
+    const lines = (await text(source.db)).trimEnd().split("\n");
+    lines.splice(3, 0, lines[2]!);
+    lines[4] = JSON.stringify({ type: "end", games: 2 });
+    const p = await prepare(target.db, lines.join("\n"));
+    assert.equal(p.duplicates, 1);
+    assert.deepEqual(await restoreBackup(target.db, p, "replace", randomUUID), {
+      added: 1,
+      skipped: 1,
+    });
   } finally {
     source.sql.close();
     target.sql.close();
