@@ -34,7 +34,7 @@ adb shell am start -a android.intent.action.VIEW -d exp://127.0.0.1:8081 host.ex
 
 既定の `start`・`android`・`web` は `--go` を指定しています。`expo-dev-client` が依存にあっても、`npm start` は `Using Expo Go` と接続先の `exp://` を表示します。SDK 58ではQRからアプリ選択ページを経由する場合があるので、その場合はExpo Goを選んでください。
 
-EASの `development` プロファイルで作成・インストールした開発クライアントを使う場合だけ、次で起動します（今回は開発APKをビルドしません）。
+開発クライアントを使う場合だけ、次で起動します。開発クライアント自体は `APP_VARIANT=development npx expo run:android` で手元ビルド・インストールできます（未検証）。
 
 ```sh
 npm run start:dev              # APP_VARIANT=development と --dev-client を指定済み
@@ -49,61 +49,43 @@ Web の本番用バンドル：`npx expo export --platform web`。配信時は S
 
 **現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-19-arm64-latest.apk`（表示版0.1.0、`versionCode=19`、arm64-v8a専用、42,416,347byte、モックとの見た目・動きの統一 #42/#43、アダプティブアイコン #39、設定とプラン画面の回数・権利表示の整理 #45 を含む）。隣の `.sha256` で照合できます。署名証明書・権限（INTERNETのみ）・arm64のみは版17と同一であることを確認済み。旧版は同じフォルダーで `old` と明記しています（版18は `kifumate-0.1.0-18-old-before-quota-cleanup.apk`、版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
 
-EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）です。ビルドとAndroid署名鍵をEASで管理します。表示名はモックと同じ **kifumate**、表示用の版は **0.1.0**。`android/`・`ios/`は生成物でコミットしません。
+配布APKは **EASを使わず、このマシンのスクリプトでビルドします**（PiMateと同じ方式、#47）。`expo prebuild --clean` → Gradle `:app:assembleRelease` を実行し、外部の署名情報を `scripts/release-signing.gradle` が読み込みます。`android/`・`ios/`は生成物でコミットせず、生成後の手編集もしません。表示名はモックと同じ **kifumate**。
 
-| `eas.json` のプロファイル | 用途 | 接続先・ID |
+| 版 | 起動・ビルド | 接続先・ID |
 | --- | --- | --- |
-| `development` | `expo-dev-client` の開発APK | staging・`com.quarterlambda.kifumate.development`・kifumate（開発） |
-| `apk` | 招待制の署名付きリリースAPK（`buildType: apk`） | 本番・`com.quarterlambda.kifumate`・開発判定は無効 |
-| `production` | 将来のストア用AAB（設定のみ） | 本番・同じリリースID。購入・ストア公開は別作業 |
+| 開発（`APP_VARIANT=development`） | Expo Go／開発クライアント | staging・`com.quarterlambda.kifumate.development`・kifumate（開発） |
+| 配布（既定・`APP_VARIANT=production`） | `npm run build:android` の署名付きリリースAPK | 本番・`com.quarterlambda.kifumate`・開発判定は無効 |
 
-配布用の `apk` と将来のストア用 `production` は **arm64-v8a専用**です。公式の `expo-build-properties` の `android.buildArchs: ["arm64-v8a"]` を `app.config.ts` のリリース側にだけ設定し、Prebuildで `reactNativeArchitectures` を生成します。**32bit ARM端末（64bit CPUでもOSが32bitの端末を含む）とx86／x86_64端末にはインストールできません**。開発プロファイルは従来の4ABIのままで、エミュレータ向けのABIも残しています。
+配布版は **arm64-v8a専用**です。公式の `expo-build-properties` の `android.buildArchs: ["arm64-v8a"]` を `app.config.ts` のリリース側にだけ設定し、Prebuildで `reactNativeArchitectures` を生成します。**32bit ARM端末（64bit CPUでもOSが32bitの端末を含む）とx86／x86_64端末にはインストールできません**。開発版は従来の4ABIのままです。
 
-`app.config.ts` はEASプロファイルの `APP_VARIANT=development` のときだけ開発用IDへ変更します。既定と配布版はリリースIDです。Expo Go・開発版と配布版の棋譜／トークンは別アプリのデータで、自動移行されません。開発版を作るだけでは招待権利は付きません。APKは `__DEV__ === false` のリリースで、環境変数を変えても本番URL固定・開発用権利は拒否します。
+`app.config.ts` は `APP_VARIANT=development` のときだけ開発用IDへ変更します。既定と配布版はリリースIDです。Expo Go・開発版と配布版の棋譜／トークンは別アプリのデータで、自動移行されません。開発版を作るだけでは招待権利は付きません。APKは `__DEV__ === false` のリリースで、環境変数を変えても本番URL固定・開発用権利は拒否します（スクリプトも `EXPO_PUBLIC_ANALYSIS_URL` を本番に指定し、`.env.local` のstagingを使いません）。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。
 
-### クラウドでビルド・保存
+### ビルド
+
+準備：Node.js、**JDK 17**（JREだけでは不可。このマシンは `/usr/lib/jvm/java-17-openjdk-amd64`）、Android SDK（`~/Android/Sdk`：SDK Platform 37.0・Build Tools 37.0.0・NDK 27.1）、署名鍵のバックアップ（下記）。EASのログインや通信は不要です。
 
 ```sh
 cd app
 npm ci
-npx eas-cli@latest login  # asitaka.k。既にログイン済みなら不要
-npx eas-cli@latest whoami
-npm run check
-npm run test:web
-npx eas-cli@latest build --platform android --profile apk
-# 完了後、EASのビルド画面からAPKをダウンロードし、例えば次へ保管する
-mkdir -p ~/kifumate-releases
-# ~/kifumate-releases/kifumate-0.1.0-<versionCode>.apk
+npm run check && npm run test:web
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 npm run build:android
 ```
 
-EASプロジェクトの `internalDistributionBuildPrivacy` は **PRIVATE**（未認証アクセス無効）に設定しています。ビルドURLは本人用の管理画面で、知人へはAPKの実体を個別に渡します。EASの内部配布URL／APKのダウンロードURLを公開しないでください。`.easignore` は開発環境変数・ネイティブ生成物・ローカル検証データ・署名情報をアップロードから除きます。`EXPO_PUBLIC_*` はAPKから読めるので秘密を入れません。無料枠を節約するため、ローカル検証を通してから依頼し、AABや開発版を確認のためだけに追加ビルドしません。
-
-クラウドが混雑している場合や上書き更新確認の2回目は、Android SDK・NDK・JDKがあるLinux/macOSで同じEAS設定を使えます。ローカルでもログイン・EASの鍵と版番号への接続が必要です。
-
-```sh
-# このマシンは JDK 17、~/Android/Sdk（SDK Platform 37.0・Build Tools 37.0.0）を使用
-JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
-  ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" \
-  npx eas-cli@latest build --platform android --profile apk --local \
-  --output "$HOME/kifumate-releases/kifumate-0.1.0-update.apk"
-```
-
-ローカルでも同じ `apk` プロファイルがEAS上の番号を先に更新し、その番号をネイティブへ埋め込みます。手元だけで番号を変更したり、クラウドの番号を巻き戻したりしません。完了後は `aapt dump badging <APK>` で番号を確かめ、配布ファイル名にも `versionCode` を付けてください。
+出力は `~/kifumate-releases/kifumate-<version>-<versionCode>.apk` と `.sha256`（`KIFUMATE_RELEASE_DIR` で変更可）。同名ファイルがあれば上書きせず停止します。最後に `apksigner` の署名検証と証明書の指紋を表示します。Gradleの並列数は既定2（`KIFUMATE_GRADLE_WORKERS`）。このマシンで約6分です。完了後は `aapt dump badging <APK>` で版・ID・`native-code: 'arm64-v8a'` を確かめます。
 
 ### 版と上書き更新
 
-- **表示用の版**：`app.json` の `expo.version`（現在 `0.1.0`）を変更し、`package.json`／lockfileの版もそろえます。自動では上がりません。
-- **更新の番号**：`cli.appVersionSource: remote` と各プロファイルの `autoIncrement: true` でEASがAndroid `versionCode`を採番します。`app.json`に手で番号を書かず、ビルド失敗で欠番ができても戻しません。確認は `npx eas-cli@latest build:version:get --platform android --profile apk`。
+- **版と番号**：`versionName` は `app.json` の `expo.version`、`versionCode` は `app.config.ts` が `major * 1_000_000 + minor * 1_000 + patch` で算出します（0.1.0 → 1000、各要素0〜999の安定版のみ）。`app.json` に番号は書きません。**配布のたびに `expo.version` を上げ**、`package.json`／lockfileの版もそろえます。
+- EAS採番だった版19までより1000以上が大きいので、そのまま上書き更新できます。一度配った番号より小さい版へは戻せません。
 - 同じアプリID・**同じ署名鍵**で、より大きな `versionCode`のAPKを配ります。先にアンインストールせず、端末で新しいAPKを開き「更新」を選びます。棋譜・解析・解説・設定が残ることを確認します。USB確認は `adb -s 8AFX0S69E install -r <新しいAPK>`。古い番号への戻しやデータ消去はしません。
 - リポジトリにはAPK・AABを置かず、**公開リポジトリやGitHub Releasesにもアップロードしません**。信頼できる私的な共有経路で対象者だけへファイルと表示版・更新番号を伝えます。自動更新通知はありません。
+- 将来のストア用AABは同じ手順で `:app:bundleRelease` にすれば作れますが、スクリプト化はしていません（購入・ストア公開は別作業）。
 
 ### 署名鍵とバックアップ
 
-EASの既定のAndroid keystoreを継続使用します。バックアップ1部は **`~/.config/kifumate/android-keystore/`** の `credentials.json` と `credentials/android/keystore.jks`。ディレクトリ0700、ファイル0600です。パスワードは `credentials.json` に含まれるので、**中身を表示・ログ保存・チャット送信・コミットしないでください**。利用者本人が両方をパスワードマネージャー等の安全な保管先へ移してください。通常のAPK配布に鍵は渡しません。
+版19まで EAS が管理していた鍵をそのまま使います。正本は **`~/.config/kifumate/android-keystore/`**（`KIFUMATE_SIGNING_DIR` で変更可、**リポジトリ外必須**）の `credentials.json`（EAS形式。keystoreの相対パス・alias・パスワード）と `credentials/android/keystore.jks`。ディレクトリ0700、ファイル0600で、スクリプトも毎回そろえます。**中身を表示・ログ保存・チャット送信・コミットしないでください**。スクリプトは鍵を生成せず、`credentials.json` が無ければ停止します。
 
-再ダウンロードは `npx eas-cli@latest credentials --platform android` → `apk` → `credentials.json: Upload/Download...` → `Download credentials from EAS to credentials.json`。**CLIは実行ディレクトリに書くため、リポジトリ内でダウンロードしないこと**。リポジトリ外の0700の一時ディレクトリへ `app.json`・`eas.json`・`package.json`・`app.config.ts`をコピーし、依存解決用に `node_modules` への一時シンボリックリンクを用意して実行します。`EAS_NO_VCS=1`を指定し、`umask 077`で作成、終了後は設定のコピー・リンクを取り除いて0700/0600を再確認します。機密情報を表示する質問には「いいえ」を選びます。
-
-EAS上の鍵とバックアップを両方失うと、配布済みアプリを同じIDのまま更新できません。新しい鍵へ勝手に作り直さないでください。再インストールにはアンインストールが必要となり、バックアップしていない棋譜・解析・解説は失われます。鍵／EASアカウントの漏えいにも注意してください。
+**このフォルダーを暗号化して別の安全な場所にもバックアップしてください。失くすと配布済みアプリを同じIDのまま更新できません**（再インストールにはアンインストールが必要で、バックアップしていない棋譜・解析・解説は失われます）。新しい鍵へ勝手に作り直さないでください。EASプロジェクト [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）にも同じ鍵が残っており、`npx eas-cli@latest credentials --platform android` で再ダウンロードできます（リポジトリ外の0700の一時ディレクトリで実行すること）。
 
 ### 知人へのインストール案内
 

@@ -13,7 +13,8 @@
     "test:web": "playwright test",
     "check": "npm run test && npm run typecheck && npm run lint",
     "compare": "tsx scripts/compare-mock.mts",
-    "start:dev": "APP_VARIANT=development expo start --dev-client"
+    "start:dev": "APP_VARIANT=development expo start --dev-client",
+    "build:android": "bash scripts/build-android-release.sh"
   },
   "dependencies": {
     "@expo-google-fonts/zen-maru-gothic": "^0.4.2",

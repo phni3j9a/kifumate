@@ -1,0 +1,19 @@
+// Applied after CNG, without editing the generated Android project or copying secrets into it.
+// Reads the EAS-format credentials.json backup (keystore path is relative to that file).
+gradle.beforeProject { app ->
+    app.plugins.withId('com.android.application') {
+        app.androidComponents.finalizeDsl { android ->
+            def file = new File(System.getenv('KIFUMATE_CREDENTIALS'))
+            def keystore = new groovy.json.JsonSlurper().parse(file).android?.keystore ?: [:]
+            ['keystorePath', 'keystorePassword', 'keyAlias', 'keyPassword'].each { key ->
+                if (!keystore[key]) throw new GradleException("Missing signing property: ${key}")
+            }
+            def signing = android.signingConfigs.create('kifumateRelease')
+            signing.storeFile = new File(file.parentFile, keystore.keystorePath)
+            signing.storePassword = keystore.keystorePassword
+            signing.keyAlias = keystore.keyAlias
+            signing.keyPassword = keystore.keyPassword
+            android.buildTypes.release.signingConfig = signing
+        }
+    }
+}
