@@ -21,12 +21,16 @@ import { Color, formatMove, Move, Square, type PieceType } from "tsshogi";
 import { Board } from "../../components/board";
 import { ChanceBar } from "../../components/chance-bar";
 import { EvaluationHelp } from "../../components/evaluation-help";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ensureVisibleY } from "../../core/scroll";
 import ExportSheet from "../../components/export-sheet";
 import { EvalGraph } from "../../components/graph";
 import { Icon } from "../../components/icons";
-import { ask, MenuRow, Sheet, toast } from "../../components/overlay";
+import {
+  ask,
+  hideToast,
+  MenuRow,
+  Sheet,
+  toast,
+} from "../../components/overlay";
 import { colors, font, line, radius, shadow } from "../../components/theme";
 import {
   Button,
@@ -128,7 +132,15 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const opened = useRef(false);
   const [initialized, setInitialized] = useState(false);
   const { records, offline, controller, ready, watchReview } = useAnalysis();
-  const undoBranch = useRef<Branch | null>(null);
+  const undoBranch = useRef<(() => void) | null>(null);
+  const clearBranchUndo = useCallback(() => {
+    if (undoBranch.current) hideToast(undoBranch.current);
+    undoBranch.current = null;
+  }, []);
+  const [movesRow, setMovesRow] = useState<{
+    y: number;
+    height: number;
+  } | null>(null);
   const loaded = !!record && !!game;
   const reviewJump = useRef(() => {});
   useFocusEffect(
@@ -138,9 +150,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         : undefined;
       return () => {
         unwatch?.();
-        undoBranch.current = null;
+        clearBranchUndo();
       };
-    }, [watchReview, id, loaded]),
+    }, [watchReview, id, loaded, clearBranchUndo]),
   );
   const analysis = records[id];
   const rt = useRealtime();
@@ -239,7 +251,6 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     }
   }, [record, ready, analysis, evaluated, game?.self_side]);
   const { width: W, height: H } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const base = branch?.base;
   // 戻る操作は、まず分岐を抜ける（モックの back()）。
   useFocusEffect(
@@ -274,11 +285,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const position = branch?.position || record.position;
   const own = !!game.self_side;
   const self = game.self_side === "white" ? Color.WHITE : Color.BLACK;
-  const bottom = flipped
-    ? self === Color.BLACK
-      ? Color.WHITE
-      : Color.BLACK
-    : self;
+  const bottom = !own && flipped ? Color.WHITE : self;
   const top = bottom === Color.BLACK ? Color.WHITE : Color.BLACK;
   // 反転は盤だけ。形勢情報の軸は自分の側（観戦では先手）に固定する。
   const nameOf = (color: Color) =>
@@ -317,17 +324,15 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     setBranch(null);
     clear();
     if (!branch || branch.moves.length < 2) return;
-    undoBranch.current = branch;
-    toast("本譜に戻りました", {
-      label: "分岐に戻る",
-      onPress: () => {
-        if (undoBranch.current !== branch) return;
-        undoBranch.current = null;
-        setPly(branch.base);
-        setBranch(branch);
-        clear();
-      },
-    });
+    const restore = () => {
+      if (undoBranch.current !== restore) return;
+      clearBranchUndo();
+      setPly(branch.base);
+      setBranch(branch);
+      clear();
+    };
+    undoBranch.current = restore;
+    toast("本譜に戻りました", { label: "分岐に戻る", onPress: restore });
   }
   reviewJump.current = () =>
     jumpMain(
@@ -349,7 +354,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     }
     try {
       const b = branch ?? new Branch(ply, position);
-      undoBranch.current = null;
+      clearBranchUndo();
       b.play(move);
       setBranch(b);
       redraw((v) => v + 1);
@@ -593,7 +598,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         });
         return;
       }
-      undoBranch.current = null;
+      clearBranchUndo();
       setBranch(null);
       clear();
       void controller
@@ -672,13 +677,6 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
       </Text>
     </Pressable>
   );
-  // Sheet の58%の高さから、見出し48px・上枠・下の安全領域を引く。
-  const movesViewport = H * 0.58 - 48 - line.ol - insets.bottom;
-  const moveRowHeight = 36.2; // 本文13.5 × 1.2 + 上下10px
-  const movesY = branch
-    ? 0
-    : ensureVisibleY(6 + ply * moveRowHeight, moveRowHeight, 0, movesViewport);
-
   return (
     <Screen bottom>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -845,7 +843,10 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="棋譜を開く"
-            onPress={() => setSheet("moves")}
+            onPress={() => {
+              setMovesRow(null);
+              setSheet("moves");
+            }}
             style={({ pressed }) => [
               s.now,
               { height: cb },
@@ -1027,7 +1028,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           start={() => start("precise")}
           jump={jumpMain}
           tryLine={(p, pv) => {
-            undoBranch.current = null;
+            clearBranchUndo();
             record.goto(p);
             const next = new Branch(p, record.position);
             for (const usi of pv) {
@@ -1042,82 +1043,94 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           }}
         />
       )}
-      <Sheet
-        visible={sheet === "moves"}
-        title={
-          branch
-            ? "分岐の手順"
-            : `棋譜（${date ? `${date.m}/${date.d}・` : ""}${total}手）`
-        }
-        onClose={() => setSheet(null)}
-        scrollToY={movesY}
-      >
-        {branch ? (
-          <>
-            <View style={s.mrh}>
-              <Text style={[font(700, 11.5, 1.4, colors.ink2), { flex: 1 }]}>
-                {plyLabel(branch.base)}
-                から分かれた手順です。本譜と戦績は変わりません。
-              </Text>
-              <Button
-                size="sm"
-                onPress={() => {
-                  setSheet(null);
-                  leaveBranch();
-                }}
-              >
-                本譜に戻る
-              </Button>
-            </View>
-            {branch.moves.map((m, i) => (
-              <Pressable
-                key={i}
-                accessibilityRole="button"
-                aria-selected={i + 1 === at}
-                onPress={() => {
-                  setSheet(null);
-                  step(i + 1);
-                }}
-                style={[s.mr, i + 1 === at && { backgroundColor: colors.you }]}
-              >
-                <Text style={s.mn}>{i + 1}</Text>
-                <Text style={font(700, 13.5, 1.2)}>{branchText(i)}</Text>
-              </Pressable>
-            ))}
-          </>
-        ) : (
-          // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
-          [null, ...mainMoves].map((n, i) => {
-            const score = results.find((r) => r.ply === i)?.score;
-            return (
-              <Pressable
-                key={i}
-                accessibilityRole="button"
-                aria-selected={i === ply}
-                onPress={() => jumpMain(i)}
-                style={[
-                  s.mr,
-                  { height: moveRowHeight },
-                  i === ply && { backgroundColor: colors.you },
-                ]}
-              >
-                <Text style={s.mn}>{i || ""}</Text>
-                <Text style={font(700, 13.5, 1.2)}>
-                  {n ? mainText(n) : "開始局面"}
+      {sheet === "moves" && (
+        <Sheet
+          visible
+          title={
+            branch
+              ? "分岐の手順"
+              : `棋譜（${date ? `${date.m}/${date.d}・` : ""}${total}手）`
+          }
+          onClose={() => setSheet(null)}
+          scrollRow={movesRow}
+        >
+          {branch ? (
+            <>
+              <View style={s.mrh}>
+                <Text style={[font(700, 11.5, 1.4, colors.ink2), { flex: 1 }]}>
+                  {plyLabel(branch.base)}
+                  から分かれた手順です。本譜と戦績は変わりません。
                 </Text>
-                <Text style={[font(900, 10, 1.2), { marginLeft: "auto" }]}>
-                  {evaluated[i]?.mark || (evaluated[i]?.mate ? "詰みあり" : "")}
-                </Text>
-                {score && (
-                  <Text style={font(700, 11, 1.2, colors.ink2)}>
-                    {scoreText(score, self)}
+                <Button
+                  size="sm"
+                  onPress={() => {
+                    setSheet(null);
+                    leaveBranch();
+                  }}
+                >
+                  本譜に戻る
+                </Button>
+              </View>
+              {branch.moves.map((m, i) => (
+                <Pressable
+                  key={i}
+                  accessibilityRole="button"
+                  aria-selected={i + 1 === at}
+                  onLayout={
+                    i + 1 === at
+                      ? (e) => setMovesRow(e.nativeEvent.layout)
+                      : undefined
+                  }
+                  onPress={() => {
+                    setSheet(null);
+                    step(i + 1);
+                  }}
+                  style={[
+                    s.mr,
+                    i + 1 === at && { backgroundColor: colors.you },
+                  ]}
+                >
+                  <Text style={s.mn}>{i + 1}</Text>
+                  <Text style={font(700, 13.5, 1.2)}>{branchText(i)}</Text>
+                </Pressable>
+              ))}
+            </>
+          ) : (
+            // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
+            [null, ...mainMoves].map((n, i) => {
+              const score = results.find((r) => r.ply === i)?.score;
+              return (
+                <Pressable
+                  key={i}
+                  accessibilityRole="button"
+                  aria-selected={i === ply}
+                  onPress={() => jumpMain(i)}
+                  onLayout={
+                    i === ply
+                      ? (e) => setMovesRow(e.nativeEvent.layout)
+                      : undefined
+                  }
+                  style={[s.mr, i === ply && { backgroundColor: colors.you }]}
+                >
+                  <Text style={s.mn}>{i || ""}</Text>
+                  <Text style={font(700, 13.5, 1.2)}>
+                    {n ? mainText(n) : "開始局面"}
                   </Text>
-                )}
-              </Pressable>
-            );
-          })
-        )}
-      </Sheet>
+                  <Text style={[font(900, 10, 1.2), { marginLeft: "auto" }]}>
+                    {evaluated[i]?.mark ||
+                      (evaluated[i]?.mate ? "詰みあり" : "")}
+                  </Text>
+                  {score && (
+                    <Text style={font(700, 11, 1.2, colors.ink2)}>
+                      {scoreText(score, self)}
+                    </Text>
+                  )}
+                </Pressable>
+              );
+            })
+          )}
+        </Sheet>
+      )}
       <Sheet
         auto
         visible={sheet === "menu"}

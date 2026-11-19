@@ -602,11 +602,11 @@ export function CoachSheet({
     </>
   );
   return (
-    <Animated.View
-      testID="coach-sheet"
+    <KeyboardAvoidingView
       accessibilityViewIsModal
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[
-        s.sheet,
+        s.sheetFrame,
         {
           top: Math.min(
             Math.max(
@@ -615,18 +615,19 @@ export function CoachSheet({
             ),
             height - 250,
           ),
-          paddingBottom: insets.bottom,
-          transform: [{ translateY: slide }],
         },
       ]}
     >
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      <Animated.View
+        testID="coach-sheet"
+        style={[
+          s.sheet,
+          { paddingBottom: insets.bottom, transform: [{ translateY: slide }] },
+        ]}
       >
         {content}
-      </KeyboardAvoidingView>
-    </Animated.View>
+      </Animated.View>
+    </KeyboardAvoidingView>
   );
 }
 function SectionView({
@@ -754,12 +755,16 @@ function ReferenceView({
   );
 }
 const s = StyleSheet.create({
-  sheet: {
+  sheetFrame: {
+    // iOSのキーボード回避に、シートが親のどこから始まるかを含める。
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 5,
+  },
+  sheet: {
+    flex: 1,
     backgroundColor: colors.bg,
     borderTopWidth: line.ol,
     borderColor: colors.ink,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Animated, Easing, View } from "react-native";
+import { Animated, Easing, Platform, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { colors } from "../components/theme";
 import { useReduceMotion } from "../components/use-reduce-motion";
@@ -15,7 +15,7 @@ export function CoachSkeleton({ active }: { active: boolean }) {
         toValue: 1,
         duration: 1100,
         easing: Easing.linear,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
         isInteraction: false,
       }),
     );

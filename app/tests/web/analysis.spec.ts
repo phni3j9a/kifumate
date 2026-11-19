@@ -152,6 +152,17 @@ test("観戦棋譜の反転でも先後と勝率・グラフ・候補の基準�
   expect(Number(await arrow.getAttribute("y2"))).toBeGreaterThan(
     Number(await arrow.getAttribute("y1")),
   );
+  await button(page, "この対局のメニュー").click();
+  await button(page, "対局情報").click();
+  await page.getByRole("radio", { name: "☗ つばめ" }).click();
+  await expect(page.getByRole("radio", { name: "☗ つばめ" })).toBeChecked();
+  await button(page, "戻る").click();
+  await expect(page.getByText("あなた 88%", { exact: true })).toBeVisible();
+  expect(Number(await arrow.getAttribute("y2"))).toBeLessThan(
+    Number(await arrow.getAttribute("y1")),
+  );
+  await button(page, "この対局のメニュー").click();
+  await expect(button(page, "盤の向きを変える")).toHaveCount(0);
 });
 
 test("応答不明から7日経った依頼は自動再送せず、確認してからだけ新しく依頼する", async ({
@@ -214,7 +225,18 @@ test("初回の誘導・途中から向き直るゲージと視差軽減", async
   fake.results[1]!.score = { kind: "cp", value: -1200 };
   await button(page, "解析する").click();
   await button(page, "1手進む").click();
+  await button(page, "この対局のメニュー").click();
+  await button(page, "この棋譜を削除").click();
+  const removeDialog = page.getByRole("heading", {
+    name: "この棋譜を削除しますか",
+  });
+  await expect(removeDialog).toBeVisible();
   fake.complete = true;
+  // 候補が出た後も、先に開いた確認は利用者が閉じるまで維持する。
+  await expect(page.getByText("3位", { exact: true })).toBeAttached();
+  await expect(removeDialog).toBeVisible();
+  await expect(button(page, "見てみる")).toHaveCount(0);
+  await button(page, "やめる").click();
   await expect(
     page.getByRole("heading", { name: "はじめての解析ができました" }),
   ).toBeVisible();

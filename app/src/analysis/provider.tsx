@@ -19,7 +19,7 @@ import {
 import { AppState } from "react-native";
 import { router, usePathname } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import { ask, toast } from "../components/overlay";
+import { ask, toast, whenDialogIdle } from "../components/overlay";
 import { AnalysisClient } from "./client";
 import { AnalysisController } from "./controller";
 import { analysisStorage } from "./storage";
@@ -123,28 +123,28 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
         notice(id, failed);
         return;
       }
-      void claimFirstReview(db)
-        .then(async (first) => {
-          if (!first) return notice(id, false);
-          if (!sameScreen()) {
-            await db.runAsync(
-              "DELETE FROM settings WHERE key=?",
-              firstReviewKey,
-            );
-            return notice(id, false);
-          }
-          ask({
-            title: "はじめての解析ができました",
-            text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。",
-            ok: "見てみる",
-            single: true,
-            image: "learn-first",
-            onOk: () => {
-              if (sameScreen()) screen.jump();
-            },
-          });
-        })
-        .catch(() => notice(id, false));
+      void (async () => {
+        let pending: Promise<void> | undefined;
+        while (sameScreen() && (pending = whenDialogIdle())) await pending;
+        if (!sameScreen() || !(await claimFirstReview(db)))
+          return notice(id, false);
+        // フラグの保存中に開かれたダイアログも置き換えない。
+        while (sameScreen() && (pending = whenDialogIdle())) await pending;
+        if (!sameScreen()) {
+          await db.runAsync("DELETE FROM settings WHERE key=?", firstReviewKey);
+          return notice(id, false);
+        }
+        ask({
+          title: "はじめての解析ができました",
+          text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。",
+          ok: "見てみる",
+          single: true,
+          image: "learn-first",
+          onOk: () => {
+            if (sameScreen()) screen.jump();
+          },
+        });
+      })().catch(() => notice(id, false));
     });
   }, [controller, db]);
   useEffect(() => {

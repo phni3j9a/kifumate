@@ -165,4 +165,12 @@ test("グラフで本譜へ飛ぶと解析を停止し、2手の分岐を一度�
   await expect(
     page.getByRole("img", { name: "分岐1手目の盤面" }),
   ).toBeVisible();
+  await graph.click();
+  await expect(undo).toBeVisible();
+  await button(page, "戻る").click();
+  await expect(page.getByRole("tab", { name: "棋譜" })).toBeVisible();
+  await expect(undo).toHaveCount(0);
+  await expect(page.getByText("本譜に戻りました", { exact: true })).toHaveCount(
+    0,
+  );
 });

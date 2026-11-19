@@ -209,3 +209,36 @@ test("対局画面：持ち駒は見た目より広い範囲で押せる", async
 function assertIdentity(text: string) {
   expect(identity(readKif(text))).toBe(identity(readKif(kif)));
 }
+
+test("棋譜の文字が大きい場合も実測した現在手を画面内に収める", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await button(page, "見本の対局で試してみる").click();
+  await button(page, "最後へ").click();
+  for (let i = 0; i < 3; i++) await button(page, "1手戻る").click();
+  // WebではOSの文字倍率の代わりに、同じように行の文字と行間を大きくする。
+  await page.addStyleTag({
+    content:
+      '[role="button"][aria-selected] > div {font-size: 28px !important; line-height: 40px !important;}',
+  });
+  await button(page, "棋譜を開く").click();
+  const row = page.locator('[role="button"][aria-selected="true"]');
+  await expect(row).toHaveCount(1);
+  await expect
+    .poll(() =>
+      row.evaluate((node) => {
+        let scroller = node.parentElement;
+        while (scroller && getComputedStyle(scroller).overflowY !== "auto")
+          scroller = scroller.parentElement;
+        const r = node.getBoundingClientRect();
+        return (
+          !!scroller &&
+          scroller.scrollTop > 0 &&
+          r.height >= 60 &&
+          r.bottom <= scroller.getBoundingClientRect().bottom - 39
+        );
+      }),
+    )
+    .toBe(true);
+});
