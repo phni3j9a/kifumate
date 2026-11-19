@@ -47,7 +47,7 @@ Web の本番用バンドル：`npx expo export --platform web`。配信時は S
 
 ## Androidの配布APKビルド
 
-**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-17-arm64-latest.apk`（表示版0.1.0、`versionCode=17`、arm64-v8a専用、42,239,134byte）。隣の `.sha256` で照合できます。旧版は同じフォルダーで `old` と明記しています。ビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
+**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-18-arm64-latest.apk`（表示版0.1.0、`versionCode=18`、arm64-v8a専用、42,417,323byte、モックとの見た目・動きの統一 #42/#43 とアダプティブアイコン #39 を含む）。隣の `.sha256` で照合できます。署名証明書・権限（INTERNETのみ）・arm64のみは版17と同一であることを確認済み。旧版は同じフォルダーで `old` と明記しています（版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
 
 EASプロジェクトは [@asitaka.k/kifumate](https://expo.dev/accounts/asitaka.k/projects/kifumate)（`app.json` の `extra.eas.projectId`）です。ビルドとAndroid署名鍵をEASで管理します。表示名はモックと同じ **kifumate**、表示用の版は **0.1.0**。`android/`・`ios/`は生成物でコミットしません。
 
