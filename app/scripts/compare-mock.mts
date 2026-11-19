@@ -56,7 +56,7 @@ async function run(width: number, height: number) {
     errors.push(e.message);
     console.error("ページエラー:", e.message);
   });
-  const fake = await fakeAnalysis(a, { onboarding: true });
+  const fake = await fakeAnalysis(a, { onboarding: true, firstReview: true });
   fake.paid = false;
   fake.remaining = 10;
   await m.goto(MOCK);
@@ -353,6 +353,11 @@ async function run(width: number, height: number) {
   await shot("game-saved-toast");
   await pause(2800);
   await shot("game-not-analysed");
+  await act("evalhelp");
+  await tap("評価値");
+  await shot("sheet-evaluation-help");
+  await closeSheet();
+  await tap("閉じる");
   await act("ai");
   await tap("AIに聞く");
   await shot("coach-lock");
@@ -531,6 +536,12 @@ async function run(width: number, height: number) {
   await shot("sheet-branch-moves");
   await closeSheet();
   await tap("閉じる");
+  await rtMock("setPly(0)");
+  await a.getByRole("slider", { name: /形勢グラフ/ }).click();
+  await button("分岐に戻る").waitFor();
+  await shot("branch-undo");
+  await act("toastact");
+  await tap("分岐に戻る");
   await act("exitbr");
   await tap("本譜に戻る");
   // 対局情報、結果の修正、削除の確認
@@ -733,6 +744,13 @@ async function run(width: number, height: number) {
     .getByRole("button", { name: "中止", exact: true })
     .waitFor({ state: "hidden" });
   await a.getByRole("button", { name: "3位", exact: true }).waitFor();
+  await rtMock(
+    "DB.celebrated=false; RUN={id:CUR.id,kind:'pre',timer:0}; finishRun()",
+  );
+  await button("見てみる").waitFor();
+  await shot("dialog-first-review");
+  await act("dlgok");
+  await tap("見てみる");
   await m.evaluate(() => {
     (window as any).__compare("CUR.an='pre'; CUR.err=false; renderGame();");
   });
