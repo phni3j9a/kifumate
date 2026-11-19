@@ -116,7 +116,7 @@ export function ToastHost() {
   );
 }
 
-function useSlideUp(visible: boolean) {
+export function useSlideUp(visible: boolean) {
   const [y] = useState(() => new Animated.Value(0));
   useEffect(() => {
     if (!visible) return;

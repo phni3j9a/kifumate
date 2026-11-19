@@ -13,6 +13,8 @@ import {
   type Score,
 } from "../analysis/types";
 import { Icon } from "./icons";
+import { WaitingDots } from "./waiting-dots";
+import { BarStripes } from "./chance-bar";
 import { ask, toast } from "./overlay";
 import { colors, font, line, radius, shadow } from "./theme";
 import { Button } from "./ui";
@@ -395,21 +397,24 @@ export function AnalysisPanel({
           accessibilityRole="button"
           accessibilityLabel="AIに聞く"
           onPress={onCoach}
-          style={{
-            marginLeft: "auto",
-            height: 25,
-            marginBottom: 4,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            paddingLeft: 7,
-            paddingRight: 10,
-            borderWidth: line.ol,
-            borderColor: colors.ink,
-            borderRadius: radius.pill,
-            backgroundColor: quota?.paid ? colors.mint : colors.white,
-            boxShadow: shadow.small,
-          }}
+          style={({ pressed }) => [
+            {
+              marginLeft: "auto",
+              height: 25,
+              marginBottom: 4,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              paddingLeft: 7,
+              paddingRight: 10,
+              borderWidth: line.ol,
+              borderColor: colors.ink,
+              borderRadius: radius.pill,
+              backgroundColor: quota?.paid ? colors.mint : colors.white,
+              boxShadow: shadow.small,
+            },
+            pressed && { transform: [{ translateY: 2 }], boxShadow: "none" },
+          ]}
         >
           <Icon name="spark" size={14} />
           <Text style={font(900, 11)}>AIに聞く</Text>
@@ -450,25 +455,7 @@ export function AnalysisPanel({
             >
               {title}
             </Text>
-            {realtimeBusy && (
-              <View
-                accessible={false}
-                style={{ flexDirection: "row", gap: 3, marginLeft: 1 }}
-              >
-                {[1, 0.6, 0.3].map((opacity, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 3,
-                      backgroundColor: colors.ink2,
-                      opacity,
-                    }}
-                  />
-                ))}
-              </View>
-            )}
+            {realtimeBusy && <WaitingDots />}
             {running && (
               <Text
                 style={font(700, offline ? 9 : 10, 1.3, colors.ink2)}
@@ -481,7 +468,9 @@ export function AnalysisPanel({
               <Text style={s.mate}>{row.mate}手詰め</Text>
             )}
             {(!t || branch) && row?.game && row.label !== "本譜" && (
-              <Text style={font(700, 9.5, 1.4, colors.ink2)}>本譜</Text>
+              <View style={s.mainBadge}>
+                <Text style={font(900, 9.5, 1.1)}>本譜</Text>
+              </View>
             )}
           </View>
           {row && (!t || branch) ? (
@@ -504,10 +493,11 @@ export function AnalysisPanel({
                     row.game ? "本譜を1手進める" : "この手を盤で試す"
                   }
                   onPress={() => onTry(row)}
-                  style={[s.try, branch && { backgroundColor: colors.you }]}
+                  hitSlop={{ top: 5, bottom: 5, left: 4, right: 4 }}
+                  style={s.try}
                 >
                   <Icon name="play" size={10} />
-                  <Text style={font(900, 9.5)}>
+                  <Text style={font(900, 10.5)}>
                     {branch || row.game ? "次の手" : "試す"}
                   </Text>
                 </Pressable>
@@ -529,14 +519,18 @@ export function AnalysisPanel({
             </Pressable>
           )}
           {running && (
-            <View style={[s.progress, { backgroundColor: colors.white }]}>
+            <View style={s.progress}>
               <View
                 style={{
                   width: `${(100 * (job?.next || 0)) / Math.max(1, t.moves.length + 1)}%`,
                   height: "100%",
                   backgroundColor: offline ? colors.orange : colors.mint,
+                  overflow: "hidden",
                 }}
-              />
+              >
+                {offline && <BarStripes size={5} color={colors.pausedStripe} />}
+                <View style={s.progressEdge} />
+              </View>
             </View>
           )}
         </View>
@@ -607,15 +601,33 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
-    paddingVertical: 4,
+    height: 22,
+    marginVertical: -3,
+    paddingLeft: 5,
+    paddingRight: 8,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.you,
+  },
+  mainBadge: {
+    paddingVertical: 2,
     paddingHorizontal: 6,
     borderWidth: line.thin,
     borderColor: colors.ink,
     borderRadius: radius.pill,
-    backgroundColor: colors.sand,
+  },
+  progressEdge: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: line.thin,
+    backgroundColor: colors.ink,
   },
   progress: {
-    height: 8,
+    height: 9,
+    backgroundColor: colors.white,
     borderRadius: 99,
     overflow: "hidden",
     marginVertical: 2,

@@ -33,6 +33,8 @@ test("途中結果の未受信局面を候補なしや終局と表示しない",
     "./overlay": { ask() {}, toast() {} },
     "./ui": { Button: "Button" },
     "./realtime-controls": {},
+    "./chance-bar": { BarStripes: "BarStripes" },
+    "./waiting-dots": { WaitingDots: "WaitingDots" },
   });
   const tree = api.AnalysisPanel({
     analysis: {
