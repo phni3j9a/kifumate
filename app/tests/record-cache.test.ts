@@ -61,8 +61,14 @@ for (const screen of ["info", "game/[id]"]) {
         "expo-router": {
           useLocalSearchParams: () => ({ id: "a" }),
           useFocusEffect: () => {},
+          useIsFocused: () => true,
           router: {},
         },
+        "react-native-safe-area-context": {
+          useSafeAreaInsets: () => ({ bottom: 0 }),
+        },
+        [`${prefix}/components/chance-bar`]: stub(["ChanceBar"]),
+        [`${prefix}/components/evaluation-help`]: stub(["EvaluationHelp"]),
         [`${prefix}/components/use-game`]: {
           useGame: () => ({ game, error: "", db: {}, reload: async () => {} }),
         },

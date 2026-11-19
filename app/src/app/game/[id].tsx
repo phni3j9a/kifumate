@@ -11,10 +11,18 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Line } from "react-native-svg";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import {
+  router,
+  useFocusEffect,
+  useIsFocused,
+  useLocalSearchParams,
+} from "expo-router";
 import { Color, formatMove, Move, Square, type PieceType } from "tsshogi";
 import { Board } from "../../components/board";
+import { ChanceBar } from "../../components/chance-bar";
+import { EvaluationHelp } from "../../components/evaluation-help";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ensureVisibleY } from "../../core/scroll";
 import ExportSheet from "../../components/export-sheet";
 import { EvalGraph } from "../../components/graph";
 import { Icon } from "../../components/icons";
@@ -50,35 +58,6 @@ import {
 import { needsRetryConfirmation, type Mode } from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
 
-/** まだ形勢が分からないときのバー（.bar.na）：白と砂色の斜めじま */
-function StripedBar() {
-  const [w, setW] = useState(0);
-  const lines = [];
-  // 135°・12px 周期のしま。x + y = 9√2 + 12√2·k の線を太さ6で引く。
-  for (let c = 12.73; c < w + 9; c += 16.97) lines.push(c);
-  return (
-    <View
-      accessibilityRole="image"
-      accessibilityLabel="形勢はまだ分かりません"
-      onLayout={(e) => setW(e.nativeEvent.layout.width)}
-      style={s.bar}
-    >
-      <Svg width={w} height={9}>
-        {lines.map((c) => (
-          <Line
-            key={c}
-            x1={c + 3}
-            y1={-3}
-            x2={c - 12}
-            y2={12}
-            stroke="#EFE6CC"
-            strokeWidth={6}
-          />
-        ))}
-      </Svg>
-    </View>
-  );
-}
 /** 対局者名（.id）。手番の側はミント色になり「手番」と出る */
 function PlayerName({
   name,
@@ -127,6 +106,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const [coachFull, setCoachFull] = useState(false);
   const [coachTop, setCoachTop] = useState(450);
   const [coachFullTop, setCoachFullTop] = useState(46);
+  const focused = useIsFocused();
   const coach = useCoach();
   const { game, error, db } = useGame(id);
   const kif = game?.kif;
@@ -140,12 +120,28 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const [selected, setSelected] = useState<Square | PieceType | null>(null),
     [promotion, setPromotion] = useState<Move[]>([]),
     [flipped, setFlipped] = useState(false),
-    [sheet, setSheet] = useState<"moves" | "menu" | "export" | null>(null),
+    [sheet, setSheet] = useState<
+      "moves" | "menu" | "export" | "evaluation" | null
+    >(null),
     [favorite, setFavorite] = useState<number | null>(null);
   const told = useRef(false);
   const opened = useRef(false);
   const [initialized, setInitialized] = useState(false);
-  const { records, offline, controller, ready } = useAnalysis();
+  const { records, offline, controller, ready, watchReview } = useAnalysis();
+  const undoBranch = useRef<Branch | null>(null);
+  const loaded = !!record && !!game;
+  const reviewJump = useRef(() => {});
+  useFocusEffect(
+    useCallback(() => {
+      const unwatch = loaded
+        ? watchReview({ id, jump: () => reviewJump.current() })
+        : undefined;
+      return () => {
+        unwatch?.();
+        undoBranch.current = null;
+      };
+    }, [watchReview, id, loaded]),
+  );
   const analysis = records[id];
   const rt = useRealtime();
   const rtController = rt.controller;
@@ -243,6 +239,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     }
   }, [record, ready, analysis, evaluated, game?.self_side]);
   const { width: W, height: H } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const base = branch?.base;
   // 戻る操作は、まず分岐を抜ける（モックの back()）。
   useFocusEffect(
@@ -315,6 +312,33 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     setBranch(null);
     clear();
   }
+  function jumpMain(to: number) {
+    setPly(Math.max(0, Math.min(total, to)));
+    setBranch(null);
+    clear();
+    if (!branch || branch.moves.length < 2) return;
+    undoBranch.current = branch;
+    toast("本譜に戻りました", {
+      label: "分岐に戻る",
+      onPress: () => {
+        if (undoBranch.current !== branch) return;
+        undoBranch.current = null;
+        setPly(branch.base);
+        setBranch(branch);
+        clear();
+      },
+    });
+  }
+  reviewJump.current = () =>
+    jumpMain(
+      startPly(
+        pointsFor(
+          record,
+          controller.snapshot.records[id]?.saved?.results ?? [],
+          self,
+        ),
+      ),
+    );
   function commit(move: Move) {
     // 本譜の次の手と同じなら、分岐にせず本譜を1手進める（モックの commitMove と同じ）
     const next = mainMoves[ply]?.move;
@@ -325,6 +349,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     }
     try {
       const b = branch ?? new Branch(ply, position);
+      undoBranch.current = null;
       b.play(move);
       setBranch(b);
       redraw((v) => v + 1);
@@ -434,6 +459,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   if (rtBusy) branchRow = undefined;
   const shownScore = branch ? branchRow?.score : shown?.score;
   const value = cp(shownScore);
+  const comparablePly = branch ? branch.base + branch.at : -1;
+  const comparable =
+    branchRow && analysis?.saved && !analysis.attempt && comparablePly <= total
+      ? results.find((r) => r.ply === comparablePly)
+      : undefined;
   const previousResult = results.find((r) => r.ply === ply - 1);
   const textBefore = scoreText(previousResult?.score, self),
     textAfter = scoreText(shownScore, self);
@@ -482,9 +512,16 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
       ? winnerColor === self
         ? 100
         : 0
-      : value === null
+      : over || value === null
         ? null
         : percent((self === Color.BLACK ? 1 : -1) * value);
+  const favored = over
+    ? winnerColor
+    : value === null || Math.abs(value) < 150
+      ? null
+      : value > 0
+        ? Color.BLACK
+        : Color.WHITE;
   const stateLabel = analysis?.attempt
     ? needsRetryConfirmation(analysis.attempt)
       ? "要確認"
@@ -556,6 +593,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         });
         return;
       }
+      undoBranch.current = null;
       setBranch(null);
       clear();
       void controller
@@ -584,7 +622,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     setSheet(null);
     ask({
       title: "この棋譜を削除しますか",
-      text: "戦績からも外れます。元には戻せません。",
+      text: "解析結果と、AIコーチの解説・質問の履歴もいっしょに消えます。戦績からも外れます。元には戻せません。使った回数は戻りません。",
       ok: "削除する",
       danger: true,
       onOk: async () => {
@@ -618,6 +656,29 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   }
   const date = dateParts(game.played_at);
   const plyLabel = (n: number) => (n ? `${n}手目` : "開始局面");
+  const evalHelp = (
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => setSheet("evaluation")}
+      hitSlop={{ top: 10, bottom: 10, left: 5, right: 5 }}
+    >
+      <Text
+        style={[
+          font(700, 10.5, 1.3, colors.ink2),
+          { textDecorationLine: "underline", textDecorationStyle: "dotted" },
+        ]}
+      >
+        評価値
+      </Text>
+    </Pressable>
+  );
+  // Sheet の58%の高さから、見出し48px・上枠・下の安全領域を引く。
+  const movesViewport = H * 0.58 - 48 - line.ol - insets.bottom;
+  const moveRowHeight = 36.2; // 本文13.5 × 1.2 + 上下10px
+  const movesY = branch
+    ? 0
+    : ensureVisibleY(6 + ply * moveRowHeight, moveRowHeight, 0, movesViewport);
+
   return (
     <Screen bottom>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -646,7 +707,19 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 {own ? "あなた" : sideOf(self)}
                 {chance !== null && !over ? ` ${chance}%` : ""}
               </Text>
-              <View style={s.jg}>
+              <View
+                style={[
+                  s.jg,
+                  {
+                    backgroundColor:
+                      favored === null
+                        ? colors.white
+                        : favored === self
+                          ? colors.you
+                          : colors.opp,
+                  },
+                ]}
+              >
                 <Text style={font(900, 10.5)}>
                   {branch && rtBusy
                     ? "解析中"
@@ -662,23 +735,18 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                   : sideOf(self === Color.BLACK ? Color.WHITE : Color.BLACK)}
               </Text>
             </View>
-            {chance === null ? (
-              <StripedBar />
-            ) : (
-              <View
-                accessibilityRole="image"
-                accessibilityLabel={`${own ? "あなた" : sideOf(self)}の勝率 ${chance}%`}
-                style={[s.bar, { backgroundColor: colors.opp }]}
-              >
-                <View
-                  style={{
-                    width: `${Math.max(4, Math.min(96, chance))}%`,
-                    height: "100%",
-                    backgroundColor: colors.you,
-                  }}
-                />
-              </View>
-            )}
+            <ChanceBar
+              chance={chance}
+              terminal={over}
+              visible={focused}
+              label={
+                over && winnerColor !== null
+                  ? resultLabel
+                  : chance === null
+                    ? "形勢はまだ分かりません"
+                    : `${own ? "あなた" : sideOf(self)}の勝率 ${chance}%`
+              }
+            />
           </View>
           <RoundButton
             icon="more"
@@ -854,9 +922,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 <View style={s.bk}>
                   <Text style={font(900, 10.5)}>分岐 {at}手目</Text>
                 </View>
-                {branchRow && (
-                  <Text style={font(700, 10.5, 1, colors.ink2)}>評価値</Text>
-                )}
+                {branchRow && evalHelp}
                 <Text
                   style={font(
                     branchRow ? 900 : 700,
@@ -879,12 +945,30 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                               ? "今月の分岐中の解析は残り0分"
                               : "評価値 —"}
                 </Text>
+                {comparable?.score ? (
+                  <>
+                    <Text style={font(700, 10.5, 1.3, colors.ink2)}>
+                      本譜の{comparablePly}手目は
+                    </Text>
+                    <Text style={font(900, 12.5, 1.3)}>
+                      {scoreText(comparable.score, self)}
+                    </Text>
+                  </>
+                ) : branchRow && !rtResult ? (
+                  <Text style={font(700, 10.5, 1.3, colors.ink2)}>
+                    保存した読み筋
+                  </Text>
+                ) : null}
               </>
             ) : (
               <>
-                <Text style={font(700, 10.5, 1, colors.ink2)}>
-                  {over ? "終局" : shown && !ply ? "開始局面" : "評価値"}
-                </Text>
+                {over || (shown && !ply) ? (
+                  <Text style={font(700, 10.5, 1, colors.ink2)}>
+                    {over ? "終局" : "開始局面"}
+                  </Text>
+                ) : (
+                  evalHelp
+                )}
                 <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
                 <Text style={font(700, 10.5, 1, colors.ink2)}>
                   {over
@@ -906,10 +990,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 {recommendation && (
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() => {
-                      setPly(ply - 1);
-                      clear();
-                    }}
+                    onPress={() => jumpMain(ply - 1)}
                   >
                     <Text style={font(900, 10.5, 1, colors.ink2)}>
                       {recommendation} ›
@@ -926,11 +1007,10 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             sign={self === Color.BLACK ? 1 : -1}
             phases={phases}
             labels={own ? ["あなた", "相手"] : ["先手", "後手"]}
-            onPly={(p) => {
-              setBranch(null);
-              setPly(p);
-              clear();
-            }}
+            branch={
+              branch ? { base: branch.base, at: branch.at, value } : undefined
+            }
+            onPly={jumpMain}
           />
         </View>
         <View style={s.spb} />
@@ -945,12 +1025,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           ply={ply}
           branch={!!branch}
           start={() => start("precise")}
-          jump={(p) => {
-            setBranch(null);
-            setPly(p);
-            clear();
-          }}
+          jump={jumpMain}
           tryLine={(p, pv) => {
+            undoBranch.current = null;
             record.goto(p);
             const next = new Branch(p, record.position);
             for (const usi of pv) {
@@ -973,7 +1050,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             : `棋譜（${date ? `${date.m}/${date.d}・` : ""}${total}手）`
         }
         onClose={() => setSheet(null)}
-        scrollToY={branch ? 0 : Math.max(0, ply * 36.2 - 80)}
+        scrollToY={movesY}
       >
         {branch ? (
           <>
@@ -1010,26 +1087,35 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           </>
         ) : (
           // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
-          [null, ...mainMoves].map((n, i) => (
-            <Pressable
-              key={i}
-              accessibilityRole="button"
-              aria-selected={i === ply}
-              onPress={() => step(i)}
-              style={[s.mr, i === ply && { backgroundColor: colors.you }]}
-            >
-              <Text style={s.mn}>{i || ""}</Text>
-              <Text style={font(700, 13.5, 1.2)}>
-                {n ? mainText(n) : "開始局面"}
-              </Text>
-              <Text style={[font(900, 10, 1.2), { marginLeft: "auto" }]}>
-                {evaluated[i]?.mark || (evaluated[i]?.mate ? "詰みあり" : "")}
-              </Text>
-              <Text style={font(700, 11, 1.2, colors.ink2)}>
-                {scoreText(results.find((r) => r.ply === i)?.score, self)}
-              </Text>
-            </Pressable>
-          ))
+          [null, ...mainMoves].map((n, i) => {
+            const score = results.find((r) => r.ply === i)?.score;
+            return (
+              <Pressable
+                key={i}
+                accessibilityRole="button"
+                aria-selected={i === ply}
+                onPress={() => jumpMain(i)}
+                style={[
+                  s.mr,
+                  { height: moveRowHeight },
+                  i === ply && { backgroundColor: colors.you },
+                ]}
+              >
+                <Text style={s.mn}>{i || ""}</Text>
+                <Text style={font(700, 13.5, 1.2)}>
+                  {n ? mainText(n) : "開始局面"}
+                </Text>
+                <Text style={[font(900, 10, 1.2), { marginLeft: "auto" }]}>
+                  {evaluated[i]?.mark || (evaluated[i]?.mate ? "詰みあり" : "")}
+                </Text>
+                {score && (
+                  <Text style={font(700, 11, 1.2, colors.ink2)}>
+                    {scoreText(score, self)}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })
         )}
       </Sheet>
       <Sheet
@@ -1048,22 +1134,24 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         <MenuRow
           icon="info"
           label="対局情報"
-          sub="対局者・結果（修正もここから）"
+          sub="対局者・結果・戦法と囲い（修正もここから）"
           onPress={() => {
             setSheet(null);
             router.push({ pathname: "/info", params: { id } });
           }}
         />
-        <MenuRow
-          icon="refresh"
-          label="盤の向きを変える"
-          sub={`いまは${sideOf(bottom)}の側から見ています`}
-          onPress={() => {
-            setSheet(null);
-            setFlipped(!flipped);
-            clear();
-          }}
-        />
+        {!own && (
+          <MenuRow
+            icon="refresh"
+            label="盤の向きを変える"
+            sub={`いまは${sideOf(bottom)}の側から見ています`}
+            onPress={() => {
+              setSheet(null);
+              setFlipped(!flipped);
+              clear();
+            }}
+          />
+        )}
         <MenuRow
           icon="export"
           label="KIFを書き出す"
@@ -1081,6 +1169,12 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           onPress={remove}
         />
       </Sheet>
+      <EvaluationHelp
+        visible={sheet === "evaluation"}
+        close={() => setSheet(null)}
+        you={own ? "あなた" : sideOf(self)}
+        opponent={own ? "相手" : "後手"}
+      />
       <ExportSheet
         visible={sheet === "export"}
         onClose={() => setSheet(null)}
@@ -1116,14 +1210,6 @@ const s = StyleSheet.create({
     borderColor: colors.ink,
     borderRadius: radius.pill,
     backgroundColor: colors.white,
-  },
-  bar: {
-    height: 13,
-    borderWidth: line.ol,
-    borderColor: colors.ink,
-    borderRadius: radius.pill,
-    backgroundColor: colors.white,
-    overflow: "hidden",
   },
   nmr: { flexDirection: "row", alignItems: "center", paddingHorizontal: 4 },
   id: {
@@ -1197,6 +1283,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 5,
+    overflow: "hidden",
   },
   bk: {
     paddingTop: 2,

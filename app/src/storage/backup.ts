@@ -1,3 +1,4 @@
+import { firstReviewKey } from "../analysis/first-review";
 import { reconcileAliases } from "./aliases";
 import type { SQLiteDatabase, SQLiteBindValue } from "expo-sqlite";
 import {
@@ -517,7 +518,7 @@ export async function restoreBackup(
     if (mode === "replace") {
       await db.runAsync("DELETE FROM games");
       await db.runAsync("DELETE FROM aliases");
-      await db.runAsync("DELETE FROM settings");
+      await db.runAsync("DELETE FROM settings WHERE key<>?", firstReviewKey);
       await db.runAsync("DELETE FROM coach_meta WHERE key='profile'");
     }
     let after = "";

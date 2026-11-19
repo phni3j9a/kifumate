@@ -142,3 +142,27 @@ test("結果を保持したまま月上限になっても、再開時期と更�
   expect(fake.rt.requests.length).toBe(requests);
   expect(fake.errors).toEqual([]);
 });
+
+test("グラフで本譜へ飛ぶと解析を停止し、2手の分岐を一度だけ復元できる", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await open(page);
+  await move(page, 2, 7, 6);
+  await move(page, 3, 3, 4);
+  await expect.poll(() => fake.rt.requests.at(-1)?.input.moves.length).toBe(2);
+  const graph = page.getByRole("slider", { name: /形勢グラフ/ });
+  await graph.click();
+  await expect.poll(() => fake.rt.stops).toBe(1);
+  const undo = button(page, "分岐に戻る");
+  await undo.click();
+  await expect(
+    page.getByRole("img", { name: "分岐2手目の盤面" }),
+  ).toBeVisible();
+  await expect(undo).toHaveCount(0);
+  await expect.poll(() => fake.rt.requests.at(-1)?.method).toBe("POST");
+  await button(page, "1手戻る").click();
+  await expect(
+    page.getByRole("img", { name: "分岐1手目の盤面" }),
+  ).toBeVisible();
+});

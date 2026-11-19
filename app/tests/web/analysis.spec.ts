@@ -205,3 +205,77 @@ test("精密依頼の応答喪失後に失効しても、再起動で結果を�
   await expect(page.getByText("無料プラン", { exact: true })).toBeVisible();
   expect(fake.errors).toEqual([]);
 });
+
+test("初回の誘導・途中から向き直るゲージと視差軽減", async ({ page }) => {
+  const fake = await fakeAnalysis(page, { firstReview: true });
+  await importOne(page);
+  fake.results = makeResults(analysisInput(readKif(kif), "precise"));
+  fake.results[0]!.score = { kind: "cp", value: 1200 };
+  fake.results[1]!.score = { kind: "cp", value: -1200 };
+  await button(page, "解析する").click();
+  await button(page, "1手進む").click();
+  fake.complete = true;
+  await expect(
+    page.getByRole("heading", { name: "はじめての解析ができました" }),
+  ).toBeVisible();
+  await button(page, "見てみる").click();
+  await expect(page.getByRole("img", { name: "開始局面の盤面" })).toBeVisible();
+  const track = page.getByRole("img", { name: /先手の勝率/ });
+  await expect(track).toHaveAccessibleName("先手の勝率 88%");
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLElement>('[aria-label="先手の勝率 88%"] > div')
+        ?.style.width === "88%",
+  );
+  const samples = await page.evaluate(async () => {
+    const find = (name: string) =>
+      document.querySelector<HTMLElement>(`[aria-label="${name}"]`)!;
+    const width = () =>
+      parseFloat(
+        document.querySelector<HTMLElement>('[aria-label^="先手の勝率"] > div')!
+          .style.width,
+      );
+    const frames = (test: () => boolean) =>
+      new Promise<void>((resolve, reject) => {
+        const end = performance.now() + 1000;
+        const tick = () =>
+          test()
+            ? resolve()
+            : performance.now() > end
+              ? reject(Error("幅が更新されません"))
+              : requestAnimationFrame(tick);
+        tick();
+      });
+    find("1手進む").click();
+    await frames(
+      () => !!find("先手の勝率 12%") && width() < 80 && width() > 25,
+    );
+    const before = width();
+    find("1手戻る").click();
+    await frames(() => !!find("先手の勝率 88%"));
+    const reversed = width();
+    await frames(() => width() === 88);
+    return { before, reversed };
+  });
+  expect(samples.reversed).toBeGreaterThan(12);
+  expect(samples.reversed).toBeLessThan(88);
+  expect(Math.abs(samples.reversed - samples.before)).toBeLessThan(25);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await button(page, "1手進む").click();
+  await expect(track).toHaveAccessibleName("先手の勝率 12%");
+  expect(
+    await track
+      .locator(":scope > div")
+      .first()
+      .evaluate((node: HTMLElement) => node.style.width),
+  ).toBe("12%");
+  await button(page, "最後へ").click();
+  const end = page.getByRole("img", { name: "先手の勝ち", exact: true });
+  await expect(end.locator(":scope > div").first()).toHaveAttribute(
+    "style",
+    /width: 100%/,
+  );
+  await page.reload();
+  await expect(button(page, "3位")).toBeVisible();
+  await expect(button(page, "見てみる")).toHaveCount(0);
+});
