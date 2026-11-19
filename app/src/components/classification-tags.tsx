@@ -156,5 +156,5 @@ const s = StyleSheet.create({
     marginHorizontal: 2,
     marginBottom: 7,
   },
-  options: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
+  options: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
 });

@@ -19,7 +19,7 @@ import {
   type PlayerSide,
   type Tags,
 } from "../../core/stats";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -29,7 +29,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import {
+  router,
+  useFocusEffect,
+  useLocalSearchParams,
+  useScrollToTop,
+} from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { Icon } from "../../components/icons";
 import { KifHelpLink } from "../../components/kif-help";
@@ -130,6 +135,8 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
   const { revision } = useClassifications();
   const db = useSQLiteContext();
   const { records, offline, quota, controller } = useAnalysis();
+  const list = useRef<FlatList<Game>>(null);
+  useScrollToTop(list);
   const [games, setGames] = useState<Game[] | null>(null),
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
@@ -177,8 +184,15 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
       toast("お気に入りを保存できませんでした");
     }
   }
+  function listTop() {
+    list.current?.scrollToOffset({ offset: 0, animated: false });
+  }
+  function changeFilter(next: GameFilter) {
+    listTop();
+    setFilter(next);
+  }
   function clear() {
-    setFilter(noFilter);
+    changeFilter(noFilter);
     setQuery("");
     setSearching(false);
     setQuick("all");
@@ -298,9 +312,16 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
       ) : (
         <AppBar title="棋譜" note={`${games.length}局`}>
           {quota && !quota.paid && (
-            <Text style={font(700, 10, 1.3, colors.ink2)}>
-              今週の解析 あと{quota.totalRemaining}局
-            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`今週の解析 あと${quota.totalRemaining}局`}
+              onPress={() => router.push("/plan")}
+              style={s.upl}
+            >
+              <Text style={font(700, 11)}>今週の解析</Text>
+              <Text style={font(900, 11)}>あと{quota.totalRemaining}局</Text>
+              <Icon name="next" size={11} strokeWidth={2.6} />
+            </Pressable>
           )}
           {!searching && (
             <RoundButton
@@ -371,7 +392,10 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                 key={value}
                 label={label}
                 selected={quick === value}
-                onPress={() => setQuick(value)}
+                onPress={() => {
+                  listTop();
+                  setQuick(value);
+                }}
               />
             ))}
           </ScrollView>
@@ -393,6 +417,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         </View>
       )}
       <FlatList
+        ref={list}
         data={visible}
         keyExtractor={(g) => g.id}
         keyboardShouldPersistTaps="handled"
@@ -607,7 +632,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
               {`${visible.length}局を表示`}
             </Button>
             {active > 0 && (
-              <TextButton onPress={() => setFilter(noFilter)}>
+              <TextButton onPress={() => changeFilter(noFilter)}>
                 条件をすべて外す
               </TextButton>
             )}
@@ -628,18 +653,35 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                   key={value}
                   label={text}
                   selected={filter[key] === value}
-                  onPress={() => setFilter({ ...filter, [key]: value })}
+                  onPress={() => changeFilter({ ...filter, [key]: value })}
                 />
               ))}
             </View>
           </View>
         ))}
-        <TagFilterGroups games={games} filter={filter} onChange={setFilter} />
+        <TagFilterGroups
+          games={games}
+          filter={filter}
+          onChange={changeFilter}
+        />
       </Sheet>
     </Screen>
   );
 }
 const s = StyleSheet.create({
+  upl: {
+    height: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 4,
+    paddingLeft: 11,
+    paddingRight: 9,
+    borderWidth: line.thin,
+    borderColor: colors.ink,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    boxShadow: shadow.small,
+  },
   sf: {
     flexDirection: "row",
     alignItems: "center",
@@ -777,5 +819,6 @@ const s = StyleSheet.create({
     marginHorizontal: 2,
     marginBottom: 7,
   },
-  opt: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
+  // モックでは直前の .opt の 12px と .fgrp の 14px が相殺される。
+  opt: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
 });
