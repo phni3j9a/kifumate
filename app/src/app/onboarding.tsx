@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ComponentRef,
@@ -9,6 +10,7 @@ import {
   AccessibilityInfo,
   Animated,
   BackHandler,
+  Easing,
   Image,
   KeyboardAvoidingView,
   PanResponder,
@@ -69,12 +71,14 @@ export default function Onboarding() {
     app = useAppData(),
     coach = useCoach(),
     replay = app.completed;
-  const [step, setStep] = useState(0),
+  const [{ step, direction }, setScene] = useState({ step: 0, direction: 1 }),
     [name, setName] = useState(""),
     [practice, setPractice] = useState<string[]>([]),
     [goal, setGoal] = useState(""),
     [saving, setSaving] = useState(false);
-  const [x] = useState(() => new Animated.Value(0));
+  const [stage, setStage] = useState({ width: 0, height: 0 });
+  const [progress] = useState(() => new Animated.Value(0));
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
   const initialized = useRef(false),
     scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   useEffect(() => {
@@ -85,21 +89,46 @@ export default function Onboarding() {
     }
   }, [coach.ready, coach.profile]);
   useEffect(() => {
+    let live = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
+      if (live) setReduceMotion(reduce);
+    });
+    const sub = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
+    return () => {
+      live = false;
+      sub?.remove();
+    };
+  }, []);
+  useLayoutEffect(() => {
     scroll.current?.scrollTo({ y: 0, animated: false });
   }, [step]);
-  function go(direction: number) {
-    if (step + direction < 0 || step + direction > 6 || saving) return;
-    setStep(step + direction);
-    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
-      if (reduce) return;
-      x.setValue(direction * 28);
-      Animated.timing(x, {
-        toValue: 0,
-        duration: 220,
-        useNativeDriver: true,
-      }).start();
+  useLayoutEffect(() => {
+    if (reduceMotion !== false) return;
+    progress.setValue(0);
+    const animation = Animated.timing(progress, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: Platform.OS !== "web",
     });
-  }
+    animation.start();
+    return () => animation.stop();
+  }, [step, progress, reduceMotion]);
+  const go = useCallback(
+    (direction: number) => {
+      if (saving) return;
+      setScene((previous) => {
+        const step = previous.step + direction;
+        return step < 0 || step >= scenes.length
+          ? previous
+          : { step, direction };
+      });
+    },
+    [saving],
+  );
   const swipe = PanResponder.create({
     onMoveShouldSetPanResponder: (_, g) =>
       Math.abs(g.dx) > 48 && Math.abs(g.dy) < 30,
@@ -135,17 +164,25 @@ export default function Onboarding() {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
         if (saving) return true;
         if (step > 0) {
-          setStep(step - 1);
+          go(-1);
           return true;
         }
         return false;
       });
       return () => sub.remove();
-    }, [step, saving]),
+    }, [step, saving, go]),
   );
   const last = step === 6,
     scene = scenes[step]!,
     image = mascots[`onb-${step + 1}` as Mascot];
+  // 画像自体を contain 後の寸法にして、縦の余白を残さず底に揃える。
+  const imageHeight = Math.max(
+    0,
+    Math.min(
+      (stage.height - 2 * line.ol) * 0.91,
+      ((stage.width - 2 * line.ol) * 0.88) / image.ratio,
+    ),
+  );
   const alt =
     step === 0
       ? replay
@@ -244,9 +281,34 @@ export default function Onboarding() {
             paddingBottom: 8,
           }}
         >
-          <Animated.View style={{ flex: 1, transform: [{ translateX: x }] }}>
+          <Animated.View
+            testID="onboarding-scene"
+            style={[
+              { flex: 1 },
+              reduceMotion === null && { opacity: 0 },
+              reduceMotion === false && {
+                opacity: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.3, 1],
+                }),
+                transform: [
+                  {
+                    translateX: progress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [direction * 22, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View
               {...swipe.panHandlers}
+              onLayout={({
+                nativeEvent: {
+                  layout: { width, height },
+                },
+              }) => setStage({ width, height })}
               style={{
                 flex: 1,
                 minHeight: 120,
@@ -268,8 +330,8 @@ export default function Onboarding() {
                 style={{
                   position: "absolute",
                   bottom: -3,
-                  height: "91%",
-                  width: "88%",
+                  height: imageHeight,
+                  width: imageHeight * image.ratio,
                   alignSelf: "center",
                 }}
               />
@@ -421,6 +483,7 @@ export default function Onboarding() {
                 </Text>
                 <Input
                   accessibilityLabel="目標"
+                  autoComplete="off"
                   maxLength={60}
                   placeholder="例：初段になりたい"
                   value={goal}

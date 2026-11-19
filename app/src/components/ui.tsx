@@ -1,4 +1,10 @@
-import { useState, type PropsWithChildren, type ReactNode } from "react";
+import {
+  useState,
+  type ComponentRef,
+  type PropsWithChildren,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   Image,
   KeyboardAvoidingView,
@@ -166,7 +172,10 @@ export function PageHeader({
   );
 }
 /** 画面の本文（.pgc）。入力中はキーボードを避ける */
-export function PageScroll({ children }: PropsWithChildren) {
+export function PageScroll({
+  children,
+  ref,
+}: PropsWithChildren<{ ref?: Ref<ComponentRef<typeof ScrollView>> }>) {
   const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
@@ -174,6 +183,7 @@ export function PageScroll({ children }: PropsWithChildren) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
+        ref={ref}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[s.pgc, { paddingBottom: 22 + insets.bottom }]}
       >
@@ -526,6 +536,25 @@ export function Input({
     </View>
   );
 }
+/** 複数行の入力（.ta） */
+export function TextArea({
+  height = 120,
+  ...props
+}: Omit<TextInputProps, "style"> & { height?: number }) {
+  const ring = useFocusRing();
+  return (
+    <View style={[s.taBox, ring.focused && s.ring]}>
+      <TextInput
+        multiline
+        placeholderTextColor={placeholder}
+        {...props}
+        onFocus={ring.onFocus}
+        onBlur={ring.onBlur}
+        style={[s.ta, font(500, 16, 1.45), { height }]}
+      />
+    </View>
+  );
+}
 /** KIFの本文を入れる・見せる欄（.ta.kif / .kifx）。invalid は読み取れないとき（.ng） */
 export function KifArea({
   invalid = false,
@@ -537,7 +566,7 @@ export function KifArea({
   return (
     <View
       style={[
-        s.kifBox,
+        s.taBox,
         invalid && {
           outlineWidth: 2,
           outlineStyle: "solid",
@@ -556,8 +585,8 @@ export function KifArea({
         onFocus={ring.onFocus}
         onBlur={ring.onBlur}
         style={[
-          s.kif,
-          { height, fontSize: size, lineHeight: size * 1.5 },
+          s.ta,
+          { height, fontFamily: mono, fontSize: size, lineHeight: size * 1.5 },
           invalid && { borderColor: colors.coral },
         ]}
       />
@@ -777,7 +806,7 @@ export const s = StyleSheet.create({
   },
   // 背景色がないと Android は角丸を輪郭線に使わない（中の欄と同じ白で隠れる）
   inpBox: { borderRadius: radius.pill, backgroundColor: colors.white },
-  kifBox: { borderRadius: radius.field, backgroundColor: colors.white },
+  taBox: { borderRadius: radius.field, backgroundColor: colors.white },
   inp: {
     ...pill,
     ...font(500, 16),
@@ -788,7 +817,7 @@ export const s = StyleSheet.create({
     outlineWidth: 0,
     outlineStyle: "solid", // Web: auto のままだと幅0でも既定のフォーカス枠が出る
   },
-  kif: {
+  ta: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderWidth: line.ol,
@@ -796,7 +825,6 @@ export const s = StyleSheet.create({
     borderRadius: radius.field,
     backgroundColor: colors.white,
     color: colors.ink,
-    fontFamily: mono,
     textAlignVertical: "top",
     outlineWidth: 0,
     outlineStyle: "solid", // Web: auto のままだと幅0でも既定のフォーカス枠が出る
