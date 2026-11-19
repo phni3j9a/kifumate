@@ -59,7 +59,12 @@ export function font(
   return {
     fontFamily: fonts[weight],
     fontSize: size,
-    lineHeight: size * lineHeight,
+    // Android は行の高さが足りない分を上下均等に削り、はみ出た字形を切る。
+    // Zen Maru は ascent 1.16 / descent 0.288 em なので、1.0 だと基線下が 0.064 em しか残らず
+    // 和文の下端（約 0.12 em）が欠ける。1.3 なら 0.214 em 残る。
+    lineHeight:
+      size *
+      (Platform.OS === "android" ? Math.max(lineHeight, 1.3) : lineHeight),
     color,
     includeFontPadding: false,
   };
