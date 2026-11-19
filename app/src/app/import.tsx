@@ -37,7 +37,7 @@ import {
 } from "../core/kif";
 import { useAnalysis } from "../analysis/provider";
 import { analysisInput } from "../analysis/display";
-import type { Mode } from "../analysis/types";
+import { active, type Mode } from "../analysis/types";
 import { findDuplicate, importGame, listAliases } from "../storage/repository";
 
 // input は読み取った本文。今の入力と同じときだけ、この結果で保存できる。
@@ -78,7 +78,7 @@ function Line({
 const body = font(500, 11.5, 1.55, colors.ink2);
 
 export default function Import() {
-  const { quota, offline, controller } = useAnalysis();
+  const { quota, offline, records, controller } = useAnalysis();
   const [mode, setMode] = useState<Mode>("precise");
   const db = useSQLiteContext();
   const [tab, setTab] = useState<"paste" | "file">("paste"),
@@ -213,6 +213,15 @@ export default function Import() {
       setBusy(false);
     }
   }
+  const analysisNote = offline
+    ? "通信できません。解析はつながってから始められます"
+    : (quota?.reserved.total ?? 0) > 0 || Object.values(records).some(active)
+      ? "いまの解析が終わったら、続けて解析します"
+      : quota && !quota.paid
+        ? `今週の解析　あと${quota.totalRemaining}局`
+        : quota?.paid && mode === "precise"
+          ? "精密解析を1局分使います（候補3手・深い読み）"
+          : "候補1手です";
   const d = ok ? describe(ok.record) : null;
   const who = d && (
     <View style={{ marginTop: 6 }}>
@@ -362,7 +371,7 @@ export default function Import() {
                     ) : !side ? (
                       <Line title="自分の対局ではない">
                         <Text style={body}>
-                          保存と再生はできます。戦績には数えません。
+                          保存・再生・解析はできます。戦績には数えません。
                         </Text>
                         {who}
                       </Line>
@@ -428,7 +437,15 @@ export default function Import() {
                       onChange={setMode}
                     />
                   )}
-                  {(!quota || quota.totalRemaining > 0) && (
+                  {quota && quota.totalRemaining <= 0 ? (
+                    <Text style={s.analysisNote}>
+                      今週の解析枠は残っていません。次の更新：
+                      {new Date(quota.resetsAt).toLocaleString("ja-JP", {
+                        timeZone: "Asia/Tokyo",
+                      })}
+                      （日本時間）
+                    </Text>
+                  ) : (
                     <>
                       <Button
                         kind="pri"
@@ -446,13 +463,7 @@ export default function Import() {
                       >
                         保存して解析する
                       </Button>
-                      <Text style={font(500, 11, 1.5, colors.ink2)}>
-                        {offline
-                          ? "通信できません。解析はつながってから始められます"
-                          : quota?.paid && mode === "precise"
-                            ? "精密解析を1局分使います（候補3手・深い読み）"
-                            : "候補1手です"}
-                      </Text>
+                      <Text style={s.analysisNote}>{analysisNote}</Text>
                     </>
                   )}
                   <Button
@@ -472,6 +483,11 @@ export default function Import() {
   );
 }
 const s = StyleSheet.create({
+  analysisNote: {
+    ...font(500, 11, 1.4, colors.ink2),
+    textAlign: "center",
+    marginTop: -5,
+  },
   fpick: {
     alignItems: "center",
     gap: 10,
