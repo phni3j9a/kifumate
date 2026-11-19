@@ -14,7 +14,6 @@ import {
 } from "../components/ui";
 import { Icon } from "../components/icons";
 import { toast } from "../components/overlay";
-import { EntitlementStatus } from "../entitlements/status";
 import { planCopy } from "../entitlements/distribution";
 const rows = [
   ["棋譜の保存・再生\n戦績の集計", "✓", "✓"],
@@ -33,9 +32,6 @@ export default function Plan() {
     <Screen bottom>
       <PageHeader title="有料プラン" />
       <PageScroll>
-        <Card style={{ padding: 14, marginBottom: 12 }}>
-          <EntitlementStatus />
-        </Card>
         <Card
           style={{
             flexDirection: "row",

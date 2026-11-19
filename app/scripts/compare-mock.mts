@@ -272,18 +272,11 @@ async function run(width: number, height: number) {
     .click();
   await m.evaluate(() =>
     (window as any).__compare(
-      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove(); R.vpage.querySelector('.pgc').insertAdjacentHTML('afterbegin','<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900;line-height:1">有料プランを利用中</b><p class="hint">期限なし</p><button class="bt sm" style="margin-top:10px">今の権利を確認</button></div>');`,
+      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove();`,
     ),
   );
-  await shot("plan-invite-paid");
+  await shot("plan-invite");
   fake.paid = false;
-  await a.getByRole("button", { name: "今の権利を確認", exact: true }).click();
-  await m.evaluate(() =>
-    (window as any).__compare(
-      `const card=R.vpage.querySelector('.pgc>.cd'); card.querySelector('b').textContent='無料プラン'; card.querySelector('.hint').remove();`,
-    ),
-  );
-  await shot("plan-invite-free");
   await act("back");
   await tap("戻る");
   fake.remaining = 10;
