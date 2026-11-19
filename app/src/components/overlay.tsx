@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ensureVisibleY } from "../core/scroll";
 import { Icon, type IconName } from "./icons";
 import { colors, font, line, radius, shadow } from "./theme";
 import { Button, MascotImage, RoundButton, type Mascot } from "./ui";
@@ -51,7 +52,8 @@ export function toast(
   timer = setTimeout(() => set(null), action ? 6000 : 2600);
   AccessibilityInfo.announceForAccessibility(text);
 }
-export function hideToast() {
+export function hideToast(onPress?: Toast["onPress"]) {
+  if (onPress && current.toast?.onPress !== onPress) return;
   clearTimeout(timer);
   if (current.toast) set(null);
 }
@@ -116,7 +118,7 @@ export function ToastHost() {
   );
 }
 
-function useSlideUp(visible: boolean) {
+export function useSlideUp(visible: boolean) {
   const [y] = useState(() => new Animated.Value(0));
   useEffect(() => {
     if (!visible) return;
@@ -148,7 +150,7 @@ export function Sheet({
   height = "58%",
   auto = false,
   footer,
-  scrollToY = 0,
+  scrollRow,
 }: PropsWithChildren<{
   visible: boolean;
   title: string;
@@ -156,12 +158,32 @@ export function Sheet({
   height?: `${number}%`;
   auto?: boolean;
   footer?: ReactNode;
-  /** 開いたときに、ここまで送っておく（棋譜のいまの手） */
-  scrollToY?: number;
+  /** スクロール内容内で実測した、開いたときに見せる行（棋譜のいまの手）。 */
+  scrollRow?: { y: number; height: number } | null;
 }>) {
   const insets = useSafeAreaInsets();
   const y = useSlideUp(visible);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  const [viewport, setViewport] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const positioned = useRef(false);
+  useEffect(() => {
+    if (
+      !visible ||
+      !scrollRow ||
+      !viewport ||
+      !contentHeight ||
+      positioned.current
+    )
+      return;
+    const y = ensureVisibleY(scrollRow.y, scrollRow.height, 0, viewport);
+    positioned.current = true;
+    if (y > 0)
+      scroll.current?.scrollTo({
+        y: Math.min(y, Math.max(0, contentHeight - viewport)),
+        animated: false,
+      });
+  }, [visible, scrollRow, viewport, contentHeight]);
   return (
     <Modal
       visible={visible}
@@ -198,9 +220,22 @@ export function Sheet({
           <ScrollView
             ref={scroll}
             keyboardShouldPersistTaps="handled"
-            onLayout={() =>
-              scrollToY &&
-              scroll.current?.scrollTo({ y: scrollToY, animated: false })
+            onLayout={
+              scrollRow === undefined
+                ? undefined
+                : (e) => setViewport(e.nativeEvent.layout.height)
+            }
+            onContentSizeChange={
+              scrollRow === undefined
+                ? undefined
+                : (_, height) => setContentHeight(height)
+            }
+            onScrollBeginDrag={
+              scrollRow === undefined
+                ? undefined
+                : () => {
+                    positioned.current = true;
+                  }
             }
             contentContainerStyle={[
               s.shc,
@@ -279,9 +314,25 @@ type Ask = {
 };
 let asking: Ask | null = null;
 const askListeners = new Set<() => void>();
+let confirming = 0;
+function notifyAsk() {
+  askListeners.forEach((f) => f());
+}
 function setAsk(next: Ask | null) {
   asking = next;
-  askListeners.forEach((f) => f());
+  notifyAsk();
+}
+/** 自動で出す案内は、利用者のダイアログと確認操作の完了を待つ。 */
+export function whenDialogIdle(): Promise<void> | undefined {
+  if (!asking && !confirming) return;
+  return new Promise((resolve) => {
+    const listener = () => {
+      if (asking || confirming) return;
+      askListeners.delete(listener);
+      resolve();
+    };
+    askListeners.add(listener);
+  });
 }
 export function ask(options: Ask) {
   hideToast();
@@ -359,9 +410,15 @@ export function DialogHost() {
                 size="md"
                 kind={a.danger ? "danger" : "pri"}
                 style={{ flex: 1 }}
-                onPress={() => {
+                onPress={async () => {
+                  confirming++;
                   close();
-                  a.onOk?.();
+                  try {
+                    await a.onOk?.();
+                  } finally {
+                    confirming--;
+                    notifyAsk();
+                  }
                 }}
               >
                 {a.ok}

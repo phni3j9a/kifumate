@@ -1,3 +1,4 @@
+import { GraphMarkIcon } from "../components/graph-mark";
 import {
   useCallback,
   useEffect,
@@ -378,12 +379,7 @@ export default function Onboarding() {
                   gap: 8,
                 }}
               >
-                {[
-                  ["×", "悪手"],
-                  ["?", "疑問手"],
-                  ["!", "好手"],
-                  ["詰", "詰みあり"],
-                ].map(([mark, label], i) => (
+                {(["悪手", "疑問手", "好手", "詰みあり"] as const).map((label) => (
                   <View
                     key={label}
                     style={{
@@ -394,25 +390,7 @@ export default function Onboarding() {
                       marginRight: 6,
                     }}
                   >
-                    <View
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: i === 3 ? 4 : 9,
-                        borderWidth: line.thin,
-                        borderColor: colors.ink,
-                        backgroundColor: [
-                          colors.coral,
-                          colors.orange,
-                          colors.mint,
-                          colors.you,
-                        ][i],
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text style={font(900, i === 3 ? 10 : 14)}>{mark}</Text>
-                    </View>
+                    <GraphMarkIcon kind={label} size={18} />
                     <Text style={font(700, 12)}>{label}</Text>
                   </View>
                 ))}

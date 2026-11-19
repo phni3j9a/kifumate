@@ -20,6 +20,11 @@ export const colors = {
   sky: "#DCE6FF", // 相手側のタグ
   advice: "#E4F8F3", // AIコーチの助言
   skeleton: "#F1E8CF",
+  skeletonHighlight: "#FFF6DD",
+  barStripe: "#EFE6CC",
+  pausedStripe: "#FFD9A8",
+  graphPhase: "#FFF7DF",
+  graphDown: "#C3D3FF",
   mintSoft: "#C9F3EA", // 分岐・進行中
   coralSoft: "#FFD9D4", // 注意（本譜に戻る・削除）
   badCard: "#FFE9E6",

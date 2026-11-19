@@ -25,6 +25,40 @@ async function imported(p: Page, precise = true) {
 test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と再起動・追加質問・無料/通信なしでも履歴閲覧", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const add = media.addEventListener.bind(media);
+    const remove = media.removeEventListener.bind(media);
+    const listeners = new Set();
+    Object.assign(window, { reduceMotionListeners: () => listeners.size });
+    Object.assign(media, {
+      addEventListener(
+        name: string,
+        listener: EventListener,
+        options?: AddEventListenerOptions,
+      ) {
+        if (name === "change") listeners.add(listener);
+        add(name, listener, options);
+      },
+      removeEventListener(
+        name: string,
+        listener: EventListener,
+        options?: EventListenerOptions,
+      ) {
+        if (name === "change") listeners.delete(listener);
+        remove(name, listener, options);
+      },
+    });
+    const matchMedia = window.matchMedia.bind(window);
+    window.matchMedia = (query) =>
+      query === media.media ? media : matchMedia(query);
+  });
+  const motionListeners = () =>
+    page.evaluate(() =>
+      (
+        window as unknown as { reduceMotionListeners: () => number }
+      ).reduceMotionListeners(),
+    );
   const { analysis, coach } = await imported(page);
   await button(page, "AIに聞く").click();
   await expect(page.getByText("どこを中心に説明しますか")).toBeVisible();
@@ -37,6 +71,7 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   await expect(
     page.getByText("練習中：四間飛車", { exact: false }),
   ).toBeVisible();
+  const baseline = await motionListeners();
   await button(page, "解説をつくる").dblclick();
   await expect.poll(() => coach.requests.length).toBe(1);
   await expect(
@@ -44,7 +79,30 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   ).toBeVisible();
   expect(coach.requests[0]!.profile.practice).toEqual(["四間飛車"]);
   expect(coach.requests[0]).not.toHaveProperty("black");
+  const band = page
+    .getByTestId("coach-sheet")
+    .locator('rect[fill^="url(#shimmer-"]')
+    .first();
+  await expect(band).toBeAttached();
+  await expect.poll(motionListeners).toBe(baseline + 1);
+  // 最初の1100msが過ぎても動き続ける。
+  const positions = await band.evaluate(async (rect) => {
+    const moving = rect.closest("svg")!.parentElement!;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const values = new Set<string>();
+    for (let i = 0; i < 8; i++) {
+      await new Promise(requestAnimationFrame);
+      values.add(getComputedStyle(moving).transform);
+    }
+    return values.size;
+  });
+  expect(positions).toBeGreaterThan(1);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(band).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(band).toBeAttached();
   await button(page, "AIコーチを閉じる").click();
+  await expect.poll(motionListeners).toBe(baseline);
   const gets = coach.gets;
   await page.waitForTimeout(3700);
   expect(coach.gets).toBe(gets);
@@ -80,6 +138,28 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   await expect(page.getByText("この対局のまとめ", { exact: true })).toHaveCount(
     2,
   );
+  // 質問の先頭を上端に寄せる（末尾までしか動かせない場合はその位置）。
+  const question = page.getByText("先手の次の練習は？", { exact: true });
+  await expect
+    .poll(() =>
+      question.evaluate((node) => {
+        const row = node.parentElement!;
+        let scroller = row.parentElement;
+        while (scroller && getComputedStyle(scroller).overflowY !== "auto")
+          scroller = scroller.parentElement;
+        if (!scroller) return Infinity;
+        const top =
+          row.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top +
+          scroller.scrollTop;
+        const expected = Math.max(
+          0,
+          Math.min(top - 6, scroller.scrollHeight - scroller.clientHeight),
+        );
+        return Math.abs(scroller.scrollTop - expected);
+      }),
+    )
+    .toBeLessThan(2);
   analysis.paid = false;
   coach.online = false;
   analysis.online = false;

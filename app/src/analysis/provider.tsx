@@ -10,22 +10,29 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
   type PropsWithChildren,
 } from "react";
 import { AppState } from "react-native";
 import { router, usePathname } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import { toast } from "../components/overlay";
+import { ask, toast, whenDialogIdle } from "../components/overlay";
 import { AnalysisClient } from "./client";
 import { AnalysisController } from "./controller";
 import { analysisStorage } from "./storage";
 import { active } from "./types";
 import { tokenStore } from "./token";
 import { RealtimeController } from "./realtime-controller";
+import { claimFirstReview, firstReviewKey } from "./first-review";
 const RealtimeContext = createContext<RealtimeController | null>(null);
-const Context = createContext<AnalysisController | null>(null);
+type Review = { id: string; jump: () => void };
+const Context = createContext<{
+  controller: AnalysisController;
+  watchReview: (review: Review) => () => void;
+} | null>(null);
 export function AnalysisProvider({ children }: PropsWithChildren) {
   const { revision } = useAppData();
   const db = useSQLiteContext(),
@@ -70,9 +77,28 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
       realtime.setVisible(false);
     };
   }, [realtime]);
+  const reviewing = useRef<Review | null>(null);
+  const context = useMemo(
+    () => ({
+      controller,
+      watchReview(review: Review) {
+        reviewing.current = review;
+        return () => {
+          if (reviewing.current === review) reviewing.current = null;
+        };
+      },
+    }),
+    [controller],
+  );
+  const pathRef = useRef(path);
+  useLayoutEffect(() => {
+    pathRef.current = path;
+  }, [path]);
   useEffect(() => {
-    controller.onNotify((id, failed) => {
-      if (path === `/game/${id}`) {
+    const inForeground = () =>
+      !["background", "inactive"].includes(AppState.currentState ?? "");
+    const notice = (id: string, failed: boolean) => {
+      if (pathRef.current === `/game/${id}`) {
         toast(failed ? "解析を終えられませんでした" : "解析が終わりました");
         return;
       }
@@ -80,10 +106,47 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
         failed
           ? "対局の解析を終えられませんでした"
           : "対局の解析が終わりました",
-        { label: "開く", onPress: () => router.push(`/game/${id}`) },
+        {
+          label: "開く",
+          onPress: () => router.push(`/game/${id}`),
+        },
       );
+    };
+    // 保存後の完了通知だけが対象。既存解析を開くだけでは初回フラグを使わない。
+    controller.onNotify((id, failed) => {
+      const screen = reviewing.current;
+      const sameScreen = () =>
+        reviewing.current === screen &&
+        inForeground() &&
+        pathRef.current === `/game/${id}`;
+      if (failed || screen?.id !== id || !sameScreen()) {
+        notice(id, failed);
+        return;
+      }
+      void (async () => {
+        let pending: Promise<void> | undefined;
+        while (sameScreen() && (pending = whenDialogIdle())) await pending;
+        if (!sameScreen() || !(await claimFirstReview(db)))
+          return notice(id, false);
+        // フラグの保存中に開かれたダイアログも置き換えない。
+        while (sameScreen() && (pending = whenDialogIdle())) await pending;
+        if (!sameScreen()) {
+          await db.runAsync("DELETE FROM settings WHERE key=?", firstReviewKey);
+          return notice(id, false);
+        }
+        ask({
+          title: "はじめての解析ができました",
+          text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。",
+          ok: "見てみる",
+          single: true,
+          image: "learn-first",
+          onOk: () => {
+            if (sameScreen()) screen.jump();
+          },
+        });
+      })().catch(() => notice(id, false));
     });
-  }, [controller, path]);
+  }, [controller, db]);
   useEffect(() => {
     let alive = true,
       lastSync = 0,
@@ -124,7 +187,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
     };
   }, [controller, revision]);
   return (
-    <Context.Provider value={controller}>
+    <Context.Provider value={context}>
       <RealtimeContext.Provider value={realtime}>
         <EntitlementsProvider controller={client.access}>
           <CoachProvider client={client}>{children}</CoachProvider>
@@ -144,7 +207,7 @@ export function useRealtime() {
   return { ...state, paid: checked ? entitlement.paid : null, controller };
 }
 export function useAnalysis() {
-  const controller = useContext(Context)!;
+  const { controller, watchReview } = useContext(Context)!;
   const state = useSyncExternalStore(
     controller.subscribe,
     () => controller.snapshot,
@@ -155,6 +218,7 @@ export function useAnalysis() {
     ...state,
     // 残数を算出したプランを照会結果と照合する画面には、書き換える前の値も渡す。
     serverQuota: state.quota,
+    watchReview,
     quota: state.quota ? { ...state.quota, paid: entitlement.paid } : null,
     controller,
   };

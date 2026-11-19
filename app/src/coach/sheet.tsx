@@ -1,6 +1,8 @@
 import { partialSaved } from "../analysis/types";
 import { useRef, useState, type ComponentRef } from "react";
 import {
+  Animated,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,7 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useCallback } from "react";
 import { randomUUID } from "expo-crypto";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,11 +30,13 @@ import {
   RoundButton,
   TextButton,
 } from "../components/ui";
-import { ask, toast } from "../components/overlay";
+import { ask, toast, useSlideUp } from "../components/overlay";
 import { Icon } from "../components/icons";
 import { colors, font, line, radius, shadow } from "../components/theme";
 import { useCoach, setCoachVisible } from "./provider";
 import { coachInput } from "./privacy";
+import { WaitingDots } from "../components/waiting-dots";
+import { CoachSkeleton } from "./shimmer";
 import { StylePicker } from "./style-picker";
 import {
   quotaNotice,
@@ -63,6 +67,8 @@ export function CoachSheet({
   tryLine: (p: number, pv: string[]) => void;
   onFullChange: (full: boolean) => void;
 }) {
+  const slide = useSlideUp(true);
+  const focused = useIsFocused();
   const db = useSQLiteContext(),
     insets = useSafeAreaInsets(),
     { height } = useWindowDimensions();
@@ -77,12 +83,45 @@ export function CoachSheet({
     [question, setQuestion] = useState("");
   const [sending, setSending] = useState(false);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  const anchor = useRef<{ id: string; waitingShown: boolean } | null>(null);
+  const cancelScroll = useCallback(() => {
+    anchor.current = null;
+  }, []);
   useFocusEffect(
     useCallback(() => {
       setCoachVisible(game.id, true);
       void controller.sync();
-      return () => setCoachVisible(game.id, false);
-    }, [controller, game.id]),
+      const sub = AppState.addEventListener("change", (state) => {
+        if (state !== "active") cancelScroll();
+      });
+      const node =
+        Platform.OS === "web"
+          ? (scroll.current?.getScrollableNode() as HTMLElement | undefined)
+          : undefined;
+      const onKey = (event: KeyboardEvent) => {
+        if (
+          [
+            "ArrowUp",
+            "ArrowDown",
+            "PageUp",
+            "PageDown",
+            "Home",
+            "End",
+            " ",
+          ].includes(event.key)
+        )
+          cancelScroll();
+      };
+      node?.addEventListener("wheel", cancelScroll, { passive: true });
+      node?.addEventListener("keydown", onKey);
+      return () => {
+        node?.removeEventListener("wheel", cancelScroll);
+        node?.removeEventListener("keydown", onKey);
+        sub.remove();
+        cancelScroll();
+        setCoachVisible(game.id, false);
+      };
+    }, [cancelScroll, controller, game.id]),
   );
   const answers = r?.answers ?? [],
     attempt = r?.attempt;
@@ -128,6 +167,9 @@ export function CoachSheet({
       toast("先に、この対局の精密解析が必要です");
       return;
     }
+    const requestId = randomUUID();
+    anchor.current =
+      text === undefined ? null : { id: requestId, waitingShown: false };
     setSending(true);
     try {
       const aliases = (await listAliases(db)).map((a) => a.name);
@@ -148,7 +190,7 @@ export function CoachSheet({
       await controller.start(
         game.id,
         coachInput(
-          randomUUID(),
+          requestId,
           saved,
           game,
           aliases,
@@ -160,8 +202,8 @@ export function CoachSheet({
       );
       setQuestion("");
       setSetup(false);
-      if (text) scroll.current?.scrollToEnd({ animated: true });
     } catch {
+      cancelScroll();
       toast("依頼を保存できませんでした。もう一度お試しください");
     } finally {
       setSending(false);
@@ -209,25 +251,8 @@ export function CoachSheet({
               ? "解析が終わると、ここで解説を作れます。"
               : "ふつうの解析をしています。AIコーチは、精密解析した対局で使えます。"
             : "AIコーチは、精密解析で出た評価値・候補手・詰みをもとに説明します。";
-  return (
-    <KeyboardAvoidingView
-      testID="coach-sheet"
-      accessibilityViewIsModal
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[
-        s.sheet,
-        {
-          top: Math.min(
-            Math.max(
-              insets.top + (full ? fullTop : halfTop),
-              full ? height * 0.08 : 0,
-            ),
-            height - 250,
-          ),
-          paddingBottom: insets.bottom,
-        },
-      ]}
-    >
+  const content = (
+    <>
       <View style={s.header}>
         <View style={{ marginLeft: -4 }}>
           <MascotImage name={face} height={30} />
@@ -268,6 +293,19 @@ export function CoachSheet({
       </View>
       <ScrollView
         ref={scroll}
+        onScrollBeginDrag={cancelScroll}
+        onTouchMove={cancelScroll}
+        onContentSizeChange={() => {
+          const target = anchor.current;
+          if (
+            !target ||
+            target.waitingShown ||
+            attempt?.input.requestId !== target.id
+          )
+            return;
+          target.waitingShown = true;
+          scroll.current?.scrollToEnd({ animated: false });
+        }}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingTop: 8,
@@ -314,20 +352,7 @@ export function CoachSheet({
             >
               解説を作っています…
             </Text>
-            {[100, 100, 100, 62, 100, 80].map((w, i) => (
-              <View
-                key={i}
-                style={{
-                  height: 11,
-                  marginTop: i === 4 ? 20 : 9,
-                  marginHorizontal: 2,
-                  borderRadius: 6,
-                  backgroundColor: colors.skeleton,
-                  width: `${w}%`,
-                  maxWidth: "99%",
-                }}
-              />
-            ))}
+            <CoachSkeleton active={focused} />
             <Hint>
               解説を作っています。画面を離れても続きます。通常は40秒ほど、長いときは1〜2分かかります。
             </Hint>
@@ -337,7 +362,18 @@ export function CoachSheet({
           (stage === "gen" && pendingQuestion !== undefined)) && (
           <>
             {answers.map((a, i) => (
-              <View key={a.requestId}>
+              <View
+                key={a.requestId}
+                onLayout={(e) => {
+                  if (anchor.current?.id !== a.requestId) return;
+                  const y = Math.max(0, e.nativeEvent.layout.y - 6);
+                  requestAnimationFrame(() => {
+                    if (anchor.current?.id !== a.requestId) return;
+                    cancelScroll();
+                    scroll.current?.scrollTo({ y, animated: false });
+                  });
+                }}
+              >
                 {a.question && (
                   <Text selectable style={s.question}>
                     {a.question}
@@ -386,9 +422,12 @@ export function CoachSheet({
                 <Text style={s.question}>{pendingQuestion}</Text>
                 <View style={s.chat}>
                   <MascotImage name="chat-thinking" height={28} />
-                  <Text style={font(700, 12, 1.7)}>
-                    考えています… 画面を離れても続きます。
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <WaitingDots />
+                    <Text style={font(700, 12, 1.7)}>
+                      考えています… 画面を離れても続きます。
+                    </Text>
+                  </View>
                 </View>
               </>
             )}
@@ -560,6 +599,34 @@ export function CoachSheet({
           />
         </View>
       )}
+    </>
+  );
+  return (
+    <KeyboardAvoidingView
+      accessibilityViewIsModal
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={[
+        s.sheetFrame,
+        {
+          top: Math.min(
+            Math.max(
+              insets.top + (full ? fullTop : halfTop),
+              full ? height * 0.08 : 0,
+            ),
+            height - 250,
+          ),
+        },
+      ]}
+    >
+      <Animated.View
+        testID="coach-sheet"
+        style={[
+          s.sheet,
+          { paddingBottom: insets.bottom, transform: [{ translateY: slide }] },
+        ]}
+      >
+        {content}
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -688,12 +755,16 @@ function ReferenceView({
   );
 }
 const s = StyleSheet.create({
-  sheet: {
+  sheetFrame: {
+    // iOSのキーボード回避に、シートが親のどこから始まるかを含める。
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 5,
+  },
+  sheet: {
+    flex: 1,
     backgroundColor: colors.bg,
     borderTopWidth: line.ol,
     borderColor: colors.ink,

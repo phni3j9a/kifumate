@@ -12,7 +12,14 @@ import type {
   Quota,
   Reply,
 } from "../../src/analysis/types";
-export async function fakeAnalysis(page: Page, { onboarding = false } = {}) {
+export async function fakeAnalysis(
+  page: Page,
+  { onboarding = false, firstReview = false } = {},
+) {
+  if (!firstReview) {
+    const review = page.getByRole("button", { name: "見てみる", exact: true });
+    await page.addLocatorHandler(review, () => review.click());
+  }
   if (!onboarding) {
     await page.addInitScript(() => {
       (globalThis as any).__testEntry = location.pathname + location.search;
