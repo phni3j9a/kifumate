@@ -537,7 +537,9 @@ async function run(width: number, height: number) {
   await closeSheet();
   await tap("閉じる");
   await rtMock("setPly(0)");
-  await a.getByRole("slider", { name: /形勢グラフ/ }).click();
+  await a
+    .getByRole("slider", { name: /形勢グラフ/ })
+    .click({ position: { x: 35, y: 20 } });
   await button("分岐に戻る").waitFor();
   await shot("branch-undo");
   await act("toastact");

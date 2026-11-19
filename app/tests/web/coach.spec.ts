@@ -80,6 +80,28 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   await expect(page.getByText("この対局のまとめ", { exact: true })).toHaveCount(
     2,
   );
+  // 質問の先頭を上端に寄せる（末尾までしか動かせない場合はその位置）。
+  const question = page.getByText("先手の次の練習は？", { exact: true });
+  await expect
+    .poll(() =>
+      question.evaluate((node) => {
+        const row = node.parentElement!;
+        let scroller = row.parentElement;
+        while (scroller && getComputedStyle(scroller).overflowY !== "auto")
+          scroller = scroller.parentElement;
+        if (!scroller) return Infinity;
+        const top =
+          row.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top +
+          scroller.scrollTop;
+        const expected = Math.max(
+          0,
+          Math.min(top - 6, scroller.scrollHeight - scroller.clientHeight),
+        );
+        return Math.abs(scroller.scrollTop - expected);
+      }),
+    )
+    .toBeLessThan(2);
   analysis.paid = false;
   coach.online = false;
   analysis.online = false;
