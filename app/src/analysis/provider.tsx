@@ -10,6 +10,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
@@ -90,7 +91,9 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
     [controller],
   );
   const pathRef = useRef(path);
-  pathRef.current = path;
+  useLayoutEffect(() => {
+    pathRef.current = path;
+  }, [path]);
   useEffect(() => {
     const inForeground = () =>
       !["background", "inactive"].includes(AppState.currentState ?? "");
