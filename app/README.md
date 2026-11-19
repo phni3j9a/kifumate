@@ -47,7 +47,7 @@ Web の本番用バンドル：`npx expo export --platform web`。配信時は S
 
 ## Androidの配布APKビルド
 
-**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.0-19-arm64-latest.apk`（表示版0.1.0、`versionCode=19`、arm64-v8a専用、42,416,347byte、モックとの見た目・動きの統一 #42/#43、アダプティブアイコン #39、設定とプラン画面の回数・権利表示の整理 #45 を含む）。隣の `.sha256` で照合できます。署名証明書・権限（INTERNETのみ）・arm64のみは版17と同一であることを確認済み。旧版は同じフォルダーで `old` と明記しています（版18は `kifumate-0.1.0-18-old-before-quota-cleanup.apk`、版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
+**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.1-1001-arm64-latest.apk`（表示版0.1.1、`versionCode=1001`、arm64-v8a専用、42,416,383byte、ローカルスクリプトでビルドした最初の配布版。Androidで文字の下端が切れる不具合の修正 #49 を含む）。隣の `.sha256` で照合できます。署名証明書（SHA-256 `3960c238…69a9`）・権限（INTERNETのみ）・arm64のみは版19と同一であることを確認済み。実機で版1000からの上書き更新とデータ保持も確認済みです。旧版は同じフォルダーで `old` と明記しています（版19は `kifumate-0.1.0-19-old-before-text-clip-fix.apk`、版18は `kifumate-0.1.0-18-old-before-quota-cleanup.apk`、版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
 
 配布APKは **EASを使わず、このマシンのスクリプトでビルドします**（PiMateと同じ方式、#47）。`expo prebuild --clean` → Gradle `:app:assembleRelease` を実行し、外部の署名情報を `scripts/release-signing.gradle` が読み込みます。`android/`・`ios/`は生成物でコミットせず、生成後の手編集もしません。表示名はモックと同じ **kifumate**。
 

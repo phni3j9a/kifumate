@@ -1,6 +1,6 @@
 {
   "name": "kifumate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "将棋の棋譜を端末内で記録・再生するアプリ",
   "main": "expo-router/entry",
   "scripts": {
