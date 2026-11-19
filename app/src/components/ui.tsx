@@ -286,8 +286,7 @@ export function Button({
       ]}
     >
       {icon && <Icon name={icon} size={16} strokeWidth={2.4} />}
-      {/* 行の高さ=文字サイズだと Android で Zen Maru の下端が切れる */}
-      <Text numberOfLines={1} style={font(900, z.text, 1.4)}>
+      <Text numberOfLines={1} style={font(900, z.text)}>
         {children}
       </Text>
     </Pressable>

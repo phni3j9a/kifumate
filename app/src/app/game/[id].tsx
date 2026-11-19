@@ -1214,11 +1214,11 @@ const s = StyleSheet.create({
     gap: 6,
   },
   jg: {
-    // 高さ16の行からはみ出す分（18.5−16）。Android は行の高さで文字を切るため、余白で逃がす
+    // 高さ16の行からはみ出す分（18.5−16）。上下の余白で高さを作ると Android では文字の行が縮められて切れる
+    height: 18.5,
     marginVertical: -1.25,
-    paddingTop: 2,
+    justifyContent: "center",
     paddingHorizontal: 8,
-    paddingBottom: 3,
     borderWidth: line.thin,
     borderColor: colors.ink,
     borderRadius: radius.pill,
@@ -1299,9 +1299,9 @@ const s = StyleSheet.create({
     overflow: "hidden",
   },
   bk: {
-    paddingTop: 2,
+    height: 18.5,
+    justifyContent: "center",
     paddingHorizontal: 7,
-    paddingBottom: 3,
     borderWidth: line.thin,
     borderColor: colors.ink,
     borderRadius: radius.pill,
