@@ -79,7 +79,7 @@ export function ToastHost() {
   if (!t.label)
     return (
       <View pointerEvents="none" style={s.toastArea}>
-        <View accessibilityLiveRegion="polite" style={s.toast}>
+        <View accessibilityLiveRegion="polite" style={[s.toast, s.toastPlain]}>
           <Text
             style={[
               font(700, 11.5, 1.45, colors.white),
@@ -449,6 +449,8 @@ const s = StyleSheet.create({
     backgroundColor: colors.ink,
     boxShadow: "0 3px 0 rgba(36,40,70,0.3)",
   },
+  // モックの通常通知は left:50% の絶対配置＋幅 auto で残り半分に折り返す。
+  toastPlain: { maxWidth: "50%" },
   toastActArea: {
     position: "absolute",
     left: 0,

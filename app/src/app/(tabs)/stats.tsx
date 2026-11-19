@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentRef,
+} from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { router, useFocusEffect, useScrollToTop } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 import {
@@ -214,6 +220,8 @@ function Trend({ games }: { games: Game[] }) {
 }
 export default function Stats() {
   const db = useSQLiteContext();
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  useScrollToTop(scroll);
   const { revision, pending } = useClassifications();
   const [games, setGames] = useState<Game[] | null>(null),
     [error, setError] = useState("");
@@ -298,7 +306,7 @@ export default function Stats() {
           onPress={() => setSheet(true)}
         />
       </AppBar>
-      <PageScroll>
+      <PageScroll ref={scroll}>
         <View style={s.filters}>
           <View style={{ flex: 1 }}>
             <Segmented

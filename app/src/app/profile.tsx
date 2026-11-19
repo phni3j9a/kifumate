@@ -1,4 +1,4 @@
-import { Text, TextInput, View } from "react-native";
+import { Text, View } from "react-native";
 import { useCoach } from "../coach/provider";
 import { practices } from "../coach/types";
 import { StylePicker } from "../coach/style-picker";
@@ -9,8 +9,9 @@ import {
   PageScroll,
   Screen,
   SectionTitle,
+  TextArea,
 } from "../components/ui";
-import { colors, font, line, radius } from "../components/theme";
+import { colors, font, line } from "../components/theme";
 import { toast } from "../components/overlay";
 export default function ProfileScreen() {
   const { profile, controller, overview } = useCoach();
@@ -27,7 +28,6 @@ export default function ProfileScreen() {
             style={[
               font(500, 10.5, 1.5, colors.ink2),
               {
-                marginBottom: 10,
                 paddingVertical: 6,
                 paddingHorizontal: 10,
                 borderWidth: line.thin,
@@ -67,24 +67,13 @@ export default function ProfileScreen() {
           ))}
         </View>
         <SectionTitle>目標</SectionTitle>
-        <TextInput
+        <TextArea
           accessibilityLabel="目標"
-          multiline
+          height={92}
           maxLength={200}
           placeholder="例：初段になりたい、終盤を強くしたい"
           value={profile.goal}
           onChangeText={(goal) => save({ ...profile, goal })}
-          style={{
-            ...font(500, 16, 1.45),
-            height: 92,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderWidth: line.ol,
-            borderColor: colors.ink,
-            borderRadius: radius.field,
-            backgroundColor: colors.white,
-            textAlignVertical: "top",
-          }}
         />
         <SectionTitle>いつもの解説スタイル</SectionTitle>
         <StylePicker

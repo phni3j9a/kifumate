@@ -570,7 +570,17 @@ async function run(width: number, height: number) {
   // 一覧（1局）、絞り込み、検索結果なし、重複
   await act("back");
   await tap("戻る");
-  await plan("paid"); // 無料プランの一覧は、解析の残り回数（次の段階で追加）が見出しに入る
+  await plan("free");
+  await m.evaluate(
+    (left) =>
+      (window as any).__compare(
+        `DB.usage.free=DB.usage.freeMax-${left}; show()`,
+      ),
+    fake.remaining,
+  );
+  await a
+    .getByRole("button", { name: `今週の解析 あと${fake.remaining}局` })
+    .waitFor();
   await shot("list");
   await act("filter");
   await tap("絞り込み");

@@ -1,7 +1,7 @@
 import { useCoach } from "../../coach/provider";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState, type ComponentRef } from "react";
 import { ScrollView } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useScrollToTop } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { AppBar, Card, Row, Screen, SectionTitle } from "../../components/ui";
 import { useAnalysis } from "../../analysis/provider";
@@ -9,6 +9,8 @@ import { AnalysisQuota } from "../../components/analysis-quota";
 import { listAliases } from "../../storage/repository";
 export default function Settings() {
   const db = useSQLiteContext();
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  useScrollToTop(scroll);
   const { profile } = useCoach();
   const { controller } = useAnalysis();
   const [names, setNames] = useState("");
@@ -24,6 +26,7 @@ export default function Settings() {
     <Screen>
       <AppBar title="設定" />
       <ScrollView
+        ref={scroll}
         contentContainerStyle={{
           paddingTop: 9,
           paddingHorizontal: 14,

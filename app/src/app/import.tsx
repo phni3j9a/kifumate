@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
@@ -36,8 +36,9 @@ import {
   type Side,
 } from "../core/kif";
 import { useAnalysis } from "../analysis/provider";
+import { useEntitlements } from "../entitlements/provider";
 import { analysisInput } from "../analysis/display";
-import type { Mode } from "../analysis/types";
+import { active, type Mode } from "../analysis/types";
 import { findDuplicate, importGame, listAliases } from "../storage/repository";
 
 // input は読み取った本文。今の入力と同じときだけ、この結果で保存できる。
@@ -78,8 +79,19 @@ function Line({
 const body = font(500, 11.5, 1.55, colors.ink2);
 
 export default function Import() {
-  const { quota, offline, controller } = useAnalysis();
+  const { serverQuota, offline, records, controller } = useAnalysis();
+  const { entitlement, checked, offline: accessOffline } = useEntitlements();
   const [mode, setMode] = useState<Mode>("precise");
+  const [now, setNow] = useState(Date.now);
+  const resetsAt = serverQuota?.resetsAt;
+  useEffect(() => {
+    if (resetsAt === undefined || resetsAt <= now) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, resetsAt - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [resetsAt, now]);
   const db = useSQLiteContext();
   const [tab, setTab] = useState<"paste" | "file">("paste"),
     [text, setText] = useState(""),
@@ -180,8 +192,43 @@ export default function Import() {
   const fresh = view?.input === (tab === "paste" ? text : (file?.text ?? ""));
   const side = pick !== undefined ? pick : (ok?.auto ?? null);
   const decided = pick !== undefined || !!ok?.auto;
+  const paid = entitlement.paid;
+  const analysisMode = paid ? mode : "std";
+  const quota =
+    checked &&
+    !accessOffline &&
+    serverQuota?.paid === paid &&
+    serverQuota.resetsAt > now
+      ? serverQuota
+      : null;
+  const totalExhausted = quota?.totalRemaining === 0;
+  const preciseExhausted =
+    analysisMode === "precise" && quota?.preciseRemaining === 0;
+  const cannotAnalyze = offline || totalExhausted || preciseExhausted;
+  function analysisNote() {
+    if (offline)
+      return "通信できないため、今週の解析の残り回数を確認できません";
+    if (totalExhausted) {
+      const reset = new Date(quota.resetsAt).toLocaleString("ja-JP", {
+        timeZone: "Asia/Tokyo",
+      });
+      return `今週の解析枠は残っていません。次の更新：${reset}（日本時間）`;
+    }
+    if (preciseExhausted)
+      return "今週の精密解析枠は残っていません。ふつうの解析に切り替えてください。";
+    if (!quota)
+      return accessOffline
+        ? "解析の残り回数を確認できません"
+        : "解析の残り回数を確認しています…";
+    if (quota.reserved.total > 0 || Object.values(records).some(active))
+      return "いまの解析が終わったら、続けて解析します";
+    if (!paid) return `今週の解析　あと${quota.totalRemaining}局`;
+    return analysisMode === "precise"
+      ? "精密解析を1局分使います（候補3手・深い読み）"
+      : "候補1手です";
+  }
   async function save(analyze = false) {
-    if (!ok || !fresh || !decided || busy) return;
+    if (!ok || !fresh || !decided || busy || (analyze && cannotAnalyze)) return;
     setBusy(true);
     try {
       const saved = await importGame(
@@ -199,10 +246,7 @@ export default function Import() {
         toast("保存しました");
         if (analyze)
           void controller
-            .start(
-              saved.id,
-              analysisInput(ok.record, quota?.paid ? mode : "std"),
-            )
+            .start(saved.id, analysisInput(ok.record, analysisMode))
             .catch(() =>
               toast("棋譜は保存しましたが、解析を依頼できませんでした"),
             );
@@ -362,7 +406,7 @@ export default function Import() {
                     ) : !side ? (
                       <Line title="自分の対局ではない">
                         <Text style={body}>
-                          保存と再生はできます。戦績には数えません。
+                          保存・再生・解析はできます。戦績には数えません。
                         </Text>
                         {who}
                       </Line>
@@ -414,13 +458,15 @@ export default function Import() {
                 </Button>
               ) : (
                 <View style={{ gap: 10 }}>
-                  {quota?.paid && (
+                  {paid && (
                     <Segmented
                       label="解析の種類"
                       options={[
                         [
                           "precise",
-                          `精密解析（今週あと${Math.min(quota.totalRemaining, quota.preciseRemaining)}局）`,
+                          quota
+                            ? `精密解析（今週あと${Math.min(quota.totalRemaining, quota.preciseRemaining)}局）`
+                            : "精密解析",
                         ],
                         ["std", "ふつうの解析"],
                       ]}
@@ -428,33 +474,17 @@ export default function Import() {
                       onChange={setMode}
                     />
                   )}
-                  {(!quota || quota.totalRemaining > 0) && (
-                    <>
-                      <Button
-                        kind="pri"
-                        wide
-                        disabled={
-                          !fresh ||
-                          !decided ||
-                          busy ||
-                          offline ||
-                          (mode === "precise" &&
-                            !!quota?.paid &&
-                            quota.preciseRemaining === 0)
-                        }
-                        onPress={() => void save(true)}
-                      >
-                        保存して解析する
-                      </Button>
-                      <Text style={font(500, 11, 1.5, colors.ink2)}>
-                        {offline
-                          ? "通信できません。解析はつながってから始められます"
-                          : quota?.paid && mode === "precise"
-                            ? "精密解析を1局分使います（候補3手・深い読み）"
-                            : "候補1手です"}
-                      </Text>
-                    </>
+                  {!totalExhausted && (
+                    <Button
+                      kind="pri"
+                      wide
+                      disabled={!fresh || !decided || busy || cannotAnalyze}
+                      onPress={() => void save(true)}
+                    >
+                      保存して解析する
+                    </Button>
                   )}
+                  <Text style={s.analysisNote}>{analysisNote()}</Text>
                   <Button
                     wide
                     disabled={!fresh || !decided || busy}
@@ -472,6 +502,11 @@ export default function Import() {
   );
 }
 const s = StyleSheet.create({
+  analysisNote: {
+    ...font(500, 11, 1.4, colors.ink2),
+    textAlign: "center",
+    marginTop: -5,
+  },
   fpick: {
     alignItems: "center",
     gap: 10,
