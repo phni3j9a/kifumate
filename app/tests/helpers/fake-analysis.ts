@@ -41,6 +41,7 @@ export async function fakeAnalysis(page: Page, { onboarding = false } = {}) {
     inviteStatus: 400,
     redeemed: [] as { code: string }[],
     remaining: 99,
+    resetsAt: Date.now() + 3 * 86400000,
     reserved: 0,
     precise: 19,
     status: "running" as Reply["status"],
@@ -80,8 +81,8 @@ export async function fakeAnalysis(page: Page, { onboarding = false } = {}) {
   let job: Reply | null = null;
   const quota = (): Quota => ({
     paid: state.paid,
-    weekStart: 1794754800000,
-    resetsAt: 1795359600000,
+    weekStart: state.resetsAt - 7 * 86400000,
+    resetsAt: state.resetsAt,
     totalRemaining: state.remaining,
     preciseRemaining: state.paid ? state.precise : 0,
     completed: { total: state.paid ? 1 : 0, precise: state.paid ? 1 : 0 },

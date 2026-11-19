@@ -153,6 +153,8 @@ export function useAnalysis() {
   const { entitlement } = useEntitlements();
   return {
     ...state,
+    // 残数を算出したプランを照会結果と照合する画面には、書き換える前の値も渡す。
+    serverQuota: state.quota,
     quota: state.quota ? { ...state.quota, paid: entitlement.paid } : null,
     controller,
   };
