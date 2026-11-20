@@ -30,11 +30,11 @@ function configFor(variant?: string) {
 }
 
 test("配布APKはリリースID・本番URL・版から算出したversionCodeを使う", () => {
-  assert.equal(app.version, "0.1.1");
+  assert.equal(app.version, "0.1.2");
   assert.equal(app.android.package, "com.quarterlambda.kifumate");
   assert.equal(app.android.versionCode, undefined);
   assert.equal(analysisUrl(false, STAGING_URL), PRODUCTION_URL);
-  assert.equal(configFor("production").android?.versionCode, 1001);
+  assert.equal(configFor("production").android?.versionCode, 1002);
   assert.equal(versionCode("1.2.3"), 1_002_003);
   for (const bad of ["0.1", "0.1.0-rc.1", "01.0.0", "0.1000.0", ""]) {
     assert.throws(() => versionCode(bad));
