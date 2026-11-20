@@ -13,8 +13,9 @@ const ACTORS = 'あなた|相手|先手|後手';
 const PIECES = '成香|成桂|成銀|と金|飛車|歩|香|桂|銀|金|角|飛|玉|王|と(?!いう)|馬|龍|竜';
 const RANKS = '一二三四五六七八九';
 const SQUARE = `[1-9${RANKS}][1-9${RANKS}]`;
+const KIF_PIECES = PIECES.replace('と(?!いう)', `と(?!いう|${SQUARE})`);
 const PV = '仮の読み筋（実戦とは別）';
-const KIF = `([▲△☗☖]\\s*)?(${SQUARE}|同)\\s*(${PIECES})(不成|成|打)?(?:\\(([1-9]{2})\\))?`;
+const KIF = `([▲△☗☖]\\s*)?(${SQUARE}|同)\\s*(${KIF_PIECES})(不成|成|打)?(?:\\(([1-9]{2})\\))?`;
 const USI = /(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/;
 
 function piece(s: string) {
@@ -38,7 +39,7 @@ function matchesMove(m: RegExpMatchArray, source?: string) {
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts'): string | undefined {
   text = text.normalize('NFKC');
   if (USI.test(text)) return 'usi';
-  if (/[+−‒–—-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
+  if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
   if (kind === 'facts') {
     const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r[PV] ?? []).map((m: any) => m['表記'])) ?? [])];
