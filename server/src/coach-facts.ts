@@ -7,7 +7,7 @@ export interface CoachFacts {
 }
 
 const ACTORS = 'あなた|相手|先手|後手';
-const PIECES = '成香|成桂|成銀|と金|飛車|歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜';
+const PIECES = '成香|成桂|成銀|と金|飛車|歩|香|桂|銀|金|角|飛|玉|王|と(?!いう)|馬|龍|竜';
 const RANKS = '一二三四五六七八九';
 const KIF = `([▲△☗☖]\\s*)?([1-9${RANKS}][1-9${RANKS}]|同)\\s*(${PIECES})(不成|成|打)?(?:\\(([1-9]{2})\\))?`;
 const USI = /(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/;
