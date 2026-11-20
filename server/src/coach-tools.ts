@@ -104,7 +104,9 @@ export async function responsesWithTools(options: {
       stage = 'provider_fetch'; status = undefined;
       if (inputUsed + reservedInput > INPUT_BUDGET || outputUsed + reservedOutput > OUTPUT_BUDGET) throw new ApiError(502, 'provider_failed');
       turns++;
-      const response = await abortable(signal, () => options.transport(options.url, {method: 'POST', signal, redirect: 'manual',
+      // Workersのfetchはレシーバー付きで呼ぶとIllegal invocationになる。
+      const {transport} = options;
+      const response = await abortable(signal, () => transport(options.url, {method: 'POST', signal, redirect: 'manual',
         headers: {'Authorization': `Bearer ${options.key}`, 'Content-Type': 'application/json'}, body}));
       stage = 'provider_http'; status = response.status;
       if (!response.ok) {
