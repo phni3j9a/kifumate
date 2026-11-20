@@ -1,7 +1,7 @@
 import prompt from './coach-prompt.txt';
 import toolsPrompt from './coach-tools-prompt.txt';
 import { abortable, RESPONSES_TOOLS, responsesWithTools, type RunTools } from './coach-tools';
-import { contradicts, hasFactReference, notationIssue, type CoachFacts } from './coach-facts';
+import { contradicts, hasFactReference, lineOrigin, notationIssue, type CoachFacts } from './coach-facts';
 import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
@@ -152,8 +152,8 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
     const value = await responsesWithTools({url: url.toString(), key: env.COACH_API_KEY, model: env.COACH_MODEL ?? 'gpt-6.1-terra',
       effort: env.COACH_REASONING_EFFORT ?? 'high', maxTokens: setting(env.COACH_MAX_TOKENS, 5400, 65536), deadline,
       reserveMs: Math.min(30_000, timeoutMs(env) / 4), input: toolsMessages(input, facts),
-      facts, signal, transport, runTools, inspect: raw => {
-        try { return inspectDraft(JSON.parse(raw), refs, facts); }
+      facts, signal, transport, runTools, inspect: (raw, evidence) => {
+        try { return inspectDraft(JSON.parse(raw), refs, evidence); }
         catch { return {accepted: false, issues: [{code: 'invalid_json'}]}; }
       },
     });
@@ -180,6 +180,24 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
     throw error;
   }
 }
+function publicReferenceIds(ids: unknown[], refs: Reference[], facts?: CoachFacts) {
+  if (!Array.isArray(ids)) throw new Error();
+  const origins = new Set<string>();
+  const unique = new Set<string>();
+  for (const id of ids) {
+    if (typeof id !== 'string') throw new Error();
+    const origin = facts && lineOrigin(id, facts);
+    const publicId = origin ?? id;
+    if (!refs.some(r => r.id === publicId) || facts && !hasFactReference(publicId, facts)) throw new Error();
+    unique.add(publicId);
+    if (origin) origins.add(origin);
+  }
+  if (!origins.size && ids.length > 10) throw new Error();
+  // 上限を超える場合は、仮の手順を根拠にした起点を優先して元の順に返す。
+  const kept = new Set([...origins, ...unique].slice(0, 10));
+  return [...unique].filter(id => kept.has(id));
+}
+
 export function validateOutput(value: unknown, refs: Reference[], facts?: CoachFacts) {
   try {
     const x = record(value); keys(x, ['sections']);
@@ -188,13 +206,12 @@ export function validateOutput(value: unknown, refs: Reference[], facts?: CoachF
       const s = record(value); keys(s, ['kind', 'title', 'text', 'refs']);
       if (!['facts', 'advice'].includes(s.kind)) throw new Error();
       const title = text(s.title, 80), body = text(s.text, 2000);
-      if (notationIssue(title + '。' + body, facts, s.kind)) throw new Error();
-      if (!Array.isArray(s.refs) || s.refs.length > 10 || (s.kind === 'facts' && !s.refs.length)) throw new Error();
-      const selected = s.refs.map((id: unknown) => {
-        const ref = refs.find(r => r.id === id); if (!ref || facts && !hasFactReference(ref.id, facts)) throw new Error(); return ref;
-      });
-      if (facts && contradicts(title + '。' + body, s.refs, facts)) throw new Error();
-      return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected};
+      if (!Array.isArray(s.refs)) throw new Error();
+      const selected = publicReferenceIds(s.refs, refs, facts);
+      if (s.kind === 'facts' && !selected.length) throw new Error();
+      if (notationIssue(title + '。' + body, facts, s.kind, selected)) throw new Error();
+      if (facts && contradicts(title + '。' + body, selected, facts)) throw new Error();
+      return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected.map(id => refs.find(r => r.id === id)!)};
     })};
   } catch { throw new ApiError(502, 'invalid_output'); }
 }
@@ -207,21 +224,26 @@ function withoutClaims(value: unknown) {
   return value;
 }
 
-export function inspectDraft(draft: unknown, refs: Reference[], facts: CoachFacts) {
+export function inspectDraft(draft: unknown, refs: Reference[], facts: CoachFacts, includeOutput = false) {
   const issues: {section?: number; field?: string; code: string}[] = [];
   const output: any = withoutClaims(draft);
-  try { validateOutput(output, refs, facts); return {accepted: true, issues}; } catch { /* 以下は診断のみ */ }
+  try {
+    const published = validateOutput(output, refs, facts);
+    return {accepted: true, issues, ...(includeOutput ? {published} : {})};
+  } catch { /* 以下は診断のみ */ }
   if (Array.isArray(output?.sections)) output.sections.forEach((s: any, section: number) => {
     try { validateOutput({sections: [s]}, refs, facts); return; } catch { /* 不合格の節だけを検査 */ }
     const count = issues.length;
     if (s && ['facts', 'advice'].includes(s.kind)) {
+      let selected: string[] = [];
+      try { selected = publicReferenceIds(s.refs, refs, facts); }
+      catch { issues.push({section, field: 'refs', code: 'invalid_reference'}); }
       for (const field of ['title', 'text']) {
         if (typeof s[field] !== 'string') continue;
-        const issue = notationIssue(s[field], facts, s.kind);
+        const issue = notationIssue(s[field], facts, s.kind, selected);
         if (issue) issues.push({section, field, code: issue});
-        if (Array.isArray(s.refs) && contradicts(s[field], s.refs.filter((r: unknown) => typeof r === 'string'), facts)) issues.push({section, field, code: 'contradicts'});
+        if (Array.isArray(s.refs) && contradicts(s[field], selected, facts)) issues.push({section, field, code: 'contradicts'});
       }
-      if (!Array.isArray(s.refs) || s.refs.some((r: unknown) => typeof r !== 'string' || !refs.some(ref => ref.id === r) || !hasFactReference(r, facts))) issues.push({section, field: 'refs', code: 'invalid_reference'});
     }
     if (count === issues.length) issues.push({section, code: 'invalid_output'});
   });

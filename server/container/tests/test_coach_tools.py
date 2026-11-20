@@ -29,7 +29,7 @@ def test_kif_direction_and_ambiguity():
     assert as_usi('▲５六金打') == 'G*5f'
     with pytest.raises(ToolError) as exc:
         as_usi('▲5六金')
-    assert len(exc.value.result['候補']) == 4
+    assert len(exc.value.result['候補']) == 3
     with pytest.raises(ToolError, match='不正'):
         as_usi('△5六金(46)')
     assert sh.move_to_usi(resolve(sh.Board(), '▲５八金右')) == '4i5h'
@@ -88,3 +88,17 @@ def test_knowledge_query_and_json_tools():
         assert 'エラー' not in result, (name, result)
         json.dumps(result, ensure_ascii=False)
     assert call(data(), 'position', {'position': {'ply': -1}}).get('エラー')
+
+
+def test_implicit_drop_prefers_legal_board_move():
+    board = sh.Board('k8/9/9/9/9/9/9/4G4/8K b G 1')
+    assert sh.move_to_usi(resolve(board, '▲5七金')) == '5h5g'
+    assert sh.move_to_usi(resolve(board, '▲5七金打')) == 'G*5g'
+    assert sh.move_to_usi(resolve(board, '▲2五金')) == 'G*2e'
+
+
+def test_compare_ignores_attacks_that_follow_the_same_moved_piece():
+    game = data(initial='k8/9/4p4/9/4R2p1/9/4l4/9/8K b - 1')
+    result = call(game, 'compare_moves', {'position': {'ply': 0}, 'move': '▲5六飛'})['比較'][0]
+    assert result['新しい当たり（対象側・升・駒／攻め駒・升）'] == []
+    assert result['両取り候補'] == []

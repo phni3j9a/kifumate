@@ -7,7 +7,8 @@ const tools = schema.map(tool => ({...tool, type: 'function', strict: false}));
 const TOOL_LIMIT = 30;
 const MAX_ARGS_BYTES = 16_000;
 const MAX_RESULT_BYTES = 24_000;
-const MAX_REPLAY_BYTES = 1_048_576;
+const INPUT_BUDGET = 240_000;
+const OUTPUT_BUDGET = 24_000;
 const MAX_RESPONSE_BYTES = 2_097_152;
 const encoder = new TextEncoder();
 const bytes = (s: string) => encoder.encode(s).byteLength;
@@ -62,26 +63,38 @@ function object(value: unknown): value is Record<string, any> {
 export async function responsesWithTools(options: {
   url: string; key: string; model: string; effort: string; maxTokens: number; deadline: number; reserveMs: number;
   input: {role: string; content: string}[]; facts: CoachFacts; signal: AbortSignal;
-  transport: typeof fetch; runTools: RunTools; inspect: (draft: string) => unknown;
+  transport: typeof fetch; runTools: RunTools; inspect: (draft: string, facts: CoachFacts) => unknown;
 }): Promise<unknown> {
   const {signal, facts} = options;
-  const history: unknown[] = [...options.input];
+  let history: unknown[] = [...options.input];
   const seen = new Set<string>();
   const started = Date.now();
   let turns = 0, calls = 0, stage = 'provider_fetch', status: number | undefined, failure: string | undefined;
-  let force = false;
+  let force = false, inputUsed = 0, outputUsed = 0, replayTokens = 0;
+  const finalTokens = Math.min(options.maxTokens, OUTPUT_BUDGET);
+  const researchTokens = Math.min(4200, options.maxTokens);
+  const request = (items: unknown[], final: boolean) => JSON.stringify({model: options.model,
+    input: final ? [...items, {role: 'user', content: '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'}] : items,
+    store: false, include: ['reasoning.encrypted_content'], service_tier: 'default', reasoning: {effort: options.effort},
+    max_output_tokens: final ? finalTokens : researchTokens, text: {format: {type: 'json_object'}}, tools, tool_choice: final ? 'none' : 'auto'});
+  // shortcut: UTF-8バイト数＋APIの整形余裕＋再生する応答トークンで安全側に予約。実測とずれる場合は提供元のカウントAPIを検討する。
+  const inputEstimate = (body: string, replay: number) => bytes(body) + 4096 + replay;
   try {
     for (;;) {
       signal.throwIfAborted();
       const remaining = options.deadline - Date.now();
       if (remaining <= 0) throw new ApiError(504, 'coach_timeout');
-      const final = force || calls >= TOOL_LIMIT || remaining <= options.reserveMs;
-      const input = final ? [...history, {role: 'user', content: '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'}] : history;
-      const body = JSON.stringify({model: options.model, input, store: false, include: ['reasoning.encrypted_content'],
-        service_tier: 'default', reasoning: {effort: options.effort}, max_output_tokens: final ? options.maxTokens : Math.min(4200, options.maxTokens),
-        text: {format: {type: 'json_object'}}, tools, tool_choice: final ? 'none' : 'auto'});
+      const finalBody = request(history, true);
+      const finalInput = inputEstimate(finalBody, replayTokens);
+      const researchBody = request(history, false);
+      const researchInput = inputEstimate(researchBody, replayTokens);
+      const final = force || calls >= TOOL_LIMIT || remaining <= options.reserveMs ||
+        inputUsed + researchInput + finalInput > INPUT_BUDGET || outputUsed + researchTokens + finalTokens > OUTPUT_BUDGET;
+      const body = final ? finalBody : researchBody;
+      const reservedInput = final ? finalInput : researchInput;
+      const reservedOutput = final ? finalTokens : researchTokens;
       stage = 'provider_fetch'; status = undefined;
-      if (bytes(body) > MAX_REPLAY_BYTES) throw new ApiError(502, 'provider_failed');
+      if (inputUsed + reservedInput > INPUT_BUDGET || outputUsed + reservedOutput > OUTPUT_BUDGET) throw new ApiError(502, 'provider_failed');
       turns++;
       const response = await abortable(signal, () => options.transport(options.url, {method: 'POST', signal, redirect: 'manual',
         headers: {'Authorization': `Bearer ${options.key}`, 'Content-Type': 'application/json'}, body}));
@@ -95,32 +108,42 @@ export async function responsesWithTools(options: {
       signal.throwIfAborted();
       if (Date.now() >= options.deadline) throw new ApiError(504, 'coach_timeout');
       stage = 'provider_output';
-      if (!object(data) || !Array.isArray(data.output) || !data.output.every(object)) throw new ApiError(502, 'invalid_output');
-      if (data.status !== 'completed' && data.status !== 'incomplete') throw new ApiError(502, 'provider_failed');
-      const pending = data.output.filter(item => item.type === 'function_call');
-      if (!pending.length) {
-        if (data.status === 'completed') {
-          const messages = data.output.filter(item => item.type === 'message');
-          const content = (messages.filter(item => item.phase === 'final_answer').at(-1) ?? messages.at(-1))?.content;
-          if (!Array.isArray(content) || !content.length || !content.every(part => object(part) && part.type === 'output_text' && typeof part.text === 'string')) {
-            throw new ApiError(502, 'invalid_output');
-          }
-          try { return JSON.parse(content.map(part => part.text).join('')); }
-          catch { throw new ApiError(502, 'invalid_output'); }
-        }
+      if (!object(data)) throw new ApiError(502, 'invalid_output');
+      const usage = (key: string, reserved: number): number => {
+        const value = data.usage?.[key];
+        if (!Number.isSafeInteger(value) || value < 0) return reserved;
+        if (value > reserved) throw new ApiError(502, 'provider_failed');
+        return value;
+      };
+      inputUsed += usage('input_tokens', reservedInput);
+      const generated = usage('output_tokens', reservedOutput);
+      outputUsed += generated;
+      if (data.status === 'incomplete') {
         if (final || data.incomplete_details?.reason !== 'max_output_tokens') throw new ApiError(502, 'invalid_output');
-        // 未完了のターンでは途中の回答本文は再送しない。
-        history.push(...data.output.filter(item => item.type === 'reasoning'));
         force = true;
         continue;
       }
-      if (final || data.status !== 'completed') throw new ApiError(502, 'invalid_output');
+      if (data.status !== 'completed') throw new ApiError(502, 'provider_failed');
+      if (!Array.isArray(data.output) || !data.output.every(object)) throw new ApiError(502, 'invalid_output');
+      const pending = data.output.filter(item => item.type === 'function_call');
+      if (!pending.length) {
+        const messages = data.output.filter(item => item.type === 'message');
+        const content = (messages.filter(item => item.phase === 'final_answer').at(-1) ?? messages.at(-1))?.content;
+        if (!Array.isArray(content) || !content.length || !content.every(part => object(part) && part.type === 'output_text' && typeof part.text === 'string')) {
+          throw new ApiError(502, 'invalid_output');
+        }
+        try { return JSON.parse(content.map(part => part.text).join('')); }
+        catch { throw new ApiError(502, 'invalid_output'); }
+      }
+      if (final) throw new ApiError(502, 'invalid_output');
       for (const item of pending) {
         if (typeof item.call_id !== 'string' || !item.call_id || seen.has(item.call_id)) throw new ApiError(502, 'invalid_output');
         seen.add(item.call_id);
       }
       // 暗号化推論を含むAPIの項目列を、そのまま元の順序で再送する。
-      history.push(...data.output);
+      const nextHistory = [...history, ...data.output];
+      // 予算に収まる完全な履歴と、その履歴で確認できた根拠だけを確定する。
+      const nextFacts = {...facts, 参照: [...facts.参照], 仮の手順: [...(facts.仮の手順 ?? [])]};
       stage = 'tools';
       const batch: {index: number; call: ToolCall; args: Record<string, any>}[] = [];
       const results: unknown[] = [];
@@ -151,7 +174,7 @@ export async function responsesWithTools(options: {
           else if (bytes(JSON.stringify(result)) > MAX_RESULT_BYTES) results[index] = error('結果が大きすぎます。対象を絞って確認してください');
           else {
             results[index] = result;
-            rememberToolEvidence(facts, call.name, args, result);
+            rememberToolEvidence(nextFacts, call.name, args, result);
           }
         }
       }
@@ -159,8 +182,15 @@ export async function responsesWithTools(options: {
       if (Date.now() >= options.deadline) throw new ApiError(504, 'coach_timeout');
       for (const [index, item] of pending.entries()) {
         // 下書き点検は同じターンの盤面照会が返した証拠も使う。
-        const result = results[index] ?? options.inspect(JSON.parse(item.arguments).draft);
-        history.push({type: 'function_call_output', call_id: item.call_id, output: JSON.stringify(result)});
+        const result = results[index] ?? options.inspect(JSON.parse(item.arguments).draft, nextFacts);
+        nextHistory.push({type: 'function_call_output', call_id: item.call_id, output: JSON.stringify(result)});
+      }
+      if (inputUsed + inputEstimate(request(nextHistory, true), replayTokens + generated) > INPUT_BUDGET) {
+        force = true;
+      } else {
+        history = nextHistory;
+        replayTokens += generated;
+        Object.assign(facts, nextFacts);
       }
     }
   } catch (e) {
@@ -168,6 +198,6 @@ export async function responsesWithTools(options: {
     if (failure === 'aborted' || e instanceof ApiError && ['invalid_output', 'coach_timeout'].includes(e.code)) throw e;
     throw new ApiError(502, 'provider_failed');
   } finally {
-    console.log(JSON.stringify({event: 'coach_responses_tools', stage, status, failure, turns, calls, elapsedMs: Date.now() - started}));
+    console.log(JSON.stringify({event: 'coach_responses_tools', stage, status, failure, turns, calls, inputTokens: inputUsed, outputTokens: outputUsed, elapsedMs: Date.now() - started}));
   }
 }

@@ -157,36 +157,16 @@ def prepare(payload, bridge):
     return game, facts, [{'role': 'system', 'content': PROMPT.read_text()}, {'role': 'user', 'content': dumps(user)}]
 
 
-def add_evidence(name, result, pos, game, facts):
-    if 'エラー' in result:
-        return
-    refs = []
-    if name == 'saved_analysis':
-        refs = result['候補と詰み証明']
-    if name == 'play_line':
-        refs = [result['参照']]
-    if name == 'position' and not pos.get('moves'):
-        id_ = result['本譜の参照']
-        existing = next((r for r in facts['参照'] if r['id'] == id_), None)
-        if existing is None:
-            # 既存チェックは形勢も読むため、局面の内容のみ追加して他の照合を退化させない。
-            existing = call(game, 'saved_analysis', {'position': pos}, facts=facts)
-            existing.pop('候補と詰み証明', None)
-            refs = [existing] if 'id' in existing else []
-        existing['局面'] = result['盤面']
-    for ref in refs:
-        facts['参照'][:] = [r for r in facts['参照'] if r['id'] != ref['id']] + [ref]
-
-
 def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadline=SECONDS):
     start = time.monotonic()
     game, facts, history = prepare(case['payload'], bridge)
     record = {'case': case['name'], 'run': run, 'turns': [], 'calls': [], 'estimatedUSD': 0}
+    evidence = []
     force = False
     forced_attempt = False
 
     def inspect(value):
-        return bridge('draft', draft=value, facts=facts, results=game['results'])
+        return bridge('draft', draft=value, facts=facts, results=game['results'], evidence=evidence)
 
     def draft(raw):
         try:
@@ -250,10 +230,11 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
                     args, result = None, {'エラー': '道具の引数が不正'}
                 else:
                     result = call(game, name, args, facts=facts, draft=draft)
-                    add_evidence(name, result, args.get('position'), game, facts)
                 encoded = dumps(result)
                 if len(encoded.encode()) > 24000:
                     encoded = dumps({'エラー': '結果が大きすぎます。対象を絞って確認してください'})
+                if args is not None and 'エラー' not in json.loads(encoded):
+                    evidence.append({'name': name, 'args': args, 'result': result})
                 record['calls'].append({'name': name, 'args': args, 'resultBytes': len(encoded.encode()), 'error': json.loads(encoded).get('エラー')})
                 history.append(tool_message(provider, ident, encoded))
             if record['estimatedUSD'] > (.15 if provider == 'terra' else .09):

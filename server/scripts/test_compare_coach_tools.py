@@ -74,6 +74,17 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(body('deepseek', [], False, 70)['reasoning_effort'], 'max')
         self.assertEqual(body('terra', [], False, 70)['reasoning']['effort'], 'high')
 
+    def test_typescript_draft_uses_only_signed_references(self):
+        from coach_facts import build_facts
+        game = CASE['payload']['analysis']
+        facts = build_facts({**game, 'perspective': 'sente'})
+        line = {'id': '0:line:abc', '手数': 0, '仮の読み筋（実戦とは別）': [{'表記': '▲2六歩(27)'}]}
+        facts['仮の手順'] = [line]
+        draft = {'sections': [{**DRAFT['sections'][0], 'refs': [line['id']]}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = bridge_program(tmp)('draft', draft=draft, facts=facts, results=game['results'])
+        self.assertTrue(out['accepted'], out)
+
     def test_typescript_draft_checks_position_and_notation(self):
         from coach_facts import build_facts
         facts = build_facts({**CASE['payload']['analysis'], 'perspective': 'sente'})

@@ -446,16 +446,18 @@ class Handler(BaseHTTPRequestHandler):
             limit = {"/coach-facts": 1_048_576, "/coach-tools": 2_097_152}.get(self.path, 16384)
             if not 0 < length <= limit:
                 return self.respond(413, {"error": "input_too_large"})
-            data = json.loads(self.rfile.read(length))
-            if self.path == "/coach-facts":
-                return self.respond(200, coach_facts(data))
             if self.path == "/coach-tools":
                 if not tool_slots.acquire(blocking=False):
+                    self.close_connection = True
                     return self.respond(503, {"error": "tools_busy"})
                 try:
+                    data = json.loads(self.rfile.read(length))
                     return self.respond(200, run_coach_tools(data))
                 finally:
                     tool_slots.release()
+            data = json.loads(self.rfile.read(length))
+            if self.path == "/coach-facts":
+                return self.respond(200, coach_facts(data))
             cancel = None
             if self.path == '/realtime':
                 if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:

@@ -90,6 +90,9 @@ def resolve(b, notation, prev=None):
                 else:
                     target = (to // 9) * (1 if b.turn == sh.BLACK else -1)
                     matching = [mv for mv in matching if (key(mv) < target if d == '右' else key(mv) > target)]
+        board_moves = [mv for mv in matching if not sh.move_is_drop(mv)]
+        if board_moves:
+            matching = board_moves
         if len(matching) == 1:
             return matching[0]
         if matching:
@@ -278,9 +281,23 @@ def compare(b, prev, view, moves):
         after = b.copy()
         line, move = sequence(after, prev, view, [s])
         after_threats = threats(after, view)
-        new_attacks = relation(after_threats, '相手の利き') - initial_attack
-        lost_defense = initial_defense - relation(after_threats, '味方の利き')
         f = line[0]
+        origin, dest, actor = f['移動元'], f['移動先'], f['指した側']
+
+        def identity(edge, friendly, *, after_move=False):
+            side, target, _, _, source = edge
+            # 両端の駒を対応付ける。成りも同じ駒、取られた駒と打った駒は別物。
+            if after_move and origin:
+                if side == actor and target == dest:
+                    target = origin
+                if (side == actor) == friendly and source == dest:
+                    source = origin
+            return side, target, source
+
+        old_attacks = {identity(a, False) for a in initial_attack}
+        new_attacks = {a for a in relation(after_threats, '相手の利き') if identity(a, False, after_move=True) not in old_attacks}
+        new_defense = {identity(a, True, after_move=True) for a in relation(after_threats, '味方の利き')}
+        lost_defense = {a for a in initial_defense if identity(a, True) not in new_defense}
         # 利きの候補。取り切れるかは合法手や手順で別途確認する。
         fork = sorted((t, p) for side, t, p, _, fr in new_attacks if side != f['指した側'] and fr == f['移動先'])
         variants.append({'手': f, '新しい当たり（対象側・升・駒／攻め駒・升）': sorted(new_attacks),
@@ -356,7 +373,10 @@ def call(game, name, args, *, facts=None, draft=None, search=mate):
             choices = [args['move']] + ([args['alternative']] if args.get('alternative') else [])
             return compare(b, prev, view, choices)
         if name == 'mate':
-            return search(b, prev, view)
+            result = search(b, prev, view)
+            if branch and result['状態'] == '詰みを証明':
+                result['分岐'] = [f['表記'] for f in branch]
+            return result
         if name == 'saved_analysis':
             if branch:
                 raise ToolError('仮の分岐には保存済み解析がありません')

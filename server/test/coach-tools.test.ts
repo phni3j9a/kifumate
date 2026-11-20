@@ -102,18 +102,47 @@ describe('Responsesの道具ループ', () => {
     expect(run.mock.calls.map(([calls]) => calls.length)).toEqual([16, 14]);
   });
 
-  it('探索ターンの出力トークン切れでは推論だけを引き継ぎ最終回答を一度だけ求める', async () => {
-    const r = reason('incomplete');
+  it('未完了ターンの推論・途中の道具を全部破棄し、完全な履歴から最終回答を一度だけ求める', async () => {
     let attempts = 0;
+    const run = vi.fn<RunTools>().mockResolvedValue([{知識: []}]);
+    const ok = [reason('complete'), call('good')];
     const result = await completeWith(async (_, init) => {
       const b = bodyOf(init);
-      if (++attempts === 1) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, output: [r, message('途中')]});
+      if (++attempts === 1) return turn(...ok);
+      if (attempts === 2) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, output: [reason('discard'), message('途中'), call('partial')]});
       expect(b.tool_choice).toBe('none');
-      expect(b.input.slice(2, -1)).toEqual([r]);
+      expect(b.input.slice(2, -2)).toEqual(ok);
+      expect(b.input.at(-2)).toMatchObject({type: 'function_call_output', call_id: 'good'});
       return done();
-    }, vi.fn());
+    }, run);
     expect(result).toEqual(safe);
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(3);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('累積出力枠が迫ると最終回答用の5400トークンを残して調査を止める', async () => {
+    let attempts = 0;
+    const run = vi.fn<RunTools>().mockResolvedValue([{知識: []}]);
+    await expect(completeWith(async (_, init) => {
+      const b = bodyOf(init);
+      if (++attempts <= 4) return Response.json({status: 'completed', output: [call('out' + attempts)], usage: {input_tokens: 3000, output_tokens: 4200}});
+      expect(b.tool_choice).toBe('none');
+      expect(b.max_output_tokens).toBe(5400);
+      return done();
+    }, run)).resolves.toEqual(safe);
+    expect(attempts).toBe(5);
+  });
+
+  it('同じ履歴の入力の再送も累積枠に算入し、最終回答を残す', async () => {
+    let attempts = 0;
+    const run = vi.fn<RunTools>().mockResolvedValue([{資料: 'あ'.repeat(7800)}]);
+    await expect(completeWith(async (_, init) => {
+      const b = bodyOf(init);
+      if (++attempts <= 3) return Response.json({status: 'completed', output: [call('in' + attempts)], usage: {output_tokens: 300}});
+      expect(b.tool_choice).toBe('none');
+      return done();
+    }, run)).resolves.toEqual(safe);
+    expect(attempts).toBe(4);
   });
 
   it('提供元異常・拒否・応答サイズ上限を拒否し、ログに本文・引数・鍵を出さない', async () => {
@@ -170,7 +199,36 @@ describe('Responsesの道具ループ', () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('line', 'play_line', '{"position":{"ply":0},"moves":["▲2六歩"]}'))).mockResolvedValueOnce(done(wanted));
     const value = await completeWith(transport, async () => [{参照: line}], undefined, evidence);
     expect(validateOutput(value, refs, evidence).sections[0].references).toEqual([refs[0]]);
-    expect(() => validateOutput({sections: [{...wanted.sections[0], refs: [line.id]}]}, refs, evidence)).toThrow('invalid_output');
+    expect(validateOutput({sections: [{...wanted.sections[0], refs: [line.id, refs[0].id]}]}, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(validateOutput({sections: [{...wanted.sections[0], refs: Array(11).fill(line.id)}]}, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput({sections: [{...wanted.sections[0], refs: ['0:line:fake']}]}, refs, evidence)).toThrow('invalid_output');
+  });
+
+  it('仮の符号は起点局面または対応候補のある節に限る', async () => {
+    const evidence = facts();
+    const wanted = {sections: [{...safe.sections[0], text: '仮に▲2六歩と指す手もあります。'}]};
+    const pv = '仮の読み筋（実戦とは別）';
+    const line = {id: '0:line:abc', 手数: 0, [pv]: [{表記: '▲2六歩(27)'}, {表記: '△8四歩(83)'}]};
+    const matching = {id: '0:candidate:1', [pv]: [{表記: '▲2六歩(27)'}]};
+    const unrelated = {id: '0:candidate:2', [pv]: [{表記: '▲5六歩(57)'}]};
+    evidence.参照.push(matching, unrelated);
+    const signed = [...refs, ...[matching, unrelated].map(r => ({...refs[0], id: r.id}))];
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('line', 'play_line', '{"position":{"ply":0},"moves":["▲2六歩","△8四歩"]}'))).mockResolvedValueOnce(done(wanted));
+    await completeWith(send, async () => [{参照: line}], undefined, evidence);
+    const quote = (id: string) => ({sections: [{...wanted.sections[0], text: '仮の応手は△8四歩です。', refs: [id]}]});
+    expect(() => validateOutput(quote('1:position'), signed, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(quote(unrelated.id), signed, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(quote(matching.id), signed, evidence)).not.toThrow();
+    expect(() => validateOutput(quote('0:position'), signed, evidence)).not.toThrow();
+  });
+
+  it('mateが証明した手順を起点局面で照合し、公開mate参照は増やさない', async () => {
+    const evidence = facts();
+    const wanted = {sections: [{...safe.sections[0], text: '▲7一飛打が詰みの手です。'}]};
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('m', 'mate', '{"position":{"ply":0}}'))).mockResolvedValueOnce(done(wanted));
+    const value = await completeWith(send, async () => [{状態: '詰みを証明', 手順: ['▲7一飛打']}], undefined, evidence);
+    expect(validateOutput(value, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput({sections: [{...wanted.sections[0], refs: ['0:mate']}]}, refs, evidence)).toThrow('invalid_output');
   });
 });
 

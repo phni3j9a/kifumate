@@ -301,11 +301,11 @@ POST本文（追加キー・人名フィールドは拒否）：
 | `COACH_MAX_TOKENS` | `5400`（`max_output_tokens`、調査ターンは最大4200） | `32768`（`COACH_TOKEN_PARAMETER`は`max_tokens`、または`max_completion_tokens`） |
 | `COACH_TIMEOUT_MS` | `240000` | `240000` |
 
-トークン設定は推論を含む**ターンごとの**出力上限（設定範囲1〜65536）。Responses方式では各応答を2 MiB、再送するリクエストを1 MiBまでに制限します。一括方式の応答は従来どおり1 MiBまで。キー未設定は503。**モデル変更と無関係に署名鍵は維持**してください。
+トークン設定は推論を含む**ターンごとの**出力上限（設定範囲1〜65536、Responses方式では累積の出力枠内）。Responses方式は1相談あたり累積入力24万・出力2.4万トークンまで。履歴の再送も数え、最終回答分を残して調査を切り上げます。入力はUTF-8バイト数・API整形の余裕・再生する応答トークンで安全側に予約し、応答のusageで精算（不明なら予約値）。[Terraの標準単価](https://developers.openai.com/api/docs/models/gpt-6.1-terra)で最も高い入力区分まで見込むと、`240000 × $2.50/100万 + 24000 × $5.00/100万 = $0.72/相談` が保守的な上限の**見積もり**です。請求を制御する提供元の設定ではなく、Cloudflare料金も含みません。Responsesの各応答は2 MiB、一括方式は従来どおり1 MiBまで。キー未設定は503。**モデル変更と無関係に署名鍵は維持**してください。
 
 道具方式は最初に視点・終局・要所の見出しと参照・プロフィール・重点・詳しさ・質問だけを渡し、履歴は従来どおり会話ロールではなく参考データに入れます。盤面、指し手、保存済み候補、知識はモデルが必要なときに照会します。下書き点検はWorkerで行い、他の道具は同じターンの分をまとめて、`/coach-facts` と同じ精密slotの内部 `/coach-tools` へ送ります。戦法と囲いは既存のアプリ分類器で判定します。探索エンジンは起動せず、詰み確認はcshogiで最大1万ノード・深さ15・呼び出しあたり0.75秒、バッチの調査枠は3秒です。
 
-[OpenAIの公式手順](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses)に沿って `store:false` と `include:["reasoning.encrypted_content"]` を送り、元の入力、応答の順序を保った項目列、呼び出しIDつきの結果を次のターンへ再送します。`previous_response_id` は使いません。道具は最大30回で、その後は `tool_choice:none` を指定します。最後は従来の `validateOutput` で判定し、仮の読み筋は内部照合にのみ使い、アプリに返す `references` は署名済みの参照のままです。`openai-compatible` は [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) の一括方式のままです。
+[OpenAIの公式手順](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses)に沿って `store:false` と `include:["reasoning.encrypted_content"]` を送り、元の入力、応答の順序を保った項目列、呼び出しIDつきの結果を次のターンへ再送します。`previous_response_id` は使いません。道具は最大30回で、回数・期限・累積予算に近づいたら `tool_choice:none` で最終回答を求めます。調査ターンが `incomplete/max_output_tokens` の場合はそのターンを実行・再送せず、直前までの完全な履歴から道具なしで一度だけ回答を求めます。最後は `validateOutput` で判定し、既知の `N:line:…` は署名済みの起点 `N:position` へ置換します。公開参照は重複なし・最大10件で、仮の読み筋や道具で証明した詰み手順は、該当の起点・候補がある節の内部照合にだけ使います。`openai-compatible` は [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) の一括方式のままです。
 
 `container/coach_facts.py` は本譜全体を簡潔な一覧にし、要所ごとに指す前の局面（側別の玉・盤上の駒・持駒）、形勢の前後、実戦の続き最大3手、実戦とは別の仮の読み筋（推奨手・応手、候補1位の冒頭5手）を付けます。本譜と読み筋には指した側から見た移動方向を付けます。応手の読み筋は双方の捕獲・王手・成りを集計します。要所は損失の大きい悪手・疑問手（自分5手、相手2手、観戦は先後各3手まで）に、質問の「N手目」、詰みの見逃し、形勢逆転の代表を加えます。推奨手と実戦手が同じ場合は代案を出しません。cshogiの省略字（杏・圭・全）は成香・成桂・成銀に補完します。形勢は絶対値150未満を互角、500未満をやや有利、1500未満を有利、3000未満を大きく有利、それ以上を勝勢とし、後手視点の不利も反転します。印は指した側の損失200以上を疑問手、500以上を悪手とする目安で、境界値や詰みスコアを数値比較しません。
 
