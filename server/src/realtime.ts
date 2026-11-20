@@ -7,9 +7,20 @@ export interface RealtimeBackend {
   stop(): Promise<void>;
   schedule(when: number): Promise<void>;
 }
+export async function fetchRealtimeAnalysis(fetch: (url: string, init: RequestInit) => Promise<Response>,
+  input: Input, sessionId: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal) {
+  const payload = {...input, ply: input.moves.length, sessionId, sequence};
+  const init = {method: 'POST', headers: {'Content-Type': 'application/json'},
+    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(45_000, movetimeMs + 15_000))])};
+  const response = await fetch('http://container/realtime/deepen', {...init, body: JSON.stringify({...payload, round, movetimeMs})});
+  if (response.status !== 404 || init.signal.aborted) return response;
+  // コンテナの段階更新中は旧 bridge の単発探索へ戻す。
+  const legacy = await fetch('http://container/realtime', {...init, body: JSON.stringify(payload)});
+  return legacy.ok ? Response.json({...await legacy.json() as object, terminal: true}) : legacy;
+}
 interface Session extends Record<string, SqlStorageValue> {
   owner: string; id: string; sequence: number; status: string; result: string | null;
-  error: string | null; charged: number | null; activity: number; hold: number;
+  error: string | null; charged: number | null; activity: number;
 }
 
 /** リアルタイム解析の各枠を一端末へ排他的に貸与。探索完了後の待機も停止完了まで集計する。 */
@@ -23,12 +34,14 @@ export class RealtimeSessions {
     this.sql = storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS rt_usage (owner TEXT, month INTEGER, ms INTEGER NOT NULL, PRIMARY KEY(owner,month));
       CREATE TABLE IF NOT EXISTS rt_sessions (owner TEXT PRIMARY KEY, id TEXT NOT NULL, sequence INTEGER NOT NULL,
-        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL, hold INTEGER NOT NULL DEFAULT 0);`);
-    if (!this.sql.exec<{name: string}>('PRAGMA table_info(rt_sessions)').toArray().some(column => column.name === 'hold')) {
-      this.sql.exec('ALTER TABLE rt_sessions ADD COLUMN hold INTEGER NOT NULL DEFAULT 0');
-    }
+        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS rt_holds (owner TEXT PRIMARY KEY, id TEXT NOT NULL, sequence INTEGER NOT NULL);`);
   }
-  private idleFor(session?: Session) { return session?.hold ? this.holdIdleMs : this.idleMs; }
+  private idleFor(session?: Session) {
+    // ロールバック先も列名なし INSERT ができ、旧版の更新で hold は引き継がれない。
+    return session && this.sql.exec('SELECT 1 FROM rt_holds WHERE owner=? AND id=? AND sequence=?',
+      session.owner, session.id, session.sequence).toArray().length ? this.holdIdleMs : this.idleMs;
+  }
   private session(owner: string): Session | undefined {
     return this.sql.exec<Session>('SELECT * FROM rt_sessions WHERE owner=?', owner).toArray()[0];
   }
@@ -93,14 +106,19 @@ export class RealtimeSessions {
     finally { this.stopping = undefined; }
   }
   async expire(reschedule = true) {
-    if (this.stopping) await this.stopping;
+    const stopping = this.stopping;
+    if (stopping) await stopping;
     const session = this.active();
-    if (!session) return;
+    if (!session) return !!stopping;
     const quota = this.quota(session.owner), current = this.session(session.owner)!;
     if (['off', 'failed'].includes(current.status)) await this.halt(current.status, current.error);
     else if (!quota.remainingMs || current.status === 'limit') await this.halt('limit');
     else if (current.status === 'paused' || this.now() >= session.activity + this.idleFor(session)) await this.halt('paused');
-    else if (reschedule) await this.schedule();
+    else {
+      if (reschedule) await this.schedule();
+      return !!stopping;
+    }
+    return true;
   }
   disconnected() {
     if (this.stopping) return;
@@ -119,6 +137,7 @@ export class RealtimeSessions {
       this.sql.exec("UPDATE rt_sessions SET result=NULL WHERE charged IS NULL AND activity<?", this.now() - RETENTION_MS);
       this.sql.exec("DELETE FROM rt_sessions WHERE charged IS NULL AND activity<? AND (status!='limit' OR activity<?)",
         this.now() - RETENTION_MS, this.now() - 40 * 86400_000);
+      this.sql.exec('DELETE FROM rt_holds WHERE owner NOT IN (SELECT owner FROM rt_sessions)');
       this.sql.exec('DELETE FROM rt_usage WHERE month<?', monthStart(monthStart(this.now()) - 1));
       const url = new URL(request.url);
       const match = /^\/v1\/realtime\/([0-9a-f-]{36})$/.exec(url.pathname);
@@ -140,10 +159,13 @@ export class RealtimeSessions {
       if (creating ? sequence !== undefined : !Number.isSafeInteger(sequence) || (sequence as number) < 1) throw new ApiError(400, 'invalid_sequence');
       if (typeof hold !== 'boolean' || 'mode' in position) throw new ApiError(400, 'invalid_input');
       const input = parseInput({...position, mode: 'std'});
-      // 本文待機・権利照会の後、最新の貸与と期限を確認してから受理する。
-      if (checkPaid && !await checkPaid()) entitlement.paid = false;
-      await this.expire(false);
-      while (this.stopping) await this.stopping;
+      // 停止完了を待つ間にも権利が失効しうるため、待機後は再照会する。
+      do {
+        if (checkPaid && entitlement.paid && !await checkPaid()) entitlement.paid = false;
+        const stopped = await this.expire(false);
+        if (!stopped && !this.stopping) break;
+        while (this.stopping) await this.stopping;
+      } while (checkPaid && entitlement.paid);
       if (!entitlement.paid) {
         if (this.active()?.owner === owner) await this.halt('off', 'paid_required');
         throw new ApiError(403, 'paid_required');
@@ -158,10 +180,14 @@ export class RealtimeSessions {
       const seq = creating ? 0 : sequence as number, now = this.now();
       this.abort?.abort();
       const controller = this.abort = new AbortController();
-      this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?,?)
-        ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
-        result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity,hold=excluded.hold`,
-        owner, id, seq, now, now, Number(hold));
+      this.storage.transactionSync(() => {
+        this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?)
+          ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
+          result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
+          owner, id, seq, now, now);
+        if (hold) this.sql.exec('INSERT OR REPLACE INTO rt_holds VALUES (?,?,?)', owner, id, seq);
+        else this.sql.exec('DELETE FROM rt_holds WHERE owner=?', owner);
+      });
       await this.schedule();
       waitUntil(this.run(owner, id, seq, input, controller));
       return json(this.view(owner), 202);
@@ -179,7 +205,7 @@ export class RealtimeSessions {
       for (let round = 0, ms = 250; !signal.aborted; round++, ms = Math.min(ms * 2, MAX_REALTIME_SEARCH_MS)) {
         const response = await this.backend.analyze(input, id, sequence, round, ms, signal);
         if (signal.aborted) return;
-        const {terminal, ...result} = response.ok ? await response.json() as {terminal?: boolean; ply?: number} : {};
+        const {terminal, ...result} = response.ok ? await response.json() as {terminal?: boolean; ply?: number; score?: {kind: string} | null} : {};
         if (signal.aborted) return;
         // 結果の読み取り後にも期限を確認する。再探索は休止期限を延ばさない。
         await this.expire(false);
@@ -192,7 +218,7 @@ export class RealtimeSessions {
         }
         if (result.ply !== input.moves.length || typeof terminal !== 'boolean') throw new Error('invalid_result');
         this.sql.exec("UPDATE rt_sessions SET status='ready',result=? WHERE owner=?", JSON.stringify(result), owner);
-        if (terminal) return;
+        if (terminal || result.score?.kind === 'mate') return;
       }
     } catch {
       const current = this.session(owner);

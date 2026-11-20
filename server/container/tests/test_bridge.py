@@ -189,6 +189,21 @@ def test_realtime_checkmate_is_terminal():
         engine.close()
 
 
+def test_realtime_fourfold_repetition_is_terminal(monkeypatch):
+    cycle = ['5i5h', '5a5b', '5h5i', '5b5a']
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    try:
+        assert engine.analyze(payload(moves=cycle * 2, ply=8), movetime_ms=250)['terminal'] is False
+        def unexpected_search(command):
+            raise AssertionError(f'千日手成立後のUSIコマンド: {command}')
+        monkeypatch.setattr(engine, 'send', unexpected_search)
+        for moves in (cycle * 3, cycle * 3 + ['7g7f']):
+            result = engine.analyze(payload(moves=moves, ply=len(moves)), movetime_ms=250)
+            assert result == {'ply': len(moves), 'score': None, 'candidates': [], 'mate': None, 'terminal': True}
+    finally:
+        engine.close()
+
+
 def test_realtime_stop_drains_bestmove_and_reuses_process():
     import time
     engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py'), '--slow'])
@@ -231,6 +246,8 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
                 assert cancel.wait(2)
                 cancelled.set()
                 raise bridge.Superseded()
+            if movetime_ms is None:
+                return {'ply': data['ply'], 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None}
             return {'ply': data['ply'], 'terminal': False, 'movetime': movetime_ms}
         def close(self):
             pass
@@ -243,9 +260,13 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     url = f'http://127.0.0.1:{server.server_port}/realtime'
     session = 'a' * 36
     def send(sequence, moves, round_number=0, movetime_ms=250, session_id=session):
-        data = payload(moves=moves, ply=len(moves), sessionId=session_id, sequence=sequence, round=round_number, movetimeMs=movetime_ms)
+        data = payload(moves=moves, ply=len(moves), sessionId=session_id, sequence=sequence)
+        path = url
+        if round_number is not None:
+            path += '/deepen'
+            data.update(round=round_number, movetimeMs=movetime_ms)
         try:
-            with urlopen(Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
+            with urlopen(Request(path, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
                 return response.status, json.load(response)
         except HTTPError as error:
             return error.code, json.load(error)
@@ -271,6 +292,9 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
         assert bridge.realtime_cancel is latest and not latest.is_set()
         assert send(3, ['7g7f'])[0] == 200
         assert latest.is_set()
+        assert send(4, ['7g7f'], round_number=None) == (200, {
+            'ply': 1, 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None})
+        assert send(4, ['7g7f'], round_number=None)[0] == 409
     finally:
         server.shutdown(); server.server_close(); serving.join(); first.join(timeout=1)
 

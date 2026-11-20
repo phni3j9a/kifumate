@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """USI 中継。外部へは Worker 経由だけで到達させる。棋譜の個人情報は受け取らない。"""
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -67,7 +68,7 @@ def validate_sfen(sfen):
         raise InvalidInput()
 
 
-def prepare(data):
+def prepare(data, *, realtime=False):
     if not isinstance(data, dict) or set(data) != {"initial", "moves", "mode", "ply"}:
         raise InvalidInput()
     initial, moves, mode, ply = (data[k] for k in ("initial", "moves", "mode", "ply"))
@@ -82,16 +83,25 @@ def prepare(data):
         raise InvalidInput()
     # 全列を先に検証し、不正な後半を含む棋譜を成功扱いにしない。
     target = None
+    positions = []
     for i, usi in enumerate(moves):
         if i == ply:
             target = board.sfen()
+        if realtime and i < ply:
+            positions.append(board.sfen().rsplit(' ', 1)[0])
         if not isinstance(usi, str) or not MOVE.fullmatch(usi):
             raise InvalidInput()
         move = board.move_from_usi(usi)
         if not move or not board.is_legal(move):
             raise InvalidInput()
         board.push(move)
-    return cshogi.Board(target or board.sfen()), initial, moves, mode, ply
+    target = target or board.sfen()
+    repetition = False
+    if realtime:
+        # 同一局面は手数を除いた盤面・手番・持駒が4回一致した時点で終局。
+        positions.append(target.rsplit(' ', 1)[0])
+        repetition = any(count >= 4 for count in Counter(positions).values())
+    return cshogi.Board(target), initial, moves, mode, ply, repetition
 
 
 def score_for_sente(kind, raw, turn, bound=None):
@@ -250,7 +260,14 @@ class Engine:
                 raise RuntimeError("analysis_timeout")
 
     def analyze(self, data, cancel=None, movetime_ms=None):
-        board, initial, moves, mode, ply = prepare(data)
+        board, initial, moves, mode, ply, repetition = prepare(data, realtime=cancel is not None or movetime_ms is not None)
+        if repetition:
+            if cancel is not None and cancel.is_set():
+                raise Superseded()
+            result = {"ply": ply, "score": None, "candidates": [], "mate": None}
+            if movetime_ms is not None:
+                result['terminal'] = True
+            return result
         ms, threads, multipv = MODES[mode]
         if movetime_ms is not None:
             ms = movetime_ms
@@ -346,7 +363,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global engine
-        if self.path not in ("/analyze", "/realtime", "/coach-facts"):
+        deepening = self.path == '/realtime/deepen'
+        realtime = deepening or self.path == '/realtime'
+        if not realtime and self.path not in ("/analyze", "/coach-facts"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -358,15 +377,22 @@ class Handler(BaseHTTPRequestHandler):
                     validate_sfen(data["initial"])
                 return self.respond(200, build_facts(data))
             cancel = movetime_ms = None
-            if self.path == '/realtime':
-                if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence', 'round', 'movetimeMs'}:
+            if realtime:
+                keys = {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}
+                if deepening:
+                    keys.update(('round', 'movetimeMs'))
+                if not isinstance(data, dict) or set(data) != keys:
                     raise InvalidInput()
-                session, sequence, round_number, movetime_ms = (data.pop(k) for k in ('sessionId', 'sequence', 'round', 'movetimeMs'))
-                if (data['mode'] != 'std' or data['ply'] != len(data['moves']) or
-                        type(movetime_ms) is not int or not MODES['std'][0] <= movetime_ms <= MAX_REALTIME_SEARCH_MS):
+                session, sequence = data.pop('sessionId'), data.pop('sequence')
+                round_number = 0
+                if deepening:
+                    round_number, movetime_ms = data.pop('round'), data.pop('movetimeMs')
+                    if type(movetime_ms) is not int or not MODES['std'][0] <= movetime_ms <= MAX_REALTIME_SEARCH_MS:
+                        raise InvalidInput()
+                if data['mode'] != 'std' or data['ply'] != len(data['moves']):
                     raise InvalidInput()
             prepare(data)
-            if self.path == '/realtime':
+            if realtime:
                 cancel = replace_search(session, sequence, round_number)
             with lock:
                 try:

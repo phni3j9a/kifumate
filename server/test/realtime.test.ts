@@ -3,7 +3,7 @@ import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { Device } from '../src/index';
 import { monthStart, nextMonth, sha256 } from '../src/model';
-import { MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realtime';
+import { fetchRealtimeAnalysis, MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realtime';
 
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const position = {initial: 'startpos', moves: []};
@@ -40,6 +40,41 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000, holdId
 }
 
 describe('リアルタイム解析', () => {
+  it('新DOは旧bridgeの404で旧形式に戻し、局面ごとに単発の結果を返す', async () => fixture(async f => {
+    const paths: string[] = [];
+    f.backend.analyze = (...args: Parameters<RealtimeBackend['analyze']>) => fetchRealtimeAnalysis(async (url, init) => {
+      const path = new URL(url).pathname;
+      paths.push(path);
+      const body = JSON.parse(init.body as string);
+      if (path !== '/realtime') {
+        expect(body).toMatchObject({round: 0, movetimeMs: 250});
+        return new Response(null, {status: 404});
+      }
+      const [input, sessionId, sequence] = args;
+      if (Object.keys(body).sort().join(',') !== 'initial,mode,moves,ply,sequence,sessionId') return new Response(null, {status: 422});
+      expect(body).toEqual({...input, ply: input.moves.length, sessionId, sequence});
+      return Response.json({ply: body.ply, score: {kind: 'cp', value: 30}, candidates: [{rank: 1, depth: 8}], mate: null});
+    }, ...args);
+    const first = await f.request('POST', position); await f.drain();
+    expect(await f.request()).toMatchObject({status: 'ready', searching: false, error: null, result: {ply: 0, depth: 8}});
+    expect((await f.request('PUT', {...position, moves: ['7g7f'], sequence: 1}, 'a', true, first.sessionId)).httpStatus).toBe(202);
+    await f.drain();
+    const latest = await f.request();
+    expect(latest).toMatchObject({status: 'ready', searching: false, error: null, result: {ply: 1, depth: 8}});
+    expect(latest.result).not.toHaveProperty('terminal');
+    expect(paths).toEqual(['/realtime/deepen', '/realtime', '/realtime/deepen', '/realtime']);
+    expect(f.stops()).toBe(0);
+  }));
+  it('詰み評価を保存して即座に深読みを終える', async () => fixture(async f => {
+    const score = {kind: 'mate', value: 3, winner: 'sente'};
+    f.backend.analyze = async (_input: unknown, _id: string, _seq: number, round: number) => {
+      f.calls.push(round);
+      return Response.json({ply: 0, score, candidates: [{rank: 1, depth: 7}], terminal: round > 0});
+    };
+    await f.request('POST', position); await f.drain();
+    expect(await f.request()).toMatchObject({status: 'ready', searching: false, result: {depth: 7, score}});
+    expect(f.calls).toEqual([0]); expect(f.stops()).toBe(0);
+  }));
   it('本文受信後の外部権利再照会で取消を検知し、コンテナを起動しない', async () => {
     await runInDurableObject(devices.getByName(crypto.randomUUID()), async (_, state) => {
       let starts = 0;
@@ -88,14 +123,18 @@ describe('リアルタイム解析', () => {
     expect(f.calls).toHaveLength(times.length);
     expect(f.stops()).toBe(0);
   }));
-  it('旧スキーマのセッション・利用時間を保持してhold列を追加する', async () => fixture(async f => {
-    const first = await f.request('POST', position); await f.drain();
+  it('hold保存後も旧版の列名なしINSERTで更新でき、利用時間を保持する', async () => fixture(async f => {
+    const first = await f.request('POST', {...position, hold: true}); await f.drain();
     f.advance(1234);
-    f.sql.exec('ALTER TABLE rt_sessions DROP COLUMN hold');
+    // origin/main の INSERT。旧版の局面更新では hold 用テーブルに触れない。
+    f.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?)
+      ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
+      result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
+      'a', first.sessionId, 1, origin + 1234, origin + 1234);
     f.restart();
     const existing = await f.request();
-    expect(existing.sessionId).toBe(first.sessionId); expect(existing.idleMs).toBe(30_000);
-    expect(existing.result.depth).toBeNull(); expect(existing.quota.usedMs).toBe(1234);
+    expect(existing.sessionId).toBe(first.sessionId); expect(existing.sequence).toBe(1); expect(existing.idleMs).toBe(30_000);
+    expect(existing.quota.usedMs).toBe(1234);
     await f.request('DELETE', undefined, 'a', true, first.sessionId);
   }));
   it('holdは5分。PUTごとに数え直し、省略・falseは通常の期限に戻す', async () => fixture(async f => {
@@ -243,6 +282,33 @@ describe('リアルタイム解析', () => {
     expect(denied.quota.usedMs).toBe(1005);
     f.advance(1000);
     expect((await f.request()).quota.usedMs).toBe(denied.quota.usedMs);
+  }));
+  it.each([false, true])('PUTで休止完了を待ったら権利を再確認する（待機後の権利=%s）', async paidAfterStop => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    let paid = true, checks = 0, entered!: () => void, finish!: () => void;
+    const beganStopping = new Promise<void>(resolve => { entered = resolve; });
+    const stop = f.backend.stop;
+    f.backend.stop = async () => {
+      await new Promise<void>(resolve => { finish = resolve; entered(); });
+      await stop();
+    };
+    f.advance(29_999);
+    const pending = f.send(new Request(`https://device/v1/realtime/${first.sessionId}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...position, sequence: 1}),
+    }), 'a', true, async () => {
+      if (++checks === 1) f.advance(1);
+      return paid;
+    });
+    await beganStopping;
+    expect(checks).toBe(1); expect(f.calls).toHaveLength(1);
+    paid = paidAfterStop;
+    finish();
+    const updated = await pending; await f.drain();
+    expect(checks).toBe(2); expect(f.stops()).toBe(1);
+    expect(updated).toMatchObject(paidAfterStop ? {httpStatus: 202, sequence: 1, error: null}
+      : {httpStatus: 403, sequence: 0, status: 'paused', error: 'paid_required'});
+    expect(f.calls).toHaveLength(paidAfterStop ? 2 : 1);
+    expect(updated.quota.usedMs).toBe(30_005);
   }));
   it('本文受信後の再照会失効で別端末の稼働を停止しない', async () => fixture(async f => {
     await f.request('POST', position); await f.drain();

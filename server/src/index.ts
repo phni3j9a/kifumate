@@ -3,7 +3,7 @@ import { Invitations, limit, type Entitlement } from './invitations';
 export { Invitations } from './invitations';
 import { Coach, signAnalysis, type CoachEnv } from './coach';
 import { DurableObject } from 'cloudflare:workers';
-import { RealtimeSessions } from './realtime';
+import { RealtimeSessions, fetchRealtimeAnalysis } from './realtime';
 import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
@@ -50,11 +50,7 @@ export class RealtimeContainer extends StandardContainer {
           try { await boot; } finally { if (this.boot === boot) this.boot = undefined; }
         }
         if (signal.aborted) return new Response(null, {status: 409});
-        return this.containerFetch('http://container/realtime', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({...input, ply: input.moves.length, sessionId, sequence, round, movetimeMs}),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(45_000, movetimeMs + 15_000))]),
-        });
+        return fetchRealtimeAnalysis(this.containerFetch.bind(this), input, sessionId, sequence, round, movetimeMs, signal);
       },
       stop: async () => {
         this.lifetime.abort();
