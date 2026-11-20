@@ -1,5 +1,5 @@
 import prompt from './coach-prompt.txt';
-import { contradicts, type CoachFacts } from './coach-facts';
+import { contradicts, hasFactReference, notationIssue, type CoachFacts } from './coach-facts';
 import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
@@ -158,11 +158,10 @@ export function validateOutput(value: unknown, refs: Reference[], facts?: CoachF
       const s = record(value); keys(s, ['kind', 'title', 'text', 'refs']);
       if (!['facts', 'advice'].includes(s.kind)) throw new Error();
       const title = text(s.title, 80), body = text(s.text, 2000);
-      // 自由文から盤面に依存する指し手・数値を出せないようにし、検証済み参照だけを公開する。
-      if (/[0-9０-９一二三四五六七八九壱弐参]+\s*[歩香桂銀金角飛玉王と馬龍竜筋段]|[▲△☗☖]|[0-9０-９]|[+-][一二三四五六七八九十百千]/.test((title + body).replace(/第一歩|一歩ずつ|一段と|一段階|次の一手/g, ''))) throw new Error();
+      if (notationIssue(title + '。' + body, facts, s.kind)) throw new Error();
       if (!Array.isArray(s.refs) || s.refs.length > 10 || (s.kind === 'facts' && !s.refs.length)) throw new Error();
       const selected = s.refs.map((id: unknown) => {
-        const ref = refs.find(r => r.id === id); if (!ref) throw new Error(); return ref;
+        const ref = refs.find(r => r.id === id); if (!ref || facts && !hasFactReference(ref.id, facts)) throw new Error(); return ref;
       });
       if (facts && contradicts(title + '。' + body, s.refs, facts)) throw new Error();
       return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected};

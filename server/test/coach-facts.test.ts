@@ -78,6 +78,82 @@ describe('日本語事実の矛盾検査', () => {
   });
 });
 
+describe('出力の手数・KIF照合', () => {
+  const rows: CoachFacts['実戦手'] = [
+    [1, '▲7六歩(77)', '疑問手', '互角', '前進'], [2, '△3四歩(33)', '判定なし', '不利', '前進'],
+  ];
+  const results = [{...analysis.results[0], candidates: [{rank: 1, score: null, pv: ['2g2f']}, {rank: 2, score: null, pv: ['5g5f']}]},
+    analysis.results[1], {ply: 2, score: null, candidates: [], mate: null}];
+  const all = references(results);
+  const sample: CoachFacts = {...facts, 実戦手: rows, 参照: [...facts.参照, {
+    id: '0:candidate:1', '仮の読み筋（実戦とは別）': [{表記: '▲2六歩(27)'}, {表記: '△同　成桂(34)', 移動: '横移動'}, {表記: '▲3五角打', 移動: '打つ'}],
+  }]};
+  it.each([
+    '1手目 ▲7六歩(77)から、2手目の△3四歩まで進みました。',
+    '１ 手目：☗７六歩。おすすめは ▲2六歩。',
+    '候補は二六歩、続いて△同成桂(34)や▲3五角打。',
+    '1手目 ▲7六歩(78)。候補には▲3五角(35)もあります。',
+    '1手目 ▲7六歩と進めました。',
+    '△同成桂と進めて考えましょう。',
+    '指す前に候補を2つ読み、1手詰めも確認しましょう。',
+    '練習では一歩ずつ、駒の利きを確認します。',
+    '開始局面（0手目）を開きます。',
+    '7一という升に注目して、飛車の利きを確認します。',
+    '逃げ道は2つ—8三と9四の升を確認します。',
+  ])('資料の表記や通常の数字を許可: %s', text => {
+    const output = section(text);
+    output.sections[0].refs.push('0:candidate:1');
+    expect(() => validateOutput(output, all, sample)).not.toThrow();
+  });
+  it.each([
+    '▲2四歩', '△7六歩', '1手目 ▲7六歩打', '▲7六歩成', '▲7六歩と引きます', '△同成銀', '▲7一と',
+    '1手目 ▲2六歩', '2手目 △同成桂', '1手目 △3四歩', '0手目 ▲7六歩', '1手目と３手目', '▲',
+    '評価値-1200', '＋３５０', '評価値は − 1200', '評価値は500', '2g2f',
+  ])('未知・不一致の手、評価値、USIを拒否: %s', text => {
+    const output = section(text);
+    output.sections[0].refs.push('0:candidate:1');
+    expect(() => validateOutput(output, all, sample)).toThrow('invalid_output');
+  });
+  it('助言では一般的な着手案を許可するが、実戦の手数・符号の組と評価値は検査する', () => {
+    const advice = (text: string) => ({sections: [{kind: 'advice', title: '次の練習', text, refs: []}]});
+    expect(() => validateOutput(advice('別の局面で▲6八玉も試しましょう。'), all, sample)).not.toThrow();
+    for (const wrong of ['1手目 ▲6八玉', '3手目', '0手目 ▲7六歩', '評価値は＋600です。']) {
+      expect(() => validateOutput(advice(wrong), all, sample)).toThrow('invalid_output');
+    }
+  });
+  it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
+    const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
+    expect(() => validateOutput(output('2:position', '2手目 △3四歩。相手は歩を進めました。相手が有利です。'), all, sample)).not.toThrow();
+    expect(() => validateOutput(output('2:position', 'あなたは歩を進めました。'), all, sample)).toThrow('invalid_output');
+    expect(() => validateOutput(output('0:candidate:2', '振り返りましょう。'), all, sample)).toThrow('invalid_output');
+  });
+});
+
+describe('局面の駒の持ち主・位置', () => {
+  const position = (id: string, ownKing: string) => ({id, 局面: {
+    あなた: {玉: ownKing, 盤上: {飛: ['2八'], 金: ['6九']}, 持駒: {飛: 1}},
+    相手: {玉: '8二', 盤上: {飛: ['3二']}, 持駒: {}},
+  }});
+  const sample = {...facts, 参照: [position('0:position', '7八'), position('1:position', '7九')]};
+  // 参照を意図的に入れ替えられないよう、矛盾判定だけを局面ごとに確認。
+  it.each([
+    'あなたの玉は７九にいます。', '先手玉は七九です。', '2八の先手の飛車と8二の相手玉を見ます。',
+    'あなたの玉が6八にいれば安全です。', 'あなたの玉を6八へ動かします。', 'あなたの玉は6八へ進めます。',
+    'あなたの玉が6八にはいないことに注意します。', 'あなたの玉は6八を目指します。', '候補の順ではあなたの玉は6八にいます。',
+  ])('正しい位置や仮定を許可: %s', text => {
+    expect(contradicts(text, ['1:position'], sample)).toBe(false);
+  });
+  it.each([
+    'あなたの玉は8二にいます。', '７九の相手玉が目標です。', 'あなたの金は6八です。', '3二のあなたの飛車に注意します。',
+  ])('参照にない位置や持ち主の断定を拒否: %s', text => {
+    expect(contradicts(text, ['1:position'], sample)).toBe(true);
+  });
+  it('複数の参照のどれかに一致、または局面がない場合は拒否しない', () => {
+    expect(contradicts('あなたの玉は7八です。', ['0:position', '1:position'], sample)).toBe(false);
+    expect(contradicts('あなたの玉は6八です。', ['1:position'], facts)).toBe(false);
+  });
+});
+
 describe('依頼と取得の分離', () => {
   it('切断・DO再生成後もalarmで完了し、再取得では一度しか数えない', async () => fixture(async state => {
     const c = new Coach(state.storage, config, 'device', () => true), p = await payload();
@@ -194,9 +270,10 @@ describe('実APIの接続', () => {
         expect(url).toBe('http://container/coach-facts');
         const body = JSON.parse(init.body as string);
         expect(body.initial).toBe('startpos'); expect(body.perspective).toBe('sente');
+        expect(body.question).toBe('1手目はどうでしたか？');
         received = true; return Response.json(facts);
       }})};
-      const p = await payload();
+      const p = {...await payload(), question: '1手目はどうでしたか？'};
       p.proof = await signAnalysis('key', instance.ctx.id.toString(), 'job', {initial: analysis.initial, moves: analysis.moves, mode: analysis.mode}, analysis.results);
       const request = post(p); request.headers.set('X-Dev-Paid', '1');
       const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
