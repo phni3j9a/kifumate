@@ -63,7 +63,8 @@ function object(value: unknown): value is Record<string, any> {
 export async function responsesWithTools(options: {
   url: string; key: string; model: string; effort: string; maxTokens: number; deadline: number; reserveMs: number;
   prompt: string; userContext: {history: unknown[]; [field: string]: unknown}; facts: CoachFacts; signal: AbortSignal;
-  count: (usage: unknown) => void; transport: typeof fetch; runTools: RunTools; inspect: (draft: string, facts: CoachFacts) => unknown;
+  count: (usage: unknown) => void; transport: typeof fetch; runTools: RunTools;
+  inspect: (draft: string, facts: CoachFacts) => {accepted: boolean; issues: {code: string; section?: number; field?: string}[]};
 }): Promise<unknown> {
   const {signal, facts} = options;
   const prior = [...options.userContext.history];
@@ -76,8 +77,11 @@ export async function responsesWithTools(options: {
   let force = false, inputUsed = 0, outputUsed = 0, replayTokens = 0;
   const finalReserve = Math.min(options.maxTokens, FINAL_RESERVE_TOKENS);
   const researchTokens = Math.min(4200, options.maxTokens);
-  const request = (items: unknown[], final: boolean) => JSON.stringify({model: options.model,
-    input: final ? [...items, {role: 'user', content: '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'}] : items,
+  const finalInstruction = {role: 'user', content: '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'};
+  let repair: typeof finalInstruction | undefined;
+  let draftIssues: string[] | undefined;
+  const request = (items: unknown[], final: boolean, instruction = finalInstruction) => JSON.stringify({model: options.model,
+    input: final ? [...items, instruction] : items,
     store: false, include: ['reasoning.encrypted_content'], service_tier: 'default', reasoning: {effort: options.effort},
     max_output_tokens: final ? Math.min(options.maxTokens, OUTPUT_BUDGET - outputUsed) : researchTokens, text: {format: {type: 'json_object'}}, tools, tool_choice: final ? 'none' : 'auto'});
   // shortcut: UTF-8バイト数＋APIの整形余裕＋再生する応答トークンで安全側に予約。実測とずれる場合は提供元のカウントAPIを検討する。
@@ -92,7 +96,7 @@ export async function responsesWithTools(options: {
       signal.throwIfAborted();
       const remaining = options.deadline - Date.now();
       if (remaining <= 0) throw new ApiError(504, 'coach_timeout');
-      const finalBody = request(history, true);
+      const finalBody = request(history, true, repair);
       const finalInput = inputEstimate(finalBody, replayTokens);
       const researchBody = request(history, false);
       const researchInput = inputEstimate(researchBody, replayTokens);
@@ -143,8 +147,21 @@ export async function responsesWithTools(options: {
         if (!Array.isArray(content) || !content.length || !content.every(part => object(part) && part.type === 'output_text' && typeof part.text === 'string')) {
           throw new ApiError(502, 'invalid_output');
         }
-        try { return JSON.parse(content.map(part => part.text).join('')); }
-        catch { throw new ApiError(502, 'invalid_output'); }
+        const raw = content.map(part => part.text).join('');
+        let value: unknown;
+        try { value = JSON.parse(raw); } catch { throw new ApiError(502, 'invalid_output'); }
+        const checked = options.inspect(raw, facts);
+        if (checked.accepted) return value;
+        const issues = checked.issues.slice(0, 12);
+        draftIssues = [...new Set(issues.map(issue => issue.code))];
+        if (repair || OUTPUT_BUDGET - outputUsed < finalReserve || options.deadline - Date.now() <= options.reserveMs) throw new ApiError(502, 'invalid_output');
+        const nextHistory = [...history, ...(final ? [finalInstruction] : []), ...data.output];
+        repair = {role: 'user', content: '直前のJSONは検査不合格です。節番号は0から始まります。指摘を直してください。根拠を確認できない記述は省き、確認済みの事実と助言だけでJSONを返してください。道具は使えません。指摘: ' + JSON.stringify(issues)};
+        replayTokens += generated;
+        if (inputUsed + inputEstimate(request(nextHistory, true, repair), replayTokens) > INPUT_BUDGET) throw new ApiError(502, 'invalid_output');
+        history = nextHistory;
+        force = true;
+        continue;
       }
       if (final) throw new ApiError(502, 'invalid_output');
       for (const item of pending) {
@@ -209,6 +226,6 @@ export async function responsesWithTools(options: {
     if (failure === 'aborted' || e instanceof ApiError && ['invalid_output', 'invalid_usage', 'coach_timeout'].includes(e.code)) throw e;
     throw new ApiError(502, 'provider_failed');
   } finally {
-    console.log(JSON.stringify({event: 'coach_responses_tools', stage, status, failure, turns, calls, inputTokens: inputUsed, outputTokens: outputUsed, elapsedMs: Date.now() - started}));
+    console.log(JSON.stringify({event: 'coach_responses_tools', stage, status, failure, draftIssues, turns, calls, inputTokens: inputUsed, outputTokens: outputUsed, elapsedMs: Date.now() - started}));
   }
 }

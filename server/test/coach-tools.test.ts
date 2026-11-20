@@ -200,6 +200,41 @@ describe('Responsesの道具ループ', () => {
     } finally { logs.mockRestore(); }
   });
 
+  it('参照不合格は診断を返して道具なしで一度だけ修正し、正しい参照の回答を検査する', async () => {
+    const bad = {sections: [{...safe.sections[0], refs: ['0:line:missing']}]};
+    const first = message(bad);
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(first)).mockImplementationOnce(async (_, init) => {
+      const b = bodyOf(init);
+      expect(b.tool_choice).toBe('none');
+      expect(b.input.at(-2)).toEqual(first);
+      expect(b.input.at(-1).content).toContain('"code":"invalid_reference"');
+      return done();
+    });
+    const run = vi.fn<RunTools>();
+    await expect(completeWith(send, run)).resolves.toEqual(safe);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('修正しても符号が不合格なら一度で打ち切る', async () => {
+    const bad = {sections: [{...safe.sections[0], text: '▲1六歩と指しました。'}]};
+    const send = vi.fn<typeof fetch>().mockImplementation(async () => done(bad));
+    await expect(completeWith(send, vi.fn())).rejects.toThrow('invalid_output');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('最終回答後に出力枠が5,400トークン未満なら修正を送らない', async () => {
+    let turns = 0;
+    const send: typeof fetch = async (_, init) => {
+      const b = bodyOf(init);
+      if (++turns <= 4) return Response.json({status: 'completed', output: [call('pre' + turns)], usage: {input_tokens: 3000, output_tokens: 4200}});
+      expect(b.tool_choice).toBe('none');
+      return Response.json({status: 'completed', output: [message({sections: []})], usage: {input_tokens: 3000, output_tokens: 5400}});
+    };
+    await expect(completeWith(send, async () => [{知識: []}])).rejects.toThrow('invalid_output');
+    expect(turns).toBe(5);
+  });
+
   it('組み込みfetchをレシーバーなしで呼ぶ（WorkersのIllegal invocation対策）', async () => {
     const transport = vi.fn(function (this: unknown) {
       if (this !== undefined) throw new TypeError('Illegal invocation');
@@ -347,7 +382,7 @@ describe('非同期・期限・精密コンテナ', () => {
   it('最終出力を既存検査で拒否し、枠から差し引かない', async () => {
     await runInDurableObject(device(), async (_instance, state) => {
       const coach = new Coach(state.storage, config, 'device', () => true, async () => facts(), undefined, async () => []);
-      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(done({sections: [{...safe.sections[0], refs: ['0:line:fake']}]}));
+      const send = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => done({sections: [{...safe.sections[0], refs: ['0:line:fake']}]}));
       try {
         const out = await coach.fetch(await post());
         expect(out.status, await out.clone().text()).toBe(502);
