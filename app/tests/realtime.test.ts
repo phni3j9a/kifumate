@@ -153,6 +153,7 @@ test("準備→解析→結果、readyで短いポーリングを止める", asy
 });
 test("グラフの連続移動は最新局面にまとめ、PUTを重ねず送信間隔を空ける", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
   const { controller: c, api, calls } = setup(1100);
   await enter(c);
   c.startReading(input(1));
@@ -187,6 +188,59 @@ test("グラフの連続移動は最新局面にまとめ、PUTを重ねず送�
     positions,
     [2, 3].map((n) => ({ ...input(n), hold: true })),
   );
+  assert.equal({ ...c.snapshot }.result?.ply, 3);
+  await c.stop();
+});
+test("端末時計を戻してもPUTは単調時計で1100ms後に送る", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let elapsed = 0;
+  let wallTime = 100000;
+  t.mock.method(performance, "now", () => elapsed);
+  t.mock.method(Date, "now", () => wallTime);
+  const { controller: c, calls } = setup(1100);
+  await enter(c);
+  c.move(input(1));
+  await flush();
+  c.move(input(2));
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  wallTime -= 60000;
+  c.move(input(3));
+  await flush();
+  elapsed = 1099;
+  t.mock.timers.tick(1099);
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  elapsed = 1100;
+  t.mock.timers.tick(1);
+  await flush();
+  assert.deepEqual(calls.puts, [1, 2]);
+  await c.stop();
+});
+test("分岐の次の局面はPUTの間引き待ちでも解析中にする", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const { controller: c, api, calls } = setup(1100);
+  api.updateRealtime = async (_id, i, sequence) => {
+    calls.puts.push(sequence);
+    return reply({ sequence, result: { ...reply().result!, ply: i.moves.length } });
+  };
+  await enter(c);
+  c.move(input(1));
+  await flush();
+  c.move(input(2));
+  await flush();
+  assert.equal(c.snapshot.status, "ready");
+  assert.equal(c.snapshot.result?.ply, 2);
+  c.move(input(3));
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  assert.equal(c.snapshot.result, null);
+  assert.equal(c.snapshot.status, "analyzing");
+  t.mock.timers.tick(1100);
+  await flush();
+  assert.deepEqual(calls.puts, [1, 2]);
+  assert.equal(c.snapshot.status, "ready");
   assert.equal({ ...c.snapshot }.result?.ply, 3);
   await c.stop();
 });
@@ -603,6 +657,26 @@ for (const cancel of [false, true]) {
   });
 }
 
+test("前面復帰の権利確認で無料と分かれば、待機中の深く読むに有料プランを案内する", async () => {
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  assert.equal(c.snapshot.paid, true);
+  c.setForeground(false);
+  const pending = deferred<RealtimeReply>();
+  api.realtime = async () => pending.promise;
+  c.setForeground(true);
+  let offered = 0;
+  c.startReading(input(1), () => offered++);
+  await flush();
+  assert.equal(c.snapshot.hold, true);
+  pending.resolve(reply({ paid: false, sessionId: null, status: "off" }));
+  await flush();
+  assert.equal(c.snapshot.hold, false);
+  assert.equal(c.snapshot.paid, false);
+  assert.equal(offered, 1);
+  assert.deepEqual(calls.posts, []);
+});
+
 test("本譜・分岐の513手目以降も、途中のSFENと最大512手で同じ局面になる", () => {
   const record = new ShogiRecord();
   const cycle = ["5i5h", "5a5b", "5h5i", "5b5a"];
@@ -649,4 +723,32 @@ test("本譜・分岐の513手目以降も、途中のSFENと最大512手で同�
     longBranch.positions[1]!.sfen,
     longBranch.position.sfen,
   );
+});
+
+test("既知の制限：512手より前を切り詰めると同じ盤面でも千日手の履歴が欠ける", () => {
+  const record = new ShogiRecord();
+  const cycle = ["5i5h", "5a5b", "5h5i", "5b5a"];
+  const detour = ["4h3h", "5b4b", "3h4h", "4b5b"];
+  const line = [
+    ...cycle,
+    ...cycle,
+    "5i4h",
+    "5a5b",
+    ...Array.from({ length: 126 }, () => detour).flat(),
+    "4h5i",
+    "5b5a",
+  ];
+  for (const usi of line) {
+    const move = record.position.createMoveByUSI(usi);
+    assert.ok(move && record.append(move));
+  }
+  assert.equal(record.repetition, true);
+  const truncated = realtimeInput(record, line.length, null);
+  const replay = new ShogiRecord(Position.newBySFEN(truncated.initial)!);
+  for (const usi of truncated.moves) {
+    const move = replay.position.createMoveByUSI(usi);
+    assert.ok(move && replay.append(move));
+  }
+  assert.equal(replay.position.sfen, record.position.sfen);
+  assert.equal(replay.repetition, false);
 });

@@ -109,7 +109,8 @@ export class RealtimeController {
     )
       return;
     if (this.desired) this.leaveBranch();
-    this.offerPlan = this.snapshot.paid === null ? offerPlan : undefined;
+    this.offerPlan =
+      this.snapshot.paid === null || this.resuming ? offerPlan : undefined;
     this.emit({ hold: true, status: "preparing" });
     this.setPosition({ ...input, hold: true });
     if (this.snapshot.paid === null) void this.resume();
@@ -207,7 +208,7 @@ export class RealtimeController {
       if (epoch !== this.epoch || !this.visible || !this.foreground) return;
       if (reply.paid !== true && this.snapshot.hold) {
         this.emit({ quota: reply.quota });
-        this.fail(new ApiError(403, "paid_required"));
+        this.revokeAccess();
         return;
       }
       this.offerPlan = undefined;
@@ -243,12 +244,15 @@ export class RealtimeController {
       });
     return this.resuming;
   }
+  revokeAccess() {
+    const offerPlan = this.offerPlan;
+    this.emit({ paid: false });
+    void this.stop();
+    offerPlan?.();
+  }
   private fail(error: unknown) {
     if (error instanceof ApiError && error.status === 403) {
-      const offerPlan = this.offerPlan;
-      this.emit({ paid: false, result: null, status: "off" });
-      void this.stop();
-      offerPlan?.();
+      this.revokeAccess();
       return;
     }
     if (
@@ -322,7 +326,13 @@ export class RealtimeController {
         void this.send();
       return;
     }
-    const wait = this.nextUpdateAt - Date.now();
+    const status =
+      this.snapshot.status === "paused" || this.snapshot.status === "preparing"
+        ? "preparing"
+        : "analyzing";
+    if (this.snapshot.status !== status) this.emit({ status });
+    const now = performance.now();
+    const wait = this.nextUpdateAt - now;
     if (wait > 0) {
       clearTimeout(this.updateTimer);
       this.updateTimer = setTimeout(() => void this.send(), wait);
@@ -331,14 +341,7 @@ export class RealtimeController {
     const id = this.session;
     const sequence = ++this.sequence;
     this.activityAt = Date.now();
-    this.nextUpdateAt = this.activityAt + this.updateIntervalMs;
-    this.emit({
-      status:
-        this.snapshot.status === "paused" ||
-        this.snapshot.status === "preparing"
-          ? "preparing"
-          : "analyzing",
-    });
+    this.nextUpdateAt = now + this.updateIntervalMs;
     this.updating = this.api
       .updateRealtime(id, input, sequence)
       .then((reply) => this.receive(reply, epoch, revision, sequence))

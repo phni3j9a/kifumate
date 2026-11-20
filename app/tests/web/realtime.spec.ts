@@ -289,6 +289,50 @@ test("権利確認を待たずに深く読むを押しても、無料と分か�
   expect(fake.rt.requests).toHaveLength(0);
 });
 
+test("前面復帰の権利再確認中に深く読むを押し、失効が分かると有料プランを案内する", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await open(page);
+  await button(page, "深く読む").click();
+  await expect(page.getByText(/深く読んだ結果/)).toBeVisible();
+  await button(page, "終了").click();
+  await expect.poll(() => fake.rt.stops).toBe(1);
+  const visibility = (value: "hidden" | "visible") =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, value);
+  await visibility("hidden");
+  fake.paid = false;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/v1/entitlements", async (route) => {
+    if (route.request().method() === "GET") await pending;
+    await route.fallback();
+  });
+  const checking = page.waitForRequest(
+    (req) => req.url().endsWith("/v1/entitlements") && req.method() === "GET",
+  );
+  await visibility("visible");
+  await checking;
+  try {
+    await button(page, "深く読む").click();
+    await expect(button(page, "終了")).toBeVisible();
+  } finally {
+    release();
+  }
+  await expect(
+    page.getByText("リアルタイム解析は、有料プランで使えます"),
+  ).toBeVisible();
+  expect(fake.rt.requests).toHaveLength(1);
+});
+
 test("未解析の本譜で月上限に達しても更新日ボタンはリアルタイム解析だけ", async ({
   page,
 }) => {

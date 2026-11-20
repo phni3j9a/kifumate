@@ -41,6 +41,7 @@ export function realtimeInput(
     .filter((n) => n.move instanceof Move)
     .slice(0, branch?.base ?? ply);
   const variation = branch?.moves.slice(0, branch.at) ?? [];
+  // shortcut: 512手より前の履歴は送らないため千日手を判定できない。長手数の千日手が問題になったらサーバーの上限か送り方を見直す
   const skip = Math.max(0, main.length + variation.length - 512);
   return {
     initial:
