@@ -48,7 +48,7 @@ const fs = require('fs');
   await wait(9000); await has('解析中', 'queued game started after the first finished');
   await wait(9500); await hasNot('解析待ち');
   await act('back'); await act('tab', 'set'); await has('10 / 20局', 'two precise analyses counted'); await has('33 / 100局', 'and both count toward the weekly total');
-  await hasNot('分岐中の解析（今月）', 'real-time minutes are not shown in the settings');
+  await hasNot('リアルタイム解析（今月）', 'real-time minutes are not shown in the settings');
   await jump('queue'); await has('解析待ち', 'queue shortcut'); await has('いまの解析が終わると、続けて始まります');
 
   // 4. free plan: count goes down by one per analysis; saved precise results stay readable
@@ -72,11 +72,11 @@ const fs = require('fs');
   await act('nav', 'names'); await has('サーバーには送りません'); await act('back');
   await act('nav', 'backup'); await has('iPhone と Android の間では、有料プランは引き継げません'); await act('back');
   await act('nav', 'plan'); await has('合計 週100局'); await has('AIコーチは月100回まで');
-  await has('ふつうの解析 週10局'); await has('分岐中の解析'); await hasNot('指すたびに評価値'); await hasNot('読み筋の評価値'); await hasNot('精密解析した対局', 'plan table');
+  await has('ふつうの解析 週10局'); await has('リアルタイム解析'); await hasNot('指すたびに評価値'); await hasNot('読み筋の評価値'); await hasNot('精密解析した対局', 'plan table');
 
   // 4c. the coach's uses and the real-time minutes are only mentioned when less than a tenth is left
   await jump('branch'); await wait(900); await hasNot('残り', 'no remaining minutes while plenty is left');
-  await jump('low'); await has('分岐中の解析は、今月あと24分使えます'); await has('残り24分');
+  await jump('low'); await has('リアルタイム解析は、今月あと24分使えます'); await has('残り24分');
   await act('ai'); await has('AIコーチは、今月あと7回使えます'); await act('aigen'); await wait(1800); await has('今月あと6回');
   for (let i = 0; i < 6; i++) { await click('#scr .sq'); await wait(1000); }
   await has('今月のAIコーチは上限に達しました', 'the coach stops at the limit, and the text stays readable'); await has('この対局のまとめ'); await act('aiclose');
@@ -85,6 +85,27 @@ const fs = require('fs');
   await jump('branch'); await wait(900); await has('分岐 1手目'); await has('本譜（48手目）に戻る');
   await act('back'); await hasNot('分岐 1手目', 'back button leaves the branch first'); await has('48手目');
   await act('back'); await has('棋譜', 'second back leaves the game');
+
+  // 5b. 本譜の深く読む。時間を進めて深まり・休止・再開を確認する。
+  await jump('game');
+  await has('深く読む'); await hasNot('深く読んだ結果');
+  const graph = () => page.locator('#scr [data-b="graph"] svg path:not(.g-brl)').evaluateAll((els) => els.map((e) => e.getAttribute('d')).join(';'));
+  const before = await graph();
+  await act('deepread'); await has('終了');
+  await page.getByText('深く読んだ結果（深さ8）', { exact: true }).waitFor(); pass++;
+  await page.getByText('深く読んだ結果（深さ10）', { exact: true }).waitFor(); pass++;
+  ok(await graph() === before, 'deep reading never replaces the saved graph');
+  await page.clock.install();
+  await key('ArrowRight');
+  await page.clock.fastForward(290000);
+  await hasNot('休止中', 'moving restarts the five-minute timer');
+  await page.clock.fastForward(10001);
+  await has('休止中'); await has('再開');
+  await act('rtretry'); await hasNot('休止中');
+  await act('deepread'); await has('深く読む'); await hasNot('深く読んだ結果');
+  await ctl('.pg-ctl [data-plan="free"]'); await act('deepread');
+  await has('リアルタイム解析は、有料プランで使えます');
+  await act('dlgno'); await ctl('.pg-ctl [data-plan="paid"]');
 
   // 6. result corrected to a draw: no leftover mate note, not counted in the win rate
   await jump('game'); await act('gmenu'); await act('ginfo'); await act('resedit'); await act('resset', 'd');

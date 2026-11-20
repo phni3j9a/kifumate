@@ -234,7 +234,7 @@ async function run(width: number, height: number) {
     await m.evaluate(
       ({ paid, message }) =>
         (window as any).__compare(
-          `push({t:'names'}); R.vpage.querySelector('.ph h2').textContent='招待コード'; R.vpage.querySelector('.pgc').innerHTML=${JSON.stringify(`<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900;line-height:1">${paid ? "有料プランを利用中" : "無料プラン"}</b>${paid ? '<p class="hint">期限なし</p>' : ""}<button class="bt sm" style="margin-top:10px">今の権利を確認</button></div><h3 class="st">コードを入力</h3><p class="hint" style="margin-top:0">招待コードで、精密解析・分岐中の解析・AIコーチが使えます。この端末で有効になります。</p><input class="inp" placeholder="ABCD-EFGH-JKMN-PQRS" aria-label="招待コード"><p class="hint">大文字・小文字や全角・半角は、どちらでも入力できます。区切りは自動で入ります。</p><button class="bt pri wide">コードを使う</button>${message ? `<p style="font-size:13px;font-weight:700;line-height:1.6">${message}</p>` : ""}<p class="hint">機種変更やアプリの削除で、別の端末に権利を引き継ぐことはできません。コードには期限や使える端末数の上限があります。</p>`)};`,
+          `push({t:'names'}); R.vpage.querySelector('.ph h2').textContent='招待コード'; R.vpage.querySelector('.pgc').innerHTML=${JSON.stringify(`<div class="cd" style="padding:14px"><b style="display:block;font-size:16px;font-weight:900;line-height:1">${paid ? "有料プランを利用中" : "無料プラン"}</b>${paid ? '<p class="hint">期限なし</p>' : ""}<button class="bt sm" style="margin-top:10px">今の権利を確認</button></div><h3 class="st">コードを入力</h3><p class="hint" style="margin-top:0">招待コードで、精密解析・リアルタイム解析・AIコーチが使えます。この端末で有効になります。</p><input class="inp" placeholder="ABCD-EFGH-JKMN-PQRS" aria-label="招待コード"><p class="hint">大文字・小文字や全角・半角は、どちらでも入力できます。区切りは自動で入ります。</p><button class="bt pri wide">コードを使う</button>${message ? `<p style="font-size:13px;font-weight:700;line-height:1.6">${message}</p>` : ""}<p class="hint">機種変更やアプリの削除で、別の端末に権利を引き継ぐことはできません。コードには期限や使える端末数の上限があります。</p>`)};`,
         ),
       { paid, message },
     );
@@ -272,7 +272,7 @@ async function run(width: number, height: number) {
     .click();
   await m.evaluate(() =>
     (window as any).__compare(
-      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、分岐中の解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove();`,
+      `R.vpage.querySelector('.pwl').innerHTML=pic('onb-5','pwi')+'<div><b style="font-size:18px;font-weight:900">招待コードで使えます</b><p>精密解析、リアルタイム解析、AIコーチの解説と質問が使えます。</p></div>'; R.vpage.querySelector('.mockn').remove(); R.vpage.querySelector('.acts').innerHTML='<button class="bt pri wide">招待コードを入力</button><p class="hint">招待コードはこの端末だけで使えます。期限が切れたり、取り消されたりすると無料プランに戻ります。保存した解析結果と解説は、そのあとも読めます。</p>'; R.vpage.querySelector('.lnk').remove();`,
     ),
   );
   await shot("plan-invite");
@@ -400,6 +400,62 @@ async function run(width: number, height: number) {
   // 開始局面から、本譜とちがう手（▲2六歩 △3四歩）で分岐する
   await m.keyboard.press("Home");
   await tap("最初へ");
+  const rtMock = (code: string) =>
+    m.evaluate((code) => (window as any).__compare(code), code);
+  await act("deepread");
+  await tap("深く読む");
+  await shot("deep-read-locked");
+  await m.getByRole("button", { name: "閉じる", exact: true }).click();
+  await tap("閉じる");
+  fake.paid = true;
+  await plan("paid");
+  await a.reload();
+  await button("解析する").waitFor();
+  fake.rt.status = "ready";
+  fake.rt.searching = true;
+  const deepResult = (depth: number, value: number) => ({
+    ply: 0,
+    depth,
+    score: { kind: "cp" as const, value },
+    candidates: [
+      {
+        rank: 1,
+        depth,
+        move: "7g7f",
+        score: { kind: "cp" as const, value },
+        pv: ["7g7f", "8c8d"],
+      },
+    ],
+    mate: null,
+  });
+  const mockResult = (depth: number, value: number) =>
+    rtMock(
+      `clearRtPosition(); S.rtResult={depth:${depth},cp:${value},mate:null,next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()`,
+    );
+  await act("deepread");
+  fake.rt.result = deepResult(8, 50);
+  await tap("深く読む");
+  await mockResult(8, 50);
+  await a.getByText("深く読んだ結果（深さ8）").waitFor();
+  await shot("deep-read-start");
+  fake.rt.result = deepResult(14, 80);
+  await mockResult(14, 80);
+  await a.getByText("深く読んだ結果（深さ14）").waitFor();
+  await shot("deep-read-searching");
+  fake.rt.status = "paused";
+  await rtMock("pauseRt()");
+  await button("再開").waitFor();
+  await shot("deep-read-paused");
+  await act("deepread");
+  await tap("終了");
+  await shot("deep-read-ended");
+  fake.rt.searching = false;
+  fake.rt.result = undefined;
+  fake.rt.status = "ready";
+  fake.paid = false;
+  await plan("free");
+  await a.reload();
+  await button("解析する").waitFor();
   await both(2, 7);
   await both(2, 6);
   await shot("branch-first-move-toast");
@@ -407,10 +463,8 @@ async function run(width: number, height: number) {
   await both(3, 3);
   await both(3, 4);
   await shot("branch");
-  // 分岐中の解析。モックの休止はオンのまま、結果と盤を保つ（次の手で準備し直す）。
+  // リアルタイム解析。モックの休止はオンのまま、結果と盤を保つ（次の手で準備し直す）。
   await shot("realtime-free");
-  const rtMock = (code: string) =>
-    m.evaluate((code) => (window as any).__compare(code), code);
   fake.paid = true;
   fake.rt.status = "preparing";
   await plan("paid");
@@ -420,14 +474,14 @@ async function run(width: number, height: number) {
   await appSquare(2, 6);
   await appSquare(3, 3);
   await appSquare(3, 4);
-  await button("分岐中の解析 オン").click();
+  await button("リアルタイム解析 オン").click();
   await rtMock("S.rtOn=false; stopRt(); renderPly()");
   await shot("realtime-off");
   await button("オンにする").click();
   await tap("1手戻る");
   await tap("1手進む");
   await rtMock(
-    "S.rtOn=true; S.rtWarm=false; S.rtUntil=performance.now()+60000; renderPly()",
+    "clearRtPosition(); S.rtOn=true; S.rtWarm=false; S.rtUntil=performance.now()+60000; renderPly()",
   );
   await a.getByText("準備中", { exact: true }).waitFor();
   await shot("realtime-preparing");
@@ -437,6 +491,7 @@ async function run(width: number, height: number) {
   await shot("realtime-analyzing");
   fake.rt.result = {
     ply: 2,
+    depth: 10,
     score: { kind: "cp", value: 50 },
     candidates: [
       {
@@ -452,13 +507,13 @@ async function run(width: number, height: number) {
   fake.rt.status = "ready";
   fake.rt.idleMs = 10;
   await rtMock(
-    "S.rtUntil=0; brNow().an={known:true,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
+    "clearRtPosition(); S.rtResult={depth:10,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
   );
   await button("この手を盤で試す").waitFor();
   await shot("realtime-result");
   fake.rt.status = "paused";
-  await rtMock("S.rtWarm=false; renderPly()");
-  await button("分岐中の解析 オン、休止中").waitFor();
+  await rtMock("pauseRt()");
+  await button("リアルタイム解析 オン、休止中").waitFor();
   await shot("realtime-paused");
   // 通信なし・上限では、この局面に保存した結果がない場面を比べる。
   fake.rt.result = null;
@@ -466,14 +521,15 @@ async function run(width: number, height: number) {
   await tap("1手戻る");
   await tap("1手進む");
   await rtMock(
-    "brNow().an={known:false,lines:[]}; DB.online=false; renderPly()",
+    "clearRtPosition(); brNow().an={known:false,lines:[]}; DB.online=false; renderPly()",
   );
-  await button("分岐中の解析 通信なし").waitFor();
+  await button("リアルタイム解析 通信なし").waitFor();
   await shot("realtime-offline");
   fake.online = true;
   fake.rt.status = "ready";
   fake.rt.result = {
     ply: 2,
+    depth: 10,
     score: { kind: "cp", value: 50 },
     candidates: [
       {
@@ -490,15 +546,15 @@ async function run(width: number, height: number) {
   fake.rt.remainingMs = 12 * 60000;
   await tap("もう一度試す");
   await rtMock(
-    "DB.online=true; DB.usage.rt=DB.usage.rtMax-12; brNow().an={known:true,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
+    "DB.online=true; DB.usage.rt=DB.usage.rtMax-12; S.rtResult={depth:10,cp:50,mate:null,lines:[],next:moveOfUsi('7g7f','▲７六歩'),pv:['△８四歩']}; renderPly()",
   );
-  await button("分岐中の解析 オン・残り12分").waitFor();
+  await button("リアルタイム解析 オン・残り12分").waitFor();
   await pause(2800);
   await shot("realtime-low");
   fake.rt.status = "limit";
   fake.rt.remainingMs = 0;
   await rtMock("DB.usage.rt=DB.usage.rtMax; renderPly()");
-  await button("分岐中の解析 残り0分").waitFor();
+  await button("リアルタイム解析 残り0分").waitFor();
   await button("更新日").waitFor();
   // モックは結果優先で上限の説明を隠すため、アプリ側だけ同じ文言の案内を別に残す。
   await shot("realtime-limit-result");
@@ -506,9 +562,9 @@ async function run(width: number, height: number) {
   await tap("1手戻る");
   await tap("1手進む");
   await rtMock(
-    "DB.usage.rt=DB.usage.rtMax; brNow().an={known:false,lines:[]}; renderPly()",
+    "clearRtPosition(); DB.usage.rt=DB.usage.rtMax; brNow().an={known:false,lines:[]}; renderPly()",
   );
-  await button("分岐中の解析 残り0分").waitFor();
+  await button("リアルタイム解析 残り0分").waitFor();
   await shot("realtime-limit");
   // 後続の既存場面へ、同じ無料・2手の分岐を戻す。
   fake.paid = false;

@@ -2,7 +2,7 @@
 function syncPlan() {
   document.body.dataset.plan = DB.plan;
   document.querySelectorAll('.pg-ctl button[data-plan]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.plan === DB.plan)));
-  S.rtUntil = 0;
+  if (!paid()) stopRt();
   show();
   if (AI.open) renderAI();
 }
@@ -11,6 +11,7 @@ function resetUI() {
   if (RUN) { clearInterval(RUN.timer); RUN = null; }
   QUEUE.length = 0;
   closeLayers();
+  stopRt();
   CUR = null; S.br = null; S.lastBr = null; S.rtOn = true; S.rtWarm = false; S.told = {}; clearSel();
   NAV.length = 0;
   Object.assign(UI, { tab: 'list', quick: 'all', q: '', search: false, flt: { ...FL0 }, scroll: {} });
@@ -22,7 +23,7 @@ function syncState() {
 }
 function setOnline(on) {
   DB.online = on;
-  S.rtUntil = 0;
+  if (!on) { clearRtPosition(); S.rtWarm = false; }
   syncState();
   show();
   if (AI.open) renderAI();
@@ -103,7 +104,7 @@ const JUMPS = {
     JUMPS.branch();
     Object.assign(DB.usage, { ai: DB.usage.aiMax - 7, rt: DB.usage.rtMax - 24 });
     renderNow();
-    toast(`分岐中の解析は、今月あと${rtLeft()}分使えます`);
+    toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`);
     S.told.rtlow = true;
   },
   /* one analysis runs at a time: a second one waits for its turn */

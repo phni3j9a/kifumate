@@ -256,7 +256,7 @@ A.aigen = () => {
 };
 A.aiask = (q) => {
   if (!needNet(() => A.aiask(q))) return;
-  if (q === '@pos') { const i = S.ply; askAI(S.br ? `${i}手目から分かれた局面について教えて` : i ? `${i}手目の局面について教えて` : '開始局面について教えて', () => (S.br ? blk('答え', ENG, ['分岐の局面は、分岐中の解析の結果をもとに答えます。<span class="mk0">モック</span>ここでは、本譜の局面にだけ答えます。']) : posAnswer(i)), 'chat-explaining'); return; }
+  if (q === '@pos') { const i = S.ply; askAI(S.br ? `${i}手目から分かれた局面について教えて` : i ? `${i}手目の局面について教えて` : '開始局面について教えて', () => (S.br ? blk('答え', ENG, ['分岐の局面は、リアルタイム解析の結果をもとに答えます。<span class="mk0">モック</span>ここでは、本譜の局面にだけ答えます。']) : posAnswer(i)), 'chat-explaining'); return; }
   const x = aiQuestions().find((o) => o.q === q);
   if (x) askAI(x.q, x.a, x.face);
 };
