@@ -6,11 +6,16 @@ import { complete } from '../src/coach';
 import { sha256 } from '../src/model';
 
 const config = JSON.parse(configuration), production = config.env.production;
-it('productionは専用Worker・ドメイン・DO・有限Container枠・DeepSeek最大推論の期限を持つ', () => {
+it('productionは専用Worker・ドメイン・DO・有限Container枠を持ち、stagingと同じTerra道具方式を使う', () => {
   expect(production.name).not.toBe(config.env.staging.name);
   expect(production.workers_dev).toBe(false); expect(production.preview_urls).toBe(false);
   expect(production.routes).toEqual([{pattern: 'kifumate-api.quarterlambda.com', custom_domain: true}]);
-  expect(production.vars).toMatchObject({ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false', COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: 'https://api.deepseek.com', COACH_MODEL: 'deepseek-flash', COACH_TIMEOUT_MS: '240000'});
+  expect(production.vars).toMatchObject({ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false'});
+  for (const vars of [production.vars, config.env.staging.vars]) {
+    expect(vars).toMatchObject({COACH_PROVIDER: 'openai-responses-tools', COACH_BASE_URL: 'https://api.openai.com/v1',
+      COACH_MODEL: 'gpt-6.1-terra', COACH_REASONING_EFFORT: 'high', COACH_MAX_TOKENS: '5400', COACH_TIMEOUT_MS: '240000'});
+    expect(vars).not.toHaveProperty('COACH_API_KEY');
+  }
   expect(production.vars).not.toHaveProperty('DEV_PAID_HASHES');
   expect(production.vars).not.toHaveProperty('COACH_SIGNING_KEY');
   expect(production.durable_objects.bindings.map((x: any) => x.class_name).sort()).toEqual(['Device', 'Invitations', 'PreciseContainer', 'RealtimeContainer', 'StandardContainer']);

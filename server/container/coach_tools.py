@@ -4,6 +4,7 @@ from collections import Counter
 import hashlib
 import json
 import re
+import sys
 import unicodedata
 
 import cshogi as sh
@@ -246,7 +247,7 @@ def saved(game, b, prev, ply, facts, limit):
     return {**position, '指した直前の手の印': facts['実戦手'][ply - 1][2] if ply else 'なし', '候補と詰み証明': refs}
 
 
-def actual_claim(game, claim, facts):
+def actual_claim(game, claim, facts, search):
     kind = claim['type']
     if kind == 'winner':
         return facts['終局'].get('勝った側', '不明')
@@ -262,7 +263,7 @@ def actual_claim(game, claim, facts):
     if kind == 'captures':
         return capture_totals(sequence(b, prev, view, claim['moves'])[0])
     if kind == 'mate':
-        return mate(b, prev, view)['状態']
+        return search(b, prev, view)['状態']
     if kind == 'evaluation':
         return evaluation(game['results'][ply]['score'], view)['優勢な側'] if not branch else '不明'
     raise ToolError('不明な主張の型です')
@@ -288,7 +289,7 @@ def compare(b, prev, view, moves):
     return {'指す前の玉の安全度': safety(b, prev, view), '比較': variants}
 
 
-def call(game, name, args, *, facts=None, draft=None):
+def call(game, name, args, *, facts=None, draft=None, search=mate):
     """入力を変更せずJSON値を返す。下書きだけは呼び出し側がTS照合を注入。"""
     try:
         if name == 'knowledge':
@@ -314,7 +315,7 @@ def call(game, name, args, *, facts=None, draft=None):
             result = []
             for c in args['claims'][:8]:
                 try:
-                    actual = actual_claim(game, c, facts)
+                    actual = actual_claim(game, c, facts, search)
                     result.append({'一致': actual == c['expected'], '正しい値': actual})
                 except ToolError as e:
                     result.append(e.result)
@@ -355,7 +356,7 @@ def call(game, name, args, *, facts=None, draft=None):
             choices = [args['move']] + ([args['alternative']] if args.get('alternative') else [])
             return compare(b, prev, view, choices)
         if name == 'mate':
-            return mate(b, prev, view)
+            return search(b, prev, view)
         if name == 'saved_analysis':
             if branch:
                 raise ToolError('仮の分岐には保存済み解析がありません')
@@ -365,3 +366,11 @@ def call(game, name, args, *, facts=None, draft=None):
         return e.result
     except (ValueError, KeyError, TypeError, AttributeError, IndexError):
         return {'エラー': '引数または資料が不正です'}
+
+
+if __name__ == '__main__':
+    sfen, moves, prev, view = json.load(sys.stdin)
+    board = sh.Board(sfen)
+    for move in moves:
+        board.push_usi(move)
+    print(json.dumps(mate(board, prev, view)))

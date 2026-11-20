@@ -37,36 +37,7 @@ def dumps(x):
     return json.dumps(x, ensure_ascii=False, separators=(',', ':'))
 
 
-def obj(required=(), **properties):
-    return {'type': 'object', 'properties': properties, 'required': list(required), 'additionalProperties': False}
-
-
-STR = {'type': 'string'}
-INT = {'type': 'integer'}
-BOOL = {'type': 'boolean'}
-MOVES = {'type': 'array', 'items': STR, 'maxItems': 16, 'description': 'KIFの着手列（各手に移動元を添えてもよい）'}
-POS = {**obj(('ply',), ply=INT, moves=MOVES), 'description': '本譜のply手目の直後（0は開始）から、任意の仮の着手列を適用'}
-CLAIM = obj(('type', 'expected'), type={'enum': ['piece', 'attack', 'move', 'captures', 'mate', 'evaluation', 'winner']},
-            position=POS, square=STR, **{'from': STR, 'to': STR}, move=STR, moves=MOVES, field=STR, expected={})
-TOOLS = [
-    ('position', '駒の持ち主と位置、持駒、手番、王手、両玉を確認', obj(('position',), position=POS)),
-    ('square', '指定升にある駒と双方の利き（攻め・守り）を確認', obj(('position', 'square'), position=POS, square=STR)),
-    ('piece_attacks', '指定升にいる駒の全利き先を列挙', obj(('position', 'square'), position=POS, square=STR)),
-    ('threats', '相手の利きが当たる駒と紐がない駒を列挙（合法性とは別）', obj(('position',), position=POS)),
-    ('king_safety', '玉の周囲の駒・利き、玉の合法移動先、手番側の王手を確認', obj(('position',), position=POS)),
-    ('legal_moves', '合法手を確認。標準駒名、王手、駒取りで絞り、40手ずつ列挙', obj(('position',), position=POS, piece=STR, check=BOOL, capture=BOOL, offset=INT)),
-    ('play_line', '仮の手順を進めて、各手の駒取り・成り・王手・直後の持駒や玉を確認', obj(('position', 'moves'), position=POS, moves=MOVES)),
-    ('compare_moves', '同じ局面から1〜2手を比較し、当たり・外れた守り・両取り候補・玉の周りの変化を確認', obj(('position', 'move'), position=POS, move=STR, alternative=STR)),
-    ('mate', '手番側の詰みを範囲を限って探索。未確認は非詰みの証明ではない', obj(('position',), position=POS)),
-    ('material', '仮の手順の双方の捕獲と直後の駒を確認', obj(('position', 'moves'), position=POS, moves=MOVES)),
-    ('saved_analysis', '本譜plyに保存された形勢・印・候補（既定2件）と読み筋・詰み証明を取得', obj(('position',), position=POS, limit=INT)),
-    ('keypoints', '保存結果から抽出した要所と参照IDを取得', obj()),
-    ('played', '実戦手一覧を開始・終了手数で指定する（両端含む、最大30手ずつ、1手目から）', obj(start=INT, end=INT)),
-    ('knowledge', 'ルール・囲い・形勢判断・手筋の知識集を短い語句（複数は空白区切り）で検索', obj(('query',), query=STR)),
-    ('game_tags', '実戦で分類器が確認した戦法・囲い（確認手数つき）', obj()),
-    ('check_claims', '最大8主張を確認。winnerはexpectedに勝者ラベル、他はposition必須。piece: squareと{側,駒}又はnull、attack: from/toと真偽、move: move/field（取った駒等）と値、captures: movesと側別の駒別枚数、mate: 詰みを証明/既に詰み/未確認、evaluation: 優勢な側', obj(('claims',), claims={'type': 'array', 'items': CLAIM, 'maxItems': 8})),
-    ('check_draft', '出力JSONの下書き全体を文字列で渡す。既存TS検査で問題の節・項目・理由を返す', obj(('draft',), draft=STR)),
-]
+TOOLS = json.loads((SERVER / 'container/coach_tools_schema.json').read_text())
 
 
 class Halt(Exception):
@@ -122,7 +93,7 @@ def usage_and_cost(data, provider):
 
 def body(provider, history, final, max_tokens):
     model = PROVIDERS[provider][1]
-    tools = [{'type': 'function', 'name': n, 'description': d, 'parameters': p, 'strict': False} for n, d, p in TOOLS]
+    tools = [{'type': 'function', **tool, 'strict': False} for tool in TOOLS]
     choice = 'none' if final else 'auto'
     if provider == 'terra':
         return {'model': model, 'input': history[:], 'store': False, 'include': ['reasoning.encrypted_content'],

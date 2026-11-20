@@ -1,0 +1,247 @@
+import {env} from 'cloudflare:workers';
+import {runInDurableObject} from 'cloudflare:test';
+import {describe, expect, it, vi} from 'vitest';
+import {Coach, complete, parseCoach, references, signAnalysis, validateOutput, type CoachEnv} from '../src/coach';
+import type {CoachFacts} from '../src/coach-facts';
+import type {RunTools} from '../src/coach-tools';
+import type {Device} from '../src/index';
+
+const config: CoachEnv = {ENVIRONMENT: 'staging', COACH_PROVIDER: 'openai-responses-tools', COACH_API_KEY: 'test-key', COACH_SIGNING_KEY: 'signature'};
+const analysis = {initial: 'startpos', mode: 'precise' as const, moves: ['7g7f'],
+  results: [0, 1].map(ply => ({ply, score: null, candidates: [], mate: null}))};
+const payload = {requestId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', analysis, perspective: 'sente',
+  profile: {practice: ['四間飛車'], goal: '終盤を練習する'}, style: {focus: '総合', detail: 'ふつう'}, question: '一手目はどう見る？',
+  history: [{role: 'assistant', content: '参考文 7g7f'}]};
+const facts = (): CoachFacts => ({視点: 'あなたが先手、相手が後手', 実戦手: [[1, '▲7六歩(77)', '判定なし', '不明', '前進']],
+  終局: {勝敗: '不明'}, 参照: [{id: '0:position'}], 要所: [{手数: 1, 実戦手: {表記: '▲7六歩(77)'}, 実戦の続き: ['省略する詳細'], 指す前の参照: '0:position'}]});
+const refs = references(analysis.results);
+const safe = {sections: [{kind: 'facts', title: '序盤', text: '先に玉の位置を確認しましょう。', refs: ['0:position']}]};
+const done = (value = safe) => Response.json({status: 'completed', output: [message(value)]});
+const message = (value: unknown, phase = 'final_answer') => ({type: 'message', role: 'assistant', phase, content: [{type: 'output_text', text: JSON.stringify(value)}]});
+const call = (id: string, name = 'knowledge', args = '{"query":"入玉"}') => ({type: 'function_call', call_id: id, name, arguments: args});
+const reason = (id: string) => ({type: 'reasoning', id, summary: [], encrypted_content: `encrypted-${id}`});
+const turn = (...output: unknown[]) => Response.json({status: 'completed', output});
+const bodyOf = (init?: RequestInit) => JSON.parse(init!.body as string);
+const completeWith = (transport: typeof fetch, runTools: RunTools, signal?: AbortSignal, evidence = facts(), env = config) =>
+  complete(env, parseCoach(payload), refs, signal ?? new AbortController().signal, transport, evidence, runTools);
+const device = () => (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES.getByName(crypto.randomUUID());
+const url = 'https://device/v1/coach';
+async function post(id = 'device', prefer?: string) {
+  const {results, ...input} = analysis;
+  const proof = await signAnalysis('signature', id, 'job', input, results);
+  return new Request(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dev-Paid': '1', ...(prefer ? {Prefer: prefer} : {})},
+    body: JSON.stringify({...payload, proof})});
+}
+
+describe('Responsesの道具ループ', () => {
+  it('複数ターンを再生し、同一ターンの道具を一括で実行し下書きはWorkerで点検する', async () => {
+    const evidence = facts();
+    const r1 = reason('rs_1'), r2 = reason('rs_2');
+    const commentary = message('確認中', 'commentary');
+    const board = call('p', 'position', '{"position":{"ply":1}}');
+    const draft = {sections: [{...safe.sections[0], text: 'あなたの玉が9三にいます。', refs: ['1:position']}]};
+    const verify = call('draft', 'check_draft', JSON.stringify({draft: JSON.stringify(draft)}));
+    const bad = call('bad', 'position', 'not-json');
+    const knowledge = call('k');
+    const run = vi.fn<RunTools>().mockResolvedValueOnce([{'本譜の参照': '1:position', 盤面: {あなた: {玉: '5九', 盤上: {}, 持駒: {}}}}, {知識: []}])
+      .mockResolvedValueOnce([{エラー: '不明な道具です'}]);
+    const requests: any[] = [];
+    const transport: typeof fetch = async (url, init) => {
+      expect(String(url)).toBe('https://api.openai.com/v1/responses');
+      expect(init!.redirect).toBe('manual');
+      expect(new Headers(init!.headers).get('Authorization')).toBe('Bearer test-key');
+      const b = bodyOf(init);
+      requests.push(b);
+      expect(b).toMatchObject({store: false, include: ['reasoning.encrypted_content'], reasoning: {effort: 'high'}, model: 'gpt-6.1-terra', max_output_tokens: 4200});
+      expect(b).not.toHaveProperty('previous_response_id');
+      expect(b.tools).toHaveLength(17);
+      if (requests.length === 1) {
+        expect(b.input.map((i: {role: string}) => i.role)).toEqual(['system', 'user']);
+        const first = JSON.parse(b.input[1].content);
+        expect(first).toMatchObject({視点: evidence.視点, 終局: evidence.終局, 対局手数: 1, 要所: [{手数: 1, 実戦手: '▲7六歩(77)'}],
+          profile: payload.profile, style: payload.style, question: payload.question, history: [{role: 'assistant', content: '参考文 （指し手は参照で確認）'}]});
+        expect(b.input[1].content).not.toMatch(/実戦の続き|省略する詳細|盤面|7g7f/);
+        return turn(r1, commentary, verify, board, bad, knowledge);
+      }
+      expect(b.input.slice(2, 8)).toEqual([r1, commentary, verify, board, bad, knowledge]);
+      const outputs = b.input.filter((i: any) => i.type === 'function_call_output');
+      expect(outputs.slice(0, 4).map((i: any) => i.call_id)).toEqual(['draft', 'p', 'bad', 'k']);
+      expect(JSON.parse(outputs[0].output)).toEqual({accepted: false, issues: [{section: 0, field: 'text', code: 'contradicts'}]});
+      expect(JSON.parse(outputs[2].output)).toHaveProperty('エラー');
+      if (requests.length === 2) return turn(r2, call('next', 'unknown_tool'));
+      expect(b.input.slice(-3, -1)).toEqual([r2, call('next', 'unknown_tool')]);
+      expect(JSON.parse(outputs.at(-1).output)).toEqual({エラー: '不明な道具です'});
+      return turn(message('途中経過', 'commentary'), message({...safe, claims: []}));
+    };
+    const value = await completeWith(transport, run, undefined, evidence);
+    expect(validateOutput(value, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(run.mock.calls.map(([calls]) => calls.map(c => c.name))).toEqual([['position', 'knowledge'], ['unknown_tool']]);
+  });
+
+  it('複数呼び出しで30回を超えたら実行せず、未実行IDにも応答して道具なしで最終回答を得る', async () => {
+    let turns = 0;
+    const run = vi.fn<RunTools>().mockImplementation(async calls => calls.map(() => ({知識: []})));
+    const out = await completeWith(async (_, init) => {
+      const b = bodyOf(init);
+      turns++;
+      if (turns <= 2) {
+        expect(b.tool_choice).toBe('auto');
+        return turn(...Array.from({length: 16}, (_, i) => call(`${turns}-${i}`)));
+      }
+      expect(b.tool_choice).toBe('none');
+      expect(b.max_output_tokens).toBe(5400);
+      expect(b.input.at(-1).content).toContain('最終のJSON回答');
+      const outputs = b.input.filter((i: any) => i.type === 'function_call_output');
+      expect(outputs).toHaveLength(32);
+      expect(JSON.parse(outputs[30].output).エラー).toContain('調査上限');
+      expect(outputs[31].call_id).toBe('2-15');
+      return done();
+    }, run);
+    expect(out).toEqual(safe);
+    expect(turns).toBe(3);
+    expect(run.mock.calls.map(([calls]) => calls.length)).toEqual([16, 14]);
+  });
+
+  it('探索ターンの出力トークン切れでは推論だけを引き継ぎ最終回答を一度だけ求める', async () => {
+    const r = reason('incomplete');
+    let attempts = 0;
+    const result = await completeWith(async (_, init) => {
+      const b = bodyOf(init);
+      if (++attempts === 1) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, output: [r, message('途中')]});
+      expect(b.tool_choice).toBe('none');
+      expect(b.input.slice(2, -1)).toEqual([r]);
+      return done();
+    }, vi.fn());
+    expect(result).toEqual(safe);
+    expect(attempts).toBe(2);
+  });
+
+  it('提供元異常・拒否・応答サイズ上限を拒否し、ログに本文・引数・鍵を出さない', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      for (const [response, code] of [
+        [new Response('private-body', {status: 429}), 'provider_failed'],
+        [new Response(null, {status: 302, headers: {Location: 'https://another.example'}}), 'provider_failed'],
+        [new Response('x'.repeat(2_097_153)), 'invalid_output'],
+        [turn({type: 'message', content: [{type: 'refusal', refusal: 'private-refusal'}]}), 'invalid_output'],
+        [turn(call('same'), call('same')), 'invalid_output'],
+      ] as const) await expect(completeWith(async () => response, vi.fn())).rejects.toThrow(code);
+      expect(logs).toHaveBeenCalledTimes(5);
+      expect(JSON.parse(logs.mock.calls[0][0])).toMatchObject({event: 'coach_responses_tools', stage: 'provider_http', status: 429, failure: 'provider_failed', calls: 0, turns: 1});
+      expect(JSON.stringify(logs.mock.calls)).not.toMatch(/private-|test-key|四間飛車|入玉/);
+    } finally { logs.mockRestore(); }
+  });
+
+  it('精密コンテナの応答が欠けたら、追加の提供元ターンは実行しない', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('p')));
+    await expect(completeWith(transport, async () => [])).rejects.toThrow('provider_failed');
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it('期限間近では道具を呼ばない最終ターンに切り替える', async () => {
+    const run = vi.fn<RunTools>();
+    const send: typeof fetch = async (_, init) => {
+      expect(bodyOf(init).tool_choice).toBe('none');
+      return done();
+    };
+    await expect(complete(config, parseCoach(payload), refs, new AbortController().signal, send, facts(), run, Date.now() + 10_000))
+      .resolves.toEqual(safe);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('読み取り中の中止で応答ストリームを解放し、追加ターンを送らない', async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    let reading!: () => void;
+    const started = new Promise<void>(resolve => { reading = resolve; });
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream({pull() { reading(); }, cancel})));
+    const result = completeWith(transport, vi.fn(), controller.signal);
+    await started;
+    controller.abort();
+    await expect(result).rejects.toThrow();
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('仮の読み筋は符号照合に利用するが、公開参照は署名済みの形を維持する', async () => {
+    const evidence = facts();
+    const line = {id: '0:line:abc', 手数: 0, '仮の読み筋（実戦とは別）': [{表記: '▲2六歩(27)', 移動: '前進'}]};
+    const wanted = {sections: [{...safe.sections[0], text: '仮に▲2六歩と指す手もあります。'}]};
+    const transport = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('line', 'play_line', '{"position":{"ply":0},"moves":["▲2六歩"]}'))).mockResolvedValueOnce(done(wanted));
+    const value = await completeWith(transport, async () => [{参照: line}], undefined, evidence);
+    expect(validateOutput(value, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput({sections: [{...wanted.sections[0], refs: [line.id]}]}, refs, evidence)).toThrow('invalid_output');
+  });
+});
+
+describe('非同期・期限・精密コンテナ', () => {
+  it('実Device経由で同じ精密slotを使い、alarmの成功だけを計上する', async () => {
+    const stub = device();
+    await stub.fetch('https://device/register?hash=' + 'a'.repeat(64), {method: 'POST'});
+    await runInDurableObject(stub, async (instance: any) => {
+      Object.assign(instance.env, config);
+      const container = vi.fn(async (path: string, init: RequestInit) => {
+        const body = bodyOf(init);
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+        if (path.endsWith('/coach-facts')) return Response.json(facts());
+        expect(path).toBe('http://container/coach-tools');
+        expect(body.calls).toEqual([{name: 'game_tags', arguments: '{}'}]);
+        expect(body.game).toMatchObject({initial: analysis.initial, moves: analysis.moves, question: payload.question, tags: {対局側: {先手: {大分類: '未分類'}}}});
+        expect(JSON.stringify(body)).not.toMatch(/test-key|四間飛車|参考文/);
+        return Response.json({results: [{盤面からの分類: '未分類'}]});
+      });
+      const getByName = vi.fn(() => ({fetch: container}));
+      instance.env.PRECISE = {getByName};
+      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('tags', 'game_tags', '{}'))).mockResolvedValueOnce(done());
+      try {
+        expect((await instance.fetch(await post(instance.ctx.id.toString(), 'respond-async'))).status).toBe(202);
+        expect(send).not.toHaveBeenCalled();
+        await instance.alarm();
+        const current = await instance.fetch(new Request(url + '/' + payload.requestId, {headers: {'X-Dev-Paid': '1'}}));
+        expect(await current.json()).toMatchObject({status: 'completed', sections: [{references: [refs[0]]}], quota: {used: 1, reserved: 0}});
+        const slot = 'slot-' + parseInt(instance.ctx.id.toString().slice(0, 8), 16) % 2;
+        expect(getByName.mock.calls).toEqual([[slot], [slot]]);
+        expect(container).toHaveBeenCalledTimes(2);
+      } finally { send.mockRestore(); }
+    });
+  });
+
+  it.each(['DELETE', 'deadline'] as const)('%sで応答しない道具通信を打ち切り、回数を返す', async mode => {
+    await runInDurableObject(device(), async (_instance, state) => {
+      let entered!: () => void;
+      const toolStarted = new Promise<void>(resolve => { entered = resolve; });
+      const run = vi.fn((_input, _calls, signal: AbortSignal) => new Promise<unknown[]>(resolve => {
+        // Containerがsignalを無視してもループはここで待ち続けない。
+        signal.addEventListener('abort', () => { setTimeout(() => resolve([]), 1); }, {once: true});
+        entered();
+      }));
+      const c = new Coach(state.storage, {...config, COACH_TIMEOUT_MS: mode === 'deadline' ? '250' : '20000'}, 'device', () => true,
+        async () => facts(), undefined, run);
+      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('p')));
+      try {
+        const generation = c.fetch(await post());
+        if (mode === 'DELETE') {
+          await toolStarted;
+          expect((await c.fetch(new Request(url + '/' + payload.requestId, {method: 'DELETE'}))).status).toBe(200);
+        }
+        expect((await generation).status).toBe(mode === 'DELETE' ? 409 : 504);
+        expect(c.quota()).toMatchObject({used: 0, reserved: 0});
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(run.mock.calls[0][2].aborted).toBe(true);
+      } finally { send.mockRestore(); }
+    });
+  });
+
+  it('最終出力を既存検査で拒否し、回数は増やさない', async () => {
+    await runInDurableObject(device(), async (_instance, state) => {
+      const coach = new Coach(state.storage, config, 'device', () => true, async () => facts(), undefined, async () => []);
+      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(done({sections: [{...safe.sections[0], refs: ['0:line:fake']}]}));
+      try {
+        const out = await coach.fetch(await post());
+        expect(out.status, await out.clone().text()).toBe(502);
+        expect(await out.json()).toMatchObject({error: 'invalid_output', quota: {used: 0, reserved: 0}});
+      } finally { send.mockRestore(); }
+    });
+  });
+});
