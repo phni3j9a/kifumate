@@ -640,7 +640,7 @@ function setPly(p) {
   renderPly();
   if (left && left.line.length > 1) {
     S.lastBr = left;
-    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { S.ply = left.base; S.br = left; clearSel(); startRt(); renderPly(); } } });
+    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { stopRt(); S.ply = left.base; S.br = left; clearSel(); startRt(); renderPly(); } } });
   }
 }
 function exitBranch() {

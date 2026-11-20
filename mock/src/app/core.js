@@ -100,7 +100,10 @@ function show(anim, restore) {
     el.classList.add('in');
   }
 }
-function push(p) { closeLayers(); keepScroll(); NAV.push(p); show(true); }
+function push(p) {
+  if (topNav()?.t === 'game') stopRt();
+  closeLayers(); keepScroll(); NAV.push(p); show(true);
+}
 /* Back undoes the most recent thing first: an open sheet or the coach, then a branch on the game
    screen, and only then the screen itself. */
 function back() {

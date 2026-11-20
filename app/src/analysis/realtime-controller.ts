@@ -41,9 +41,14 @@ export class RealtimeController {
   private revision = 0;
   private epoch = 0;
   private creating: Promise<void> | null = null;
+  private updating: Promise<void> | null = null;
+  private offerPlan?: () => void;
   private resuming: Promise<void> | null = null;
   private stopping: Promise<void> = Promise.resolve();
   private pendingStop = new Set<string>();
+  private retryingStops: Promise<void> | null = null;
+  private updateTimer: ReturnType<typeof setTimeout> | undefined;
+  private nextUpdateAt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private activityAt = 0;
@@ -51,8 +56,10 @@ export class RealtimeController {
     private api: API,
     private pollMs = 350,
     private deepPollMs = 1000,
+    private updateIntervalMs = 1100, // 1分60回の書き込み上限にPOST分も残す。
   ) {}
   private clearTimers() {
+    clearTimeout(this.updateTimer);
     clearTimeout(this.timer);
     clearTimeout(this.idleTimer);
   }
@@ -93,7 +100,7 @@ export class RealtimeController {
     if (this.snapshot.hold) void this.stop();
     this.setPosition(input);
   }
-  startReading(input: RealtimeInput) {
+  startReading(input: RealtimeInput, offerPlan?: () => void) {
     if (
       !this.visible ||
       !this.foreground ||
@@ -102,6 +109,7 @@ export class RealtimeController {
     )
       return;
     if (this.desired) this.leaveBranch();
+    this.offerPlan = this.snapshot.paid === null ? offerPlan : undefined;
     this.emit({ hold: true, status: "preparing" });
     this.setPosition({ ...input, hold: true });
     if (this.snapshot.paid === null) void this.resume();
@@ -109,6 +117,7 @@ export class RealtimeController {
   showMain(input: RealtimeInput) {
     if (!this.snapshot.hold) {
       if (this.desired) this.leaveBranch();
+      if (this.pendingStop.size) void this.retryStops();
       return;
     }
     if (this.snapshot.positionKey !== positionKey(input))
@@ -148,8 +157,18 @@ export class RealtimeController {
       // 通信断でも停止の意思を残し、前面復帰・次の操作で再試行する。
     }
   }
+  private retryStops() {
+    return (this.retryingStops ??= this.stopping
+      .then(async () => {
+        for (const id of this.pendingStop) await this.remove(id);
+      })
+      .finally(() => {
+        this.retryingStops = null;
+      }));
+  }
   async stop() {
     this.epoch++;
+    this.offerPlan = undefined;
     this.clearTimers();
     const id = this.session;
     this.session = null;
@@ -160,11 +179,11 @@ export class RealtimeController {
       searching: false,
       status: this.snapshot.enabled ? "idle" : "off",
     });
-    const creating = this.creating;
     this.stopping = Promise.all([
       this.stopping,
       id ? this.remove(id) : Promise.resolve(),
-      creating,
+      this.creating,
+      this.updating,
     ]).then(() => {});
     await this.stopping;
   }
@@ -174,7 +193,7 @@ export class RealtimeController {
     this.resuming = (async () => {
       await this.stopping;
       await this.creating;
-      for (const id of this.pendingStop) await this.remove(id);
+      if (this.pendingStop.size) await this.retryStops();
       if (epoch !== this.epoch || !this.visible || !this.foreground) return;
       const reply = await this.api.realtime();
       // 離脱後に届いたGETでも、残っているセッションは回収して止める。
@@ -191,6 +210,7 @@ export class RealtimeController {
         this.fail(new ApiError(403, "paid_required"));
         return;
       }
+      this.offerPlan = undefined;
       this.emit({
         paid: reply.paid ?? false,
         quota: reply.quota,
@@ -224,10 +244,11 @@ export class RealtimeController {
     return this.resuming;
   }
   private fail(error: unknown) {
-    if (error instanceof ApiError && error.code === "stale_sequence") return;
     if (error instanceof ApiError && error.status === 403) {
+      const offerPlan = this.offerPlan;
       this.emit({ paid: false, result: null, status: "off" });
       void this.stop();
+      offerPlan?.();
       return;
     }
     if (
@@ -253,13 +274,14 @@ export class RealtimeController {
     const epoch = this.epoch;
     await this.stopping;
     if (epoch !== this.epoch || !this.allowed || !this.desired) return;
-    for (const id of this.pendingStop) await this.remove(id);
-    if (epoch !== this.epoch) return;
+    if (this.pendingStop.size) await this.retryStops();
+    if (epoch !== this.epoch || !this.allowed || !this.desired || this.resuming)
+      return;
     if (this.pendingStop.size) {
       this.emit({ status: "offline" });
       return;
     }
-    if (this.creating) return; // POST中の連続着手は最新の局面だけ、ID取得直後にPUTする。
+    if (this.creating || this.updating) return;
     const revision = this.revision;
     const input = this.desired;
     if (!this.session) {
@@ -300,25 +322,37 @@ export class RealtimeController {
         void this.send();
       return;
     }
-    await this.stopping;
-    if (epoch !== this.epoch || !this.allowed) return;
-    if (this.pendingStop.size) {
-      this.emit({ status: "offline" });
+    const wait = this.nextUpdateAt - Date.now();
+    if (wait > 0) {
+      clearTimeout(this.updateTimer);
+      this.updateTimer = setTimeout(() => void this.send(), wait);
       return;
     }
     const id = this.session;
-    if (!id) return;
     const sequence = ++this.sequence;
     this.activityAt = Date.now();
+    this.nextUpdateAt = this.activityAt + this.updateIntervalMs;
     this.emit({
-      status: this.snapshot.status === "paused" ? "preparing" : "analyzing",
+      status:
+        this.snapshot.status === "paused" ||
+        this.snapshot.status === "preparing"
+          ? "preparing"
+          : "analyzing",
     });
-    try {
-      const reply = await this.api.updateRealtime(id, input, sequence);
-      this.receive(reply, epoch, revision, sequence);
-    } catch (error) {
-      if (epoch === this.epoch && revision === this.revision) this.fail(error);
-    }
+    this.updating = this.api
+      .updateRealtime(id, input, sequence)
+      .then((reply) => this.receive(reply, epoch, revision, sequence))
+      .catch((error) => {
+        if (epoch !== this.epoch) return;
+        // 新しい局面が待っていても、送信に失敗したセッションは残さない。
+        this.session = null;
+        this.stopping = this.remove(id);
+        this.fail(error);
+      });
+    await this.updating;
+    this.updating = null;
+    if (epoch === this.epoch && this.session && revision !== this.revision)
+      void this.send();
   }
   private receive(
     reply: RealtimeReply,

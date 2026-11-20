@@ -107,6 +107,18 @@ const fs = require('fs');
   await has('リアルタイム解析は、有料プランで使えます');
   await act('dlgno'); await ctl('.pg-ctl [data-plan="paid"]');
 
+  await act('deepread'); await act('gmenu'); await act('ginfo');
+  await page.clock.fastForward(300001);
+  await act('back'); await has('深く読む', '対局情報から戻っても深読みは再開しない'); await hasNot('深く読んだ結果'); await hasNot('休止中');
+
+  await jump('branch'); await page.clock.fastForward(1101);
+  await act('playline'); await has('分岐 2手目');
+  await page.locator('#scr [data-b="graph"]').click();
+  await act('deepread'); await has('終了'); await act('toastact');
+  await has('分岐 2手目'); await hasNot('深く読んだ結果');
+  await page.clock.fastForward(30001);
+  ok(await page.getByRole('button', { name: 'リアルタイム解析 オン、休止中', exact: true }).count() === 1, '深読み中に復元した分岐は30秒で休止する');
+
   // 6. result corrected to a draw: no leftover mate note, not counted in the win rate
   await jump('game'); await act('gmenu'); await act('ginfo'); await act('resedit'); await act('resset', 'd');
   await click('#scr .shh [data-a="closesheet"]'); await has('85手・引き分け'); await has('手で修正');

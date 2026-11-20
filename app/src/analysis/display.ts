@@ -1,4 +1,5 @@
 import { moveText } from "../core/format";
+import type { Branch } from "../core/kif";
 import {
   Color,
   formatMove,
@@ -7,6 +8,7 @@ import {
   type ImmutablePosition,
   type Record as ShogiRecord,
 } from "tsshogi";
+import type { RealtimeInput } from "./realtime-types";
 import type { AnalysisResult, Input, Mode, Score } from "./types";
 export const cp = (s?: Score | null): number | null =>
   !s ? null : s.kind === "cp" ? s.value : s.winner === "gote" ? -3000 : 3000;
@@ -28,6 +30,27 @@ export function analysisInput(record: ShogiRecord, mode: Mode): Input {
       .filter((n) => n.move instanceof Move)
       .map((n) => (n.move as Move).usi),
     mode,
+  };
+}
+export function realtimeInput(
+  record: ShogiRecord,
+  ply: number,
+  branch: Branch | null,
+): RealtimeInput {
+  const main = record.moves
+    .filter((n) => n.move instanceof Move)
+    .slice(0, branch?.base ?? ply);
+  const variation = branch?.moves.slice(0, branch.at) ?? [];
+  const skip = Math.max(0, main.length + variation.length - 512);
+  return {
+    initial:
+      (skip > main.length
+        ? branch?.positions[skip - main.length]?.sfen
+        : main[skip - 1]?.sfen) ?? record.initialPosition.sfen,
+    moves: [
+      ...main.slice(skip).map((n) => (n.move as Move).usi),
+      ...variation.slice(Math.max(0, skip - main.length)).map((m) => m.usi),
+    ],
   };
 }
 export type Mark = "悪手" | "疑問手" | "好手" | "詰み逃し";

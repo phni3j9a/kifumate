@@ -48,6 +48,7 @@ import { positionKey } from "../../analysis/realtime-types";
 import {
   DeepReadButton,
   RealtimeToggle,
+  realtimeInfo,
 } from "../../components/realtime-controls";
 import {
   candidateRows,
@@ -58,6 +59,7 @@ import {
   percent,
   phaseRanges,
   pointsFor,
+  realtimeInput,
   scoreText,
   startPly,
   signed,
@@ -161,16 +163,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const rt = useRealtime();
   const rtController = rt.controller;
   const isBranch = !!branch;
-  const rtInput = record && {
-    initial: record.initialPosition.sfen,
-    moves: [
-      ...record.moves
-        .filter((n) => n.move instanceof Move)
-        .slice(0, branch?.base ?? ply)
-        .map((n) => (n.move as Move).usi),
-      ...(branch?.moves.slice(0, branch.at).map((m) => m.usi) ?? []),
-    ],
-  };
+  const rtInput = record && realtimeInput(record, ply, branch);
   const rtKey = rtInput ? positionKey(rtInput) : null;
   const inputRef = useRef(rtInput);
   inputRef.current = rtInput;
@@ -771,7 +764,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           ) : (
             <DeepReadButton
               state={rt}
-              start={() => rtInput && rtController.startReading(rtInput)}
+              start={() =>
+                rtInput && rtController.startReading(rtInput, realtimeInfo)
+              }
               end={() => void rtController.stop()}
             />
           )}

@@ -1381,7 +1381,10 @@ function show(anim, restore) {
     el.classList.add('in');
   }
 }
-function push(p) { closeLayers(); keepScroll(); NAV.push(p); show(true); }
+function push(p) {
+  if (topNav()?.t === 'game') stopRt();
+  closeLayers(); keepScroll(); NAV.push(p); show(true);
+}
 /* Back undoes the most recent thing first: an open sheet or the coach, then a branch on the game
    screen, and only then the screen itself. */
 function back() {
@@ -2063,7 +2066,7 @@ function setPly(p) {
   renderPly();
   if (left && left.line.length > 1) {
     S.lastBr = left;
-    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { S.ply = left.base; S.br = left; clearSel(); startRt(); renderPly(); } } });
+    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { stopRt(); S.ply = left.base; S.br = left; clearSel(); startRt(); renderPly(); } } });
   }
 }
 function exitBranch() {

@@ -155,12 +155,21 @@ test("グラフで本譜へ飛ぶと解析を停止し、2手の分岐を一度�
   await graph.click();
   await expect.poll(() => fake.rt.stops).toBe(1);
   const undo = button(page, "分岐に戻る");
+  await button(page, "深く読む").click();
+  await expect.poll(() => fake.rt.requests.at(-1)?.input.hold).toBe(true);
   await undo.click();
+  await expect.poll(() => fake.rt.stops).toBe(2);
   await expect(
     page.getByRole("img", { name: "分岐2手目の盤面" }),
   ).toBeVisible();
   await expect(undo).toHaveCount(0);
-  await expect.poll(() => fake.rt.requests.at(-1)?.method).toBe("POST");
+  await expect
+    .poll(() => fake.rt.requests.at(-1))
+    .toMatchObject({
+      method: "POST",
+      input: { moves: ["2g2f", "3c3d"] },
+    });
+  expect(fake.rt.requests.at(-1)?.input.hold).toBeUndefined();
   await button(page, "1手戻る").click();
   await expect(
     page.getByRole("img", { name: "分岐1手目の盤面" }),
@@ -255,6 +264,46 @@ test("本譜では深く読むまで送信せず、結果・矢印だけを更�
   expect(await graph.innerHTML()).toBe(savedGraph);
   expect(fake.rt.requests).toHaveLength(4);
   expect(fake.errors).toEqual([]);
+});
+
+test("権利確認を待たずに深く読むを押しても、無料と分かれば案内が開く", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  fake.paid = false;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/v1/entitlements", async (route) => {
+    if (route.request().method() === "GET") await pending;
+    await route.fallback();
+  });
+  await open(page);
+  await button(page, "深く読む").click();
+  await expect(button(page, "終了")).toBeVisible();
+  release();
+  await expect(
+    page.getByText("リアルタイム解析は、有料プランで使えます"),
+  ).toBeVisible();
+  expect(fake.rt.requests).toHaveLength(0);
+});
+
+test("未解析の本譜で月上限に達しても更新日ボタンはリアルタイム解析だけ", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  fake.rt.status = "limit";
+  fake.rt.remainingMs = 0;
+  fake.rt.result = null;
+  await open(page);
+  await button(page, "深く読む").click();
+  await expect(page.getByText("今月のリアルタイム解析は残り0分")).toBeVisible();
+  await expect(button(page, "解析する")).toBeVisible();
+  const reset = button(page, "更新日");
+  await expect(reset).toHaveCount(1);
+  await reset.click();
+  await expect(page.getByText(/次の更新：2026\/12\/1 0:00:00/)).toBeVisible();
 });
 
 test("深く読むは無料では案内し、背景・画面離脱で終了して復帰時に再開しない", async ({

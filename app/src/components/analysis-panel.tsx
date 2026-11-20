@@ -513,10 +513,10 @@ export function AnalysisPanel({
             </View>
           ) : running ? null : (
             <Pressable
-              disabled={!showReset}
-              accessibilityRole={showReset ? "button" : undefined}
-              accessibilityLabel={showReset ? "更新日" : undefined}
-              onPress={showReset}
+              disabled={!branch || !showReset}
+              accessibilityRole={branch && showReset ? "button" : undefined}
+              accessibilityLabel={branch && showReset ? "更新日" : undefined}
+              onPress={branch ? showReset : undefined}
             >
               <Text
                 numberOfLines={running && offline ? 2 : 1}
