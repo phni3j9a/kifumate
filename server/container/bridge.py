@@ -22,6 +22,7 @@ MAX_TOOL_CALLS = 30
 MAX_TOOL_ARGS = 16_000
 MAX_TOOL_RESULT = 24_000
 MAX_TOOL_BATCH_SECONDS = 3
+TOOL_READ_SECONDS = 5
 MAX_MATE_SECONDS = 0.75
 TOOL_SCHEMAS = {tool['name']: tool['parameters'] for tool in json.loads(Path(__file__).with_name('coach_tools_schema.json').read_text())}
 tool_slots = threading.BoundedSemaphore(2)
@@ -104,7 +105,7 @@ def prepare(data):
     return cshogi.Board(target or board.sfen()), initial, moves, mode, ply
 
 
-def coach_facts(game):
+def coach_facts(game, *, include_mate_replies=False):
     if not isinstance(game, dict) or set(game) - {'initial', 'moves', 'results', 'perspective', 'question', 'tags'}:
         raise InvalidInput()
     if 'question' in game and (not isinstance(game['question'], str) or len(game['question']) > 1000):
@@ -125,7 +126,14 @@ def coach_facts(game):
                 not isinstance(m, str) or not MOVE.fullmatch(m) for m in pv
             ) or source is mate and not pv:
                 raise InvalidInput()
-    return build_facts(game)
+        if include_mate_replies and mate is not None:
+            branches = mate.get('branches', [])
+            if not isinstance(branches, list) or len(branches) > 600 or any(
+                not isinstance(b, dict) or not all(isinstance(b.get(k), str) and MOVE.fullmatch(b[k]) for k in ('reply', 'mate'))
+                for b in branches
+            ):
+                raise InvalidInput()
+    return build_facts(game, include_mate_replies=include_mate_replies)
 
 
 def tool_arguments(value, schema):
@@ -437,6 +445,24 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # 局面変更でクライアントが古いHTTP要求を破棄した。
 
+    def read_tool_body(self, length):
+        deadline = time.monotonic() + TOOL_READ_SECONDS
+        previous = self.connection.gettimeout()
+        body = bytearray()
+        try:
+            while len(body) < length:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError()
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(65_536, length - len(body)))
+                if not chunk:
+                    raise InvalidInput()
+                body.extend(chunk)
+        finally:
+            self.connection.settimeout(previous)
+        return json.loads(body)
+
     def do_POST(self):
         global engine
         if self.path not in ("/analyze", "/realtime", "/coach-facts", "/coach-tools"):
@@ -451,13 +477,18 @@ class Handler(BaseHTTPRequestHandler):
                     self.close_connection = True
                     return self.respond(503, {"error": "tools_busy"})
                 try:
-                    data = json.loads(self.rfile.read(length))
-                    return self.respond(200, run_coach_tools(data))
+                    data = self.read_tool_body(length)
+                except TimeoutError:
+                    self.close_connection = True
+                    status, result = 408, {"error": "input_timeout"}
+                else:
+                    status, result = 200, run_coach_tools(data)
                 finally:
                     tool_slots.release()
+                return self.respond(status, result)
             data = json.loads(self.rfile.read(length))
             if self.path == "/coach-facts":
-                return self.respond(200, coach_facts(data))
+                return self.respond(200, coach_facts(data, include_mate_replies=True))
             cancel = None
             if self.path == '/realtime':
                 if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:

@@ -121,6 +121,26 @@ describe('出力の手数・KIF照合', () => {
       expect(() => validateOutput(advice(wrong), all, sample)).toThrow('invalid_output');
     }
   });
+  it('保存済み候補は、その参照か起点を根拠にする節だけで引用できる', () => {
+    const alternative = section('ここで▲2六歩と指せます。');
+    expect(() => validateOutput(alternative, all, sample)).toThrow('invalid_output');
+    for (const id of ['0:position', '0:candidate:1']) {
+      const atStart = {...sample, 参照: [...sample.参照, {id: '0:position'}]};
+      expect(() => validateOutput({sections: [{...alternative.sections[0], refs: [id]}]}, all, atStart)).not.toThrow();
+    }
+  });
+  it('代表以外の証明済み応手を引用しても、公開するのは既存の詰み参照だけ', () => {
+    const mateId = '0:mate';
+    const proofRefs = references([{...results[0], mate: {pv: ['S*8d', '8c8d', 'G*8c']}}, results[1]]);
+    const internal = {...sample, 参照: [...sample.参照, {id: mateId, '仮の読み筋（実戦とは別）': [{表記: '▲8四銀打'}, {表記: '△同歩(83)'}, {表記: '▲8三金打'}]}],
+      詰みの別応手: {[mateId]: [[{表記: '△9二玉(93)'}, {表記: '▲8二金打'}]]}};
+    const answer = section('▲8四銀打に△9二玉なら、▲8二金打で詰みです。');
+    expect(() => validateOutput(answer, proofRefs, internal)).toThrow('invalid_output');
+    answer.sections[0].refs = [mateId];
+    expect(validateOutput(answer, proofRefs, internal).sections[0].references).toEqual(proofRefs.filter(r => r.id === mateId));
+    expect(JSON.parse(messages(parseCoach({requestId: crypto.randomUUID(), analysis, perspective: 'sente',
+      profile: {practice: [], goal: ''}, style: {focus: '総合', detail: 'ふつう'}, history: []}), proofRefs, internal)[1].content).facts).not.toHaveProperty('詰みの別応手');
+  });
   it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
     const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
     expect(() => validateOutput(output('2:position', '2手目 △3四歩。相手は歩を進めました。相手が有利です。'), all, sample)).not.toThrow();

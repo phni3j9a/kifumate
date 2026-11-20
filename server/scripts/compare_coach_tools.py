@@ -149,7 +149,7 @@ def bridge_program(directory):
 def prepare(payload, bridge):
     game = {**payload['analysis'], 'perspective': payload['perspective'], 'question': payload.get('question')}
     game['tags'] = bridge('classify', initial=cshogi.STARTING_SFEN if game['initial'] == 'startpos' else game['initial'], moves=game['moves'])
-    facts = build_facts(game)
+    facts = build_facts(game, include_mate_replies=True)
     profile = payload['profile']
     user = {'視点': facts['視点'], '終局': facts['終局'], '対局手数': len(game['moves']), '要所': light_keys(facts),
             'profile': {'practice': [prose(p) for p in profile.get('practice', [])], 'goal': prose(profile.get('goal', ''))},

@@ -113,17 +113,18 @@ function consultation(input: CoachInput) {
   };
 }
 export function messages(input: CoachInput, _refs: Reference[], facts?: CoachFacts) {
+  const {詰みの別応手: _, ...modelFacts} = facts ?? {};
   return [{role: 'system', content: SYSTEM_PROMPT}, {role: 'user', content: JSON.stringify({
-    facts: facts ?? {視点: input.perspective === 'observer' ? '観戦' : input.perspective === 'sente' ? 'あなたが先手、相手が後手' : '相手が先手、あなたが後手', 参照: _refs.map(r => ({id: r.id}))},
+    facts: facts ? modelFacts : {視点: input.perspective === 'observer' ? '観戦' : input.perspective === 'sente' ? 'あなたが先手、相手が後手' : '相手が先手、あなたが後手', 参照: _refs.map(r => ({id: r.id}))},
     perspective: input.perspective, ...consultation(input),
   })}];
 }
-function toolsMessages(input: CoachInput, facts: CoachFacts) {
-  return [{role: 'system', content: toolsPrompt}, {role: 'user', content: JSON.stringify({
+function toolsContext(input: CoachInput, facts: CoachFacts) {
+  return {
     視点: facts.視点, 終局: facts.終局, 対局手数: input.input.moves.length,
     要所: (facts.要所 ?? []).map(({実戦手, 実戦の続き: _, ...key}) => ({...key, 実戦手: 実戦手.表記})),
     ...consultation(input),
-  })}];
+  };
 }
 function setting(value: string | undefined, fallback: number, max: number) {
   const n = Number(value ?? fallback); return Number.isSafeInteger(n) && n > 0 && n <= max ? n : fallback;
@@ -151,7 +152,7 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
     if (!facts || !runTools) throw new ApiError(502, 'facts_unavailable');
     const value = await responsesWithTools({url: url.toString(), key: env.COACH_API_KEY, model: env.COACH_MODEL ?? 'gpt-6.1-terra',
       effort: env.COACH_REASONING_EFFORT ?? 'high', maxTokens: setting(env.COACH_MAX_TOKENS, 5400, 65536), deadline,
-      reserveMs: Math.min(30_000, timeoutMs(env) / 4), input: toolsMessages(input, facts),
+      reserveMs: Math.min(30_000, timeoutMs(env) / 4), prompt: toolsPrompt, userContext: toolsContext(input, facts),
       facts, signal, transport, runTools, inspect: (raw, evidence) => {
         try { return inspectDraft(JSON.parse(raw), refs, evidence); }
         catch { return {accepted: false, issues: [{code: 'invalid_json'}]}; }

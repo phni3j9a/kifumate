@@ -9,6 +9,7 @@ const MAX_ARGS_BYTES = 16_000;
 const MAX_RESULT_BYTES = 24_000;
 const INPUT_BUDGET = 240_000;
 const OUTPUT_BUDGET = 24_000;
+const FINAL_RESERVE_TOKENS = 5_400;
 const MAX_RESPONSE_BYTES = 2_097_152;
 const encoder = new TextEncoder();
 const bytes = (s: string) => encoder.encode(s).byteLength;
@@ -62,24 +63,32 @@ function object(value: unknown): value is Record<string, any> {
 
 export async function responsesWithTools(options: {
   url: string; key: string; model: string; effort: string; maxTokens: number; deadline: number; reserveMs: number;
-  input: {role: string; content: string}[]; facts: CoachFacts; signal: AbortSignal;
+  prompt: string; userContext: {history: unknown[]; [field: string]: unknown}; facts: CoachFacts; signal: AbortSignal;
   transport: typeof fetch; runTools: RunTools; inspect: (draft: string, facts: CoachFacts) => unknown;
 }): Promise<unknown> {
   const {signal, facts} = options;
-  let history: unknown[] = [...options.input];
+  const prior = [...options.userContext.history];
+  const initialHistory = () => [{role: 'system', content: options.prompt},
+    {role: 'user', content: JSON.stringify({...options.userContext, history: prior})}];
+  let history: unknown[] = initialHistory();
   const seen = new Set<string>();
   const started = Date.now();
   let turns = 0, calls = 0, stage = 'provider_fetch', status: number | undefined, failure: string | undefined;
   let force = false, inputUsed = 0, outputUsed = 0, replayTokens = 0;
-  const finalTokens = Math.min(options.maxTokens, OUTPUT_BUDGET);
+  const finalReserve = Math.min(options.maxTokens, FINAL_RESERVE_TOKENS);
   const researchTokens = Math.min(4200, options.maxTokens);
   const request = (items: unknown[], final: boolean) => JSON.stringify({model: options.model,
     input: final ? [...items, {role: 'user', content: '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'}] : items,
     store: false, include: ['reasoning.encrypted_content'], service_tier: 'default', reasoning: {effort: options.effort},
-    max_output_tokens: final ? finalTokens : researchTokens, text: {format: {type: 'json_object'}}, tools, tool_choice: final ? 'none' : 'auto'});
+    max_output_tokens: final ? Math.min(options.maxTokens, OUTPUT_BUDGET - outputUsed) : researchTokens, text: {format: {type: 'json_object'}}, tools, tool_choice: final ? 'none' : 'auto'});
   // shortcut: UTF-8バイト数＋APIの整形余裕＋再生する応答トークンで安全側に予約。実測とずれる場合は提供元のカウントAPIを検討する。
   const inputEstimate = (body: string, replay: number) => bytes(body) + 4096 + replay;
   try {
+    // 初回の最終回答すら収まらないときだけ、参考履歴の最古の項目を落とす。
+    while (prior.length && inputEstimate(request(history, true), 0) > INPUT_BUDGET) {
+      prior.shift();
+      history = initialHistory();
+    }
     for (;;) {
       signal.throwIfAborted();
       const remaining = options.deadline - Date.now();
@@ -89,10 +98,10 @@ export async function responsesWithTools(options: {
       const researchBody = request(history, false);
       const researchInput = inputEstimate(researchBody, replayTokens);
       const final = force || calls >= TOOL_LIMIT || remaining <= options.reserveMs ||
-        inputUsed + researchInput + finalInput > INPUT_BUDGET || outputUsed + researchTokens + finalTokens > OUTPUT_BUDGET;
+        inputUsed + researchInput + finalInput > INPUT_BUDGET || outputUsed + researchTokens + finalReserve > OUTPUT_BUDGET;
       const body = final ? finalBody : researchBody;
       const reservedInput = final ? finalInput : researchInput;
-      const reservedOutput = final ? finalTokens : researchTokens;
+      const reservedOutput = final ? Math.min(options.maxTokens, OUTPUT_BUDGET - outputUsed) : researchTokens;
       stage = 'provider_fetch'; status = undefined;
       if (inputUsed + reservedInput > INPUT_BUDGET || outputUsed + reservedOutput > OUTPUT_BUDGET) throw new ApiError(502, 'provider_failed');
       turns++;

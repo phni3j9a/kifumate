@@ -9,6 +9,7 @@ export interface CoachFacts {
   参照: Record<string, any>[];
   要所?: (Record<string, any> & {実戦手: {表記: string}})[];
   仮の手順?: Record<string, any>[];
+  詰みの別応手?: Record<string, Record<string, any>[][]>;
 }
 
 const ACTORS = 'あなた|相手|先手|後手';
@@ -53,14 +54,23 @@ function linesFor(facts: CoachFacts | undefined, ids: string[]) {
   })) ?? [];
 }
 
+function variations(facts: CoachFacts | undefined, ids: string[]) {
+  if (!facts) return [];
+  const shown = facts.参照.filter(r => /^(\d+):(?:mate|candidate:\d+)$/.test(r.id) &&
+    (ids.includes(r.id) || ids.includes(`${r.id.split(':')[0]}:position`)));
+  return [
+    ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
+    ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),
+  ];
+}
+
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts', ids: string[] = []): string | undefined {
   text = text.normalize('NFKC');
   if (USI.test(text)) return 'usi';
   if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
   if (kind === 'facts') {
-    const lines = [...(facts?.参照 ?? []), ...linesFor(facts, ids)];
-    const proven = [...played.map(r => r[1]), ...lines.flatMap(r => (r[PV] ?? []).map((m: any) => m['表記']))];
+    const proven = [...played.map(r => r[1]), ...variations(facts, ids).map(m => m.表記)];
     const move = new RegExp(KIF, 'g');
     for (const mention of text.matchAll(move)) {
       if (!proven.some(source => matchesMove(mention, source))) return 'unknown_move';
@@ -123,9 +133,8 @@ function contradictsDirection(clause: string, refs: Record<string, any>[], facts
   const withVerb = new RegExp(`${KIF}\\s*と\\s*(引[いきく]|上が|上げ|前進|後退|横移動)`, 'g');
   if (!withVerb.test(clause)) return false;
   withVerb.lastIndex = 0;
-  const hypothetical = linesFor(facts, refs.map(r => r.id));
-  const moves: [string, Direction | undefined][] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
-    ...[...refs, ...hypothetical].flatMap(r => (r[PV] ?? []).map((m: any) => [m['表記'], m['移動']]))];
+  const moves: (readonly [string, Direction | undefined])[] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
+    ...variations(facts, refs.map(r => r.id)).map((m): [string, Direction | undefined] => [m.表記, m.移動])];
   for (const m of clause.matchAll(withVerb)) {
     if (!m[1]) continue;
     const expected = /^(引|後退)/.test(m[6]) ? '後退' : m[6] === '横移動' ? '横移動' : '前進';

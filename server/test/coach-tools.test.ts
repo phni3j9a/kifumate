@@ -145,6 +145,42 @@ describe('Responsesの道具ループ', () => {
     expect(attempts).toBe(4);
   });
 
+  it('初回の入力枠を超える参考履歴は古いものだけ省き、質問と新しい履歴を残す', async () => {
+    const history = Array.from({length: 20}, (_, i) => ({role: 'user', content: String(i) + 'あ'.repeat(4000 - String(i).length)}));
+    const run = vi.fn<RunTools>();
+    const send = vi.fn<typeof fetch>().mockImplementation(async (_, init) => {
+      const b = bodyOf(init), user = JSON.parse(b.input[1].content);
+      expect(b.input[1].role).toBe('user');
+      expect(b.tool_choice).toBe('none');
+      expect(user.question).toBe(payload.question);
+      expect(user.history.length).toBeGreaterThan(0);
+      expect(user.history.length).toBeLessThan(20);
+      expect(user.history).toEqual(history.slice(-user.history.length));
+      return done();
+    });
+    await expect(complete(config, parseCoach({...payload, history}), refs, new AbortController().signal, send, facts(), run)).resolves.toEqual(safe);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('出力上限32768でも初回は調査し、最終ターンだけ残りの出力枠まで使える', async () => {
+    const run = vi.fn<RunTools>().mockResolvedValue([{知識: []}]);
+    let attempts = 0;
+    await expect(completeWith(async (_, init) => {
+      const b = bodyOf(init);
+      if (++attempts === 1) {
+        expect(b.tool_choice).toBe('auto');
+        return Response.json({status: 'completed', output: [call('first')], usage: {input_tokens: 1000, output_tokens: 100}});
+      }
+      if (attempts === 2) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, usage: {input_tokens: 2000, output_tokens: 4200}});
+      expect(b.tool_choice).toBe('none');
+      expect(b.max_output_tokens).toBe(24_000 - 4200 - 100);
+      return done();
+    }, run, undefined, facts(), {...config, COACH_MAX_TOKENS: '32768'})).resolves.toEqual(safe);
+    expect(attempts).toBe(3);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it('提供元異常・拒否・応答サイズ上限を拒否し、ログに本文・引数・鍵を出さない', async () => {
     const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
