@@ -2,10 +2,16 @@ import { useEntitlements } from "../entitlements/provider";
 import { router } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 import { useAnalysis } from "../analysis/provider";
+import { useCoach } from "../coach/provider";
 import { colors, font, line, radius, shadow } from "./theme";
 import { Button } from "./ui";
 export function AnalysisQuota() {
   const { quota: q, offline, problem } = useAnalysis();
+  const { overview, offline: coachOffline } = useCoach();
+  const coachQuota = overview?.quota;
+  const percent = (coachQuota?.remainingRatio ?? 0) * 100;
+  const coachLeft =
+    percent > 0 && percent < 1 ? "1%未満" : `${Math.floor(percent)}%`;
   const { entitlement, checked, offline: accessOffline } = useEntitlements();
   const meter = (label: string, left: number, max: number) => (
     <View
@@ -74,6 +80,47 @@ export function AnalysisQuota() {
         <Text style={[font(700, 11, 1.5, colors.ink2), { marginTop: 8 }]}>
           通信できません。残り回数は最後に確認したものです。
         </Text>
+      )}
+      {entitlement.paid && (
+        <View style={{ gap: 5, marginTop: 12 }}>
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
+            <Text style={font(700, 11)}>AIコーチ（今週）</Text>
+            {coachQuota && <Text style={font(900, 11)}>残り {coachLeft}</Text>}
+          </View>
+          {coachQuota && (
+            <View
+              accessibilityRole="progressbar"
+              accessibilityLabel="AIコーチの今週の残り"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.floor(percent)}
+              aria-valuetext={`残り ${coachLeft}`}
+              style={s.meter}
+            >
+              <View
+                style={{
+                  width: `${percent}%`,
+                  height: "100%",
+                  backgroundColor: colors.mint,
+                }}
+              />
+            </View>
+          )}
+          <Text style={font(500, 10.5, 1.4, colors.ink2)}>
+            {coachQuota
+              ? "月曜0時（日本時間）に全回復します"
+              : coachOffline
+                ? "残りを確認できません"
+                : "残りを確認しています…"}
+          </Text>
+          {coachQuota && coachOffline && (
+            <Text style={font(700, 11, 1.5, colors.ink2)}>
+              AIコーチの残りは最後に確認した値です。
+            </Text>
+          )}
+        </View>
       )}
       <Button
         size="sm"

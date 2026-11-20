@@ -1,3 +1,4 @@
+import { prices } from './coach-provider-fixtures';
 import {env} from 'cloudflare:workers';
 import {runInDurableObject} from 'cloudflare:test';
 import {describe, expect, it, vi} from 'vitest';
@@ -6,7 +7,7 @@ import type {CoachFacts} from '../src/coach-facts';
 import type {RunTools} from '../src/coach-tools';
 import type {Device} from '../src/index';
 
-const config: CoachEnv = {ENVIRONMENT: 'staging', COACH_PROVIDER: 'openai-responses-tools', COACH_API_KEY: 'test-key', COACH_SIGNING_KEY: 'signature'};
+const config: CoachEnv = {ENVIRONMENT: 'staging', COACH_PRICES_USD_PER_MILLION: prices, COACH_PROVIDER: 'openai-responses-tools', COACH_API_KEY: 'test-key', COACH_SIGNING_KEY: 'signature'};
 const analysis = {initial: 'startpos', mode: 'precise' as const, moves: ['7g7f'],
   results: [0, 1].map(ply => ({ply, score: null, candidates: [], mate: null}))};
 const payload = {requestId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', analysis, perspective: 'sente',
@@ -16,11 +17,12 @@ const facts = (): CoachFacts => ({視点: 'あなたが先手、相手が後手'
   終局: {勝敗: '不明'}, 参照: [{id: '0:position'}], 要所: [{手数: 1, 実戦手: {表記: '▲7六歩(77)'}, 実戦の続き: ['省略する詳細'], 指す前の参照: '0:position'}]});
 const refs = references(analysis.results);
 const safe = {sections: [{kind: 'facts', title: '序盤', text: '先に玉の位置を確認しましょう。', refs: ['0:position']}]};
-const done = (value = safe) => Response.json({status: 'completed', output: [message(value)]});
+const usage = {input_tokens: 1000, output_tokens: 100, input_tokens_details: {cached_tokens: 100, cache_write_tokens: 200}};
+const done = (value = safe) => Response.json({status: 'completed', output: [message(value)], usage});
 const message = (value: unknown, phase = 'final_answer') => ({type: 'message', role: 'assistant', phase, content: [{type: 'output_text', text: JSON.stringify(value)}]});
 const call = (id: string, name = 'knowledge', args = '{"query":"入玉"}') => ({type: 'function_call', call_id: id, name, arguments: args});
 const reason = (id: string) => ({type: 'reasoning', id, summary: [], encrypted_content: `encrypted-${id}`});
-const turn = (...output: unknown[]) => Response.json({status: 'completed', output});
+const turn = (...output: unknown[]) => Response.json({status: 'completed', output, usage});
 const bodyOf = (init?: RequestInit) => JSON.parse(init!.body as string);
 const completeWith = (transport: typeof fetch, runTools: RunTools, signal?: AbortSignal, evidence = facts(), env = config) =>
   complete(env, parseCoach(payload), refs, signal ?? new AbortController().signal, transport, evidence, runTools);
@@ -109,7 +111,7 @@ describe('Responsesの道具ループ', () => {
     const result = await completeWith(async (_, init) => {
       const b = bodyOf(init);
       if (++attempts === 1) return turn(...ok);
-      if (attempts === 2) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, output: [reason('discard'), message('途中'), call('partial')]});
+      if (attempts === 2) return Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, output: [reason('discard'), message('途中'), call('partial')], usage});
       expect(b.tool_choice).toBe('none');
       expect(b.input.slice(2, -2)).toEqual(ok);
       expect(b.input.at(-2)).toMatchObject({type: 'function_call_output', call_id: 'good'});
@@ -138,7 +140,7 @@ describe('Responsesの道具ループ', () => {
     const run = vi.fn<RunTools>().mockResolvedValue([{資料: 'あ'.repeat(7800)}]);
     await expect(completeWith(async (_, init) => {
       const b = bodyOf(init);
-      if (++attempts <= 3) return Response.json({status: 'completed', output: [call('in' + attempts)], usage: {output_tokens: 300}});
+      if (++attempts <= 3) return Response.json({status: 'completed', output: [call('in' + attempts)], usage: {input_tokens: Buffer.byteLength(init!.body as string) + 4096 + (attempts - 1) * 300, output_tokens: 300}});
       expect(b.tool_choice).toBe('none');
       return done();
     }, run)).resolves.toEqual(safe);
@@ -190,8 +192,9 @@ describe('Responsesの道具ループ', () => {
         [new Response('x'.repeat(2_097_153)), 'invalid_output'],
         [turn({type: 'message', content: [{type: 'refusal', refusal: 'private-refusal'}]}), 'invalid_output'],
         [turn(call('same'), call('same')), 'invalid_output'],
+        [Response.json({status: 'completed', output: [message(safe)]}), 'invalid_usage'],
       ] as const) await expect(completeWith(async () => response, vi.fn())).rejects.toThrow(code);
-      expect(logs).toHaveBeenCalledTimes(5);
+      expect(logs).toHaveBeenCalledTimes(6);
       expect(JSON.parse(logs.mock.calls[0][0])).toMatchObject({event: 'coach_responses_tools', stage: 'provider_http', status: 429, failure: 'provider_failed', calls: 0, turns: 1});
       expect(JSON.stringify(logs.mock.calls)).not.toMatch(/private-|test-key|四間飛車|入玉/);
     } finally { logs.mockRestore(); }
@@ -286,21 +289,25 @@ describe('非同期・期限・精密コンテナ', () => {
       });
       const getByName = vi.fn(() => ({fetch: container}));
       instance.env.PRECISE = {getByName};
-      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('tags', 'game_tags', '{}'))).mockResolvedValueOnce(done());
+      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('tags', 'game_tags', '{}')))
+        .mockResolvedValueOnce(Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, usage}))
+        .mockResolvedValueOnce(done());
       try {
         expect((await instance.fetch(await post(instance.ctx.id.toString(), 'respond-async'))).status).toBe(202);
         expect(send).not.toHaveBeenCalled();
-        await instance.alarm();
+        expect(instance.coach.quota().remainingRatio).toBe(1);
+        await instance.alarm(); await instance.alarm();
         const current = await instance.fetch(new Request(url + '/' + payload.requestId, {headers: {'X-Dev-Paid': '1'}}));
-        expect(await current.json()).toMatchObject({status: 'completed', sections: [{references: [refs[0]]}], quota: {used: 1, reserved: 0}});
+        expect(await current.json()).toMatchObject({status: 'completed', sections: [{references: [refs[0]]}], quota: {remainingRatio: (500_000_000 - 5_115_000) / 500_000_000}});
         const slot = 'slot-' + parseInt(instance.ctx.id.toString().slice(0, 8), 16) % 2;
         expect(getByName.mock.calls).toEqual([[slot], [slot]]);
         expect(container).toHaveBeenCalledTimes(2);
+        expect(send).toHaveBeenCalledTimes(3);
       } finally { send.mockRestore(); }
     });
   });
 
-  it.each(['DELETE', 'deadline'] as const)('%sで応答しない道具通信を打ち切り、回数を返す', async mode => {
+  it.each(['DELETE', 'deadline'] as const)('%sで応答しない道具通信を打ち切り、枠から差し引かない', async mode => {
     await runInDurableObject(device(), async (_instance, state) => {
       let entered!: () => void;
       const toolStarted = new Promise<void>(resolve => { entered = resolve; });
@@ -319,7 +326,7 @@ describe('非同期・期限・精密コンテナ', () => {
           expect((await c.fetch(new Request(url + '/' + payload.requestId, {method: 'DELETE'}))).status).toBe(200);
         }
         expect((await generation).status).toBe(mode === 'DELETE' ? 409 : 504);
-        expect(c.quota()).toMatchObject({used: 0, reserved: 0});
+        expect(c.quota()).toMatchObject({remainingRatio: 1, exhausted: false});
         expect(send).toHaveBeenCalledTimes(1);
         expect(run).toHaveBeenCalledTimes(1);
         expect(run.mock.calls[0][2].aborted).toBe(true);
@@ -327,14 +334,14 @@ describe('非同期・期限・精密コンテナ', () => {
     });
   });
 
-  it('最終出力を既存検査で拒否し、回数は増やさない', async () => {
+  it('最終出力を既存検査で拒否し、枠から差し引かない', async () => {
     await runInDurableObject(device(), async (_instance, state) => {
       const coach = new Coach(state.storage, config, 'device', () => true, async () => facts(), undefined, async () => []);
       const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(done({sections: [{...safe.sections[0], refs: ['0:line:fake']}]}));
       try {
         const out = await coach.fetch(await post());
         expect(out.status, await out.clone().text()).toBe(502);
-        expect(await out.json()).toMatchObject({error: 'invalid_output', quota: {used: 0, reserved: 0}});
+        expect(await out.json()).toMatchObject({error: 'invalid_output', quota: {remainingRatio: 1, exhausted: false}});
       } finally { send.mockRestore(); }
     });
   });

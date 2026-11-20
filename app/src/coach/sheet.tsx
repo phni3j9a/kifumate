@@ -39,6 +39,8 @@ import { WaitingDots } from "../components/waiting-dots";
 import { CoachSkeleton } from "./shimmer";
 import { StylePicker } from "./style-picker";
 import {
+  coachLimitTitle,
+  coachReset,
   quotaNotice,
   type Message,
   type Reference,
@@ -126,7 +128,7 @@ export function CoachSheet({
   const answers = r?.answers ?? [],
     attempt = r?.attempt;
   const q = overview?.quota ?? null,
-    limit = !!q && q.remaining === 0;
+    limit = !!q?.exhausted;
   const hasAnswers = answers.length > 0;
   const stage = attempt
     ? "gen"
@@ -212,7 +214,7 @@ export function CoachSheet({
   function cancel() {
     ask({
       title: "解説の作成を中止しますか",
-      text: "中止した解説や質問は、回数に数えません。すでに完成した場合は、その解説を受け取ります。",
+      text: "中止した解説や質問では、今週の残りは減りません。すでに完成した場合は、その解説を受け取ります。",
       ok: "中止する",
       no: "続ける",
       onOk: () =>
@@ -221,7 +223,7 @@ export function CoachSheet({
           .catch(() => toast("中止を保存できませんでした")),
     });
   }
-  const notice = quotaNotice(q);
+  const notice = paid && stage !== "cap" ? quotaNotice(q) : "";
   const retry = () => {
     if (offline || attempt || !r?.error) void controller.sync();
     else void send(r?.failedQuestion);
@@ -231,7 +233,7 @@ export function CoachSheet({
     stage === "lock"
       ? "AIコーチは有料プランの機能です"
       : stage === "cap"
-        ? "今月のAIコーチは上限に達しました"
+        ? coachLimitTitle
         : stage === "redo"
           ? "AIコーチは、精密解析した対局で使えます"
           : analysis?.attempt
@@ -241,7 +243,7 @@ export function CoachSheet({
     stage === "lock"
       ? "解析結果をもとに、対局の流れと改善点を文章で説明します。続けて質問もできます。"
       : stage === "cap"
-        ? "月が変わると、また使えます。これまでに作った解説は、そのまま読めます。"
+        ? `${coachReset}。これまでに作った解説は、そのまま読めます。`
         : stage === "redo"
           ? saved?.coachProof
             ? "この対局は「ふつうの解析」です。精密解析でやり直すと、候補が3手まで出て、解説も作れます。"

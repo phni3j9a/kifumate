@@ -14,7 +14,6 @@ const MAX_RESPONSE_BYTES = 2_097_152;
 const encoder = new TextEncoder();
 const bytes = (s: string) => encoder.encode(s).byteLength;
 const error = (message: string) => ({エラー: message});
-export const RESPONSES_TOOLS = 'openai-responses-tools';
 export interface ToolCall { name: string; arguments: string }
 export type RunTools = (calls: ToolCall[], signal: AbortSignal) => Promise<unknown[]>;
 
@@ -64,7 +63,7 @@ function object(value: unknown): value is Record<string, any> {
 export async function responsesWithTools(options: {
   url: string; key: string; model: string; effort: string; maxTokens: number; deadline: number; reserveMs: number;
   prompt: string; userContext: {history: unknown[]; [field: string]: unknown}; facts: CoachFacts; signal: AbortSignal;
-  transport: typeof fetch; runTools: RunTools; inspect: (draft: string, facts: CoachFacts) => unknown;
+  count: (usage: unknown) => void; transport: typeof fetch; runTools: RunTools; inspect: (draft: string, facts: CoachFacts) => unknown;
 }): Promise<unknown> {
   const {signal, facts} = options;
   const prior = [...options.userContext.history];
@@ -118,6 +117,7 @@ export async function responsesWithTools(options: {
       if (Date.now() >= options.deadline) throw new ApiError(504, 'coach_timeout');
       stage = 'provider_output';
       if (!object(data)) throw new ApiError(502, 'invalid_output');
+      options.count(data.usage);
       const usage = (key: string, reserved: number): number => {
         const value = data.usage?.[key];
         if (!Number.isSafeInteger(value) || value < 0) return reserved;
@@ -203,8 +203,8 @@ export async function responsesWithTools(options: {
       }
     }
   } catch (e) {
-    failure = signal.aborted ? 'aborted' : e instanceof ApiError && ['provider_failed', 'invalid_output', 'coach_timeout'].includes(e.code) ? e.code : 'provider_failed';
-    if (failure === 'aborted' || e instanceof ApiError && ['invalid_output', 'coach_timeout'].includes(e.code)) throw e;
+    failure = signal.aborted ? 'aborted' : e instanceof ApiError && ['provider_failed', 'invalid_output', 'invalid_usage', 'coach_timeout'].includes(e.code) ? e.code : 'provider_failed';
+    if (failure === 'aborted' || e instanceof ApiError && ['invalid_output', 'invalid_usage', 'coach_timeout'].includes(e.code)) throw e;
     throw new ApiError(502, 'provider_failed');
   } finally {
     console.log(JSON.stringify({event: 'coach_responses_tools', stage, status, failure, turns, calls, inputTokens: inputUsed, outputTokens: outputUsed, elapsedMs: Date.now() - started}));

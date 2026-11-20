@@ -2,7 +2,9 @@ import { dataPaused } from "../storage/maintenance";
 import { ApiError, type AnalysisClient } from "../analysis/client";
 import type { CoachStorage } from "./storage";
 import {
+  coachLimitTitle,
   defaultProfile,
+  isCoachQuota,
   type CoachInput,
   type CoachOverview,
   type CoachRecord,
@@ -24,12 +26,14 @@ export function coachError(error: unknown): string {
           "精密解析の証明を確認できません。精密解析でやり直してください",
         precise_required: "先に、この対局の精密解析が必要です",
         paid_required: "AIコーチは有料プランの機能です",
-        monthly_limit: "今月のAIコーチは上限に達しました",
+        weekly_limit: coachLimitTitle,
+        provider_unavailable:
+          "今はAIコーチを利用できません。時間をおいてお試しください",
         coach_busy: "別の解説や質問を作っています。終わってからお試しください",
         result_expired:
           "解説の受け取り期限が過ぎました。保存済みの解説は読めます",
         coach_timeout:
-          "時間がかかったため、解説を終えられませんでした。回数は減っていません",
+          "時間がかかったため、解説を終えられませんでした。今週の残りは減っていません",
         invalid_input:
           "送る内容が長すぎるか、読み取れません。質問や目標を短くしてお試しください",
         unsafe_names: "送る文章を確認してください",
@@ -37,7 +41,7 @@ export function coachError(error: unknown): string {
           "端末の登録を確認できません。データは消さずにお問い合わせください",
       } as Record<string, string>
     )[code] ??
-    "解説を終えられませんでした。回数は減っていません。もう一度試せます"
+    "解説を終えられませんでした。今週の残りは減っていません。もう一度試せます"
   );
 }
 export class CoachController {
@@ -88,7 +92,7 @@ export class CoachController {
       ...this.snapshot,
       records: Object.fromEntries(records.map((r) => [r.gameId, r])),
       profile,
-      overview,
+      overview: isCoachQuota(overview?.quota) ? overview : null,
       ready: true,
     };
     this.emit();
@@ -132,7 +136,7 @@ export class CoachController {
         attempt: { input, sentAt: null, cancel: false },
         error: null,
       };
-      await this.save(r); // IDと送信本文を永続化できるまで、回数を使う通信をしない。
+      await this.save(r); // IDと送信本文を永続化できるまで、有料枠を使う通信をしない。
     } finally {
       this.starting = false;
     }
@@ -162,7 +166,7 @@ export class CoachController {
     // 中止の意思がHTTP待ちの間に変わっても、古い文書で上書きしない。
     r = this.snapshot.records[r.gameId] ?? r;
     if (!r.attempt || r.attempt.input.requestId !== reply.requestId) return;
-    if (this.snapshot.overview) {
+    if (this.snapshot.overview && isCoachQuota(reply.quota)) {
       this.snapshot.overview = {
         ...this.snapshot.overview,
         quota: reply.quota,
@@ -200,8 +204,9 @@ export class CoachController {
     if (!this.snapshot.ready) return;
     try {
       const overview = await this.api.coach();
-      await this.storage.saveOverview(overview);
-      this.snapshot.overview = overview;
+      if (isCoachQuota(overview.quota))
+        await this.storage.saveOverview(overview);
+      this.snapshot.overview = isCoachQuota(overview.quota) ? overview : null;
       this.snapshot.offline = false;
       this.emit();
       for (const original of Object.values(this.snapshot.records)) {
@@ -248,9 +253,11 @@ export class CoachController {
           if (
             e instanceof ApiError &&
             (e.status === 410 ||
-              (posting && [400, 403, 413, 429].includes(e.status)))
+              (posting &&
+                ([400, 403, 413, 429].includes(e.status) ||
+                  (e.status === 503 && e.code === "provider_unavailable"))))
           ) {
-            if (e.quota && "remaining" in e.quota && this.snapshot.overview) {
+            if (isCoachQuota(e.quota) && this.snapshot.overview) {
               this.snapshot.overview = {
                 ...this.snapshot.overview,
                 quota: e.quota,

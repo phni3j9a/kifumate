@@ -854,7 +854,7 @@ async function run(width: number, height: number) {
   );
   await shot("coach-offline");
   fake.coach.online = true;
-  fake.coach.remaining = 0;
+  fake.coach.remainingRatio = 0;
   fake.coach.low = true;
   await act("aiclose");
   await tap("AIコーチを閉じる");
@@ -876,7 +876,7 @@ async function run(width: number, height: number) {
   await shot("coach-limit");
   await act("aiclose");
   await tap("AIコーチを閉じる");
-  fake.coach.remaining = 99;
+  fake.coach.remainingRatio = 0.99;
   fake.coach.low = false;
   await aiMock("DB.usage.ai=37");
 

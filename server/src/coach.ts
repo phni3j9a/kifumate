@@ -1,8 +1,9 @@
 import prompt from './coach-prompt.txt';
 import toolsPrompt from './coach-tools-prompt.txt';
-import { abortable, RESPONSES_TOOLS, responsesWithTools, type RunTools } from './coach-tools';
+import { abortable, responsesWithTools, type RunTools } from './coach-tools';
+import { coachModel, coachRates, RESPONSES_TOOLS, usageCost, weeklyBudget } from './coach-budget';
 import { contradicts, hasFactReference, lineOrigin, notationIssue, type CoachFacts } from './coach-facts';
-import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
+import { ApiError, json, weekStart, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
   ENVIRONMENT: string;
@@ -11,7 +12,8 @@ export interface CoachEnv {
   COACH_BASE_URL?: string;
   COACH_MODEL?: string;
   COACH_PROVIDER?: string;
-  COACH_MONTHLY_LIMIT?: string;
+  COACH_WEEKLY_BUDGET_USD?: string;
+  COACH_PRICES_USD_PER_MILLION?: string;
   COACH_MAX_TOKENS?: string;
   COACH_TOKEN_PARAMETER?: string;
   COACH_REASONING_EFFORT?: string;
@@ -136,21 +138,22 @@ function errorType(error: unknown) {
     : error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name) ? error.name : 'Error';
 }
 export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch, facts?: CoachFacts,
-  runTools?: RunTools, deadline = Date.now() + timeoutMs(env)): Promise<unknown> {
-  if (env.COACH_PROVIDER === 'fake') {
-    if (!['local', 'staging'].includes(env.ENVIRONMENT)) throw new ApiError(503, 'provider_unavailable');
+  runTools?: RunTools, deadline = Date.now() + timeoutMs(env), onCost: (cost: number) => void = () => {}): Promise<unknown> {
+  const rates = coachRates(env);
+  const {provider, model} = coachModel(env);
+  if (!rates) {
     return {sections: [{kind: 'facts', title: '対局の振り返り', text: '解析結果をもとに振り返りましょう。', refs: [refs[0].id]},
       {kind: 'advice', title: '次の練習', text: '気になった局面を盤の上で確かめましょう。', refs: []}]};
   }
-  const withTools = env.COACH_PROVIDER === RESPONSES_TOOLS;
-  if (env.COACH_PROVIDER && env.COACH_PROVIDER !== 'openai-compatible' && !withTools) throw new ApiError(503, 'provider_unavailable');
+  const withTools = provider === RESPONSES_TOOLS;
+  const count = (usage: unknown) => onCost(usageCost(usage, withTools, rates));
   if (!env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
   const base = env.COACH_BASE_URL ?? (withTools ? 'https://api.openai.com/v1' : 'https://api.deepseek.com');
   const url = new URL(base.replace(/\/$/, '') + (withTools ? '/responses' : '/chat/completions'));
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new ApiError(503, 'provider_unavailable');
   if (withTools) {
     if (!facts || !runTools) throw new ApiError(502, 'facts_unavailable');
-    const value = await responsesWithTools({url: url.toString(), key: env.COACH_API_KEY, model: env.COACH_MODEL ?? 'gpt-6.1-terra',
+    const value = await responsesWithTools({url: url.toString(), key: env.COACH_API_KEY, model, count,
       effort: env.COACH_REASONING_EFFORT ?? 'high', maxTokens: setting(env.COACH_MAX_TOKENS, 5400, 65536), deadline,
       reserveMs: Math.min(30_000, timeoutMs(env) / 4), prompt: toolsPrompt, userContext: toolsContext(input, facts),
       facts, signal, transport, runTools, inspect: (raw, evidence) => {
@@ -165,7 +168,7 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
   try {
     // Workersはredirect:errorを受理しない。manualで追従せず、非2xxとして拒否する。
     const response = await transport(url.toString(), {method: 'POST', signal, redirect: 'manual', headers: {'Authorization': `Bearer ${env.COACH_API_KEY}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({model: env.COACH_MODEL ?? 'deepseek-flash', messages: messages(input, refs, facts), stream: false,
+      body: JSON.stringify({model, messages: messages(input, refs, facts), stream: false,
         response_format: {type: 'json_object'}, reasoning_effort: 'max',
         [env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: setting(env.COACH_MAX_TOKENS, 32768, 65536)})});
     httpStatus = response.status;
@@ -175,6 +178,7 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
     const data = record(await readJson(new Request('https://provider', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: response.body, duplex: 'half'} as RequestInit), 1_048_576));
     stage = 'provider_output';
     if (data.choices?.[0]?.finish_reason !== 'stop' || typeof data.choices[0].message?.content !== 'string') throw new ApiError(502, 'invalid_output');
+    count(data.usage);
     try { return JSON.parse(data.choices[0].message.content); } catch { throw new ApiError(502, 'invalid_output'); }
   } catch (error) {
     console.log(JSON.stringify({event: 'coach_provider_failed', stage, errorType: errorType(error), httpStatus, elapsedMs: Date.now() - started}));
@@ -256,18 +260,25 @@ export class Coach {
   constructor(private storage: DurableObjectStorage, private env: CoachEnv, private device: string, private paid: () => boolean,
     private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>, private refreshPaid?: () => Promise<void>,
     private runTools?: (input: CoachInput, calls: Parameters<RunTools>[0], signal: AbortSignal) => Promise<unknown[]>) {
-    storage.sql.exec(`CREATE TABLE IF NOT EXISTS coach_usage (month INTEGER PRIMARY KEY, used INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
+    storage.transactionSync(() => {
+      storage.sql.exec(`CREATE TABLE IF NOT EXISTS coach_weekly_usage (week INTEGER PRIMARY KEY, used_nano_usd INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, week INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
+      if (storage.sql.exec('PRAGMA table_info(coach_requests)').toArray().some(column => column.name === 'month')) {
+        // 月の回数は換算できない。旧ID・完了結果は保ち、処理中の要求は移行週で精算する。
+        storage.sql.exec('ALTER TABLE coach_requests RENAME COLUMN month TO week');
+        storage.sql.exec("UPDATE coach_requests SET week=? WHERE status='pending'", weekStart(Date.now()));
+        storage.sql.exec('DROP TABLE IF EXISTS coach_usage');
+      }
+    });
   }
   quota(now = Date.now()) {
-    const month = monthStart(now), limit = setting(this.env.COACH_MONTHLY_LIMIT, 100, 10000);
-    const used = this.storage.sql.exec<{used: number}>('SELECT used FROM coach_usage WHERE month=?', month).toArray()[0]?.used ?? 0;
-    const reserved = this.storage.sql.exec<{n: number}>("SELECT COUNT(*) AS n FROM coach_requests WHERE month=? AND status='pending' AND deadline>?", month, now).toArray()[0].n;
-    const remaining = Math.max(0, limit - used - reserved);
-    return {monthStart: month, resetsAt: nextMonth(now), limit, used, reserved, remaining, low: remaining < limit / 10};
+    const week = weekStart(now), budget = weeklyBudget(this.env.COACH_WEEKLY_BUDGET_USD);
+    const used = this.storage.sql.exec<{used_nano_usd: number}>('SELECT used_nano_usd FROM coach_weekly_usage WHERE week=?', week).toArray()[0]?.used_nano_usd ?? 0;
+    const remainingRatio = Math.max(0, budget - used) / budget;
+    return {remainingRatio, resetsAt: week + 7 * 86400_000, low: remainingRatio < 0.1, exhausted: remainingRatio === 0};
   }
-  private status(id: string) { return this.storage.sql.exec<{status: string; month: number; deadline: number}>('SELECT status,month,deadline FROM coach_requests WHERE id=?', id).toArray()[0]; }
+  private status(id: string) { return this.storage.sql.exec<{status: string; week: number; deadline: number}>('SELECT status,week,deadline FROM coach_requests WHERE id=?', id).toArray()[0]; }
   private async wake(at: number) {
     const current = await this.storage.getAlarm();
     if (current === null || current > at) await this.storage.setAlarm(at);
@@ -308,7 +319,7 @@ export class Coach {
     const timer = setTimeout(() => timeout.abort(), Math.max(1, deadline - Date.now()));
     const signal = AbortSignal.any([controller.signal, ...(request ? [request.signal] : []), timeout.signal]);
     const started = Date.now();
-    let stage = 'entitlement';
+    let stage = 'entitlement', cost = 0;
     try {
       await this.refreshPaid?.();
       if (!this.paid()) throw new ApiError(403, 'paid_required');
@@ -319,7 +330,7 @@ export class Coach {
       if (!facts && this.env.COACH_PROVIDER !== 'fake' && this.loadFacts) throw new ApiError(502, 'facts_unavailable');
       stage = 'complete';
       const value = await complete(this.env, input, refs, signal, fetch, facts,
-        this.runTools && ((calls, signal) => this.runTools!(input, calls, signal)), deadline);
+        this.runTools && ((calls, signal) => this.runTools!(input, calls, signal)), deadline, turn => { cost += turn; });
       stage = 'validate_output';
       const output = validateOutput(value, refs, facts);
       stage = 'commit';
@@ -330,7 +341,9 @@ export class Coach {
         if (Date.now() >= deadline || signal.aborted) throw new ApiError(504, 'coach_timeout');
         if (!this.paid()) throw new ApiError(403, 'paid_required');
         this.storage.sql.exec("UPDATE coach_requests SET status='completed',deadline=? WHERE id=?", Date.now() + 7 * 86400_000, input.requestId);
-        this.storage.sql.exec('INSERT INTO coach_usage VALUES (?,1) ON CONFLICT(month) DO UPDATE SET used=used+1', current.month);
+        if (!Number.isSafeInteger(cost)) throw new ApiError(502, 'invalid_usage');
+        if (cost) this.storage.sql.exec(`INSERT INTO coach_weekly_usage VALUES (?,?)
+          ON CONFLICT(week) DO UPDATE SET used_nano_usd=MIN(9007199254740991, used_nano_usd+excluded.used_nano_usd)`, current.week, cost);
         this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL,output=? WHERE id=?', JSON.stringify(output), input.requestId);
         console.log(JSON.stringify({event: 'coach_completed', elapsedMs: Date.now() - started}));
         return json({requestId: input.requestId, ...output, quota: this.quota()});
@@ -354,8 +367,8 @@ export class Coach {
       const now = Date.now();
       await this.refreshPaid?.();
       this.expire();
-      this.storage.sql.exec('DELETE FROM coach_requests WHERE deadline<?', monthStart(now) - 32 * 86400_000);
-      this.storage.sql.exec('DELETE FROM coach_usage WHERE month<?', monthStart(now) - 32 * 86400_000);
+      this.storage.sql.exec('DELETE FROM coach_requests WHERE deadline<?', now - 32 * 86400_000);
+      this.storage.sql.exec('DELETE FROM coach_weekly_usage WHERE week<?', weekStart(now) - 7 * 86400_000);
       if (request.method === 'GET' && new URL(request.url).pathname === '/v1/coach') {
         const latest = this.storage.sql.exec<{id: string}>('SELECT id FROM coach_requests ORDER BY rowid DESC LIMIT 1').toArray()[0];
         return json({paid: this.paid(), quota: this.quota(), latest: latest && this.status(latest.id)!.deadline > now ? this.view(latest.id) : null});
@@ -364,7 +377,7 @@ export class Coach {
       if (cancel && request.method === 'GET') return json(this.view(cancel[1]));
       if (cancel && request.method === 'DELETE') {
         // 本文を受信中のPOSTより先に届いた中止も、同じIDの墓標で止める。
-        this.storage.sql.exec("INSERT OR IGNORE INTO coach_requests VALUES (?,?,'cancelled',?)", cancel[1], monthStart(now), now + 7 * 86400_000);
+        this.storage.sql.exec("INSERT OR IGNORE INTO coach_requests VALUES (?,?,'cancelled',?)", cancel[1], weekStart(now), now + 7 * 86400_000);
         this.storage.sql.exec("UPDATE coach_requests SET status='cancelled',deadline=? WHERE id=? AND status='pending'", now + 7 * 86400_000, cancel[1]);
         this.storage.sql.exec('UPDATE coach_tasks SET payload=NULL WHERE id=?', cancel[1]);
         this.active.get(cancel[1])?.abort();
@@ -376,19 +389,21 @@ export class Coach {
       if (!this.env.COACH_SIGNING_KEY) throw new ApiError(503, 'signing_unavailable');
       await verifyAnalysis(this.env.COACH_SIGNING_KEY, this.device, input.input, input.results, input.proof);
       const asynchronous = request.headers.get('Prefer')?.includes('respond-async') ?? false;
-      const timeout = timeoutMs(this.env), accepted = Date.now();
-      // 同期も保存前にwatchdogを永続化し、プロセス消失後の入力削除を保証する。
-      await this.wake(asynchronous ? accepted + 100 : accepted + timeout);
       await this.refreshPaid?.();
+      const timeout = timeoutMs(this.env), wakeFrom = Date.now();
+      // 同期も保存前にwatchdogを永続化し、プロセス消失後の入力削除を保証する。
+      await this.wake(asynchronous ? wakeFrom + 100 : wakeFrom + timeout);
       this.storage.transactionSync(() => {
         // 本文受信・署名検証の待機中に更新された権利を、確定直前に再確認する。
         if (!this.paid()) throw new ApiError(403, 'paid_required');
         if (request.signal.aborted) throw new ApiError(409, 'cancelled');
         if (this.status(input.requestId)) throw new ApiError(409, 'request_exists');
-        const quota = this.quota(accepted);
-        if (!quota.remaining) throw new ApiError(429, 'monthly_limit');
+        const accepted = Date.now();
+        if (this.quota(accepted).exhausted) throw new ApiError(429, 'weekly_limit');
         if (this.storage.sql.exec("SELECT id FROM coach_requests WHERE status='pending' AND deadline>? LIMIT 1", accepted).toArray().length) throw new ApiError(409, 'coach_busy');
-        this.storage.sql.exec("INSERT INTO coach_requests VALUES (?,?,'pending',?)", input.requestId, quota.monthStart, accepted + timeout);
+        const rates = coachRates(this.env);
+        if (rates && !this.env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
+        this.storage.sql.exec("INSERT INTO coach_requests VALUES (?,?,'pending',?)", input.requestId, weekStart(accepted), wakeFrom + timeout);
         this.storage.sql.exec('INSERT INTO coach_tasks (id,payload,started) VALUES (?,?,?)', input.requestId, JSON.stringify(input), asynchronous ? 0 : 1);
       });
       if (asynchronous) return json(this.view(input.requestId), 202);
