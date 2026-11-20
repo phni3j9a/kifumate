@@ -485,3 +485,41 @@ maxは7/16が45秒超。全局三条件・二反復の中央値は62.6065秒（n
 - ブランチにはv3を残します。拒否0、実戦手のある10回答すべてで手・理由・代案・練習がそろい、玉の持ち主・位置の取り違えは減りました。旧#20の49件とv2の16件を再検査し、既存の正しい回答に新規拒否なし。v2で通過した自玉と相手玉の取り違え1件を検出し、表記差による拒否2件は解消しました。
 - **精度の目安（誤りの明確な減少）は未達です。** v3の誤り8件はすべて検査を通過しました。駒の隣接・利き、手順の前後、証明済み詰みの扱い、入玉宣言の一般ルールに誤りが残り、採否はユーザーが判断します。
 - `server/.local/coach-keypoints/` に全48新応答と旧出力抜粋の `outputs.md`、採点の `manual-review.json`、再検査の `revalidation-v3.json`、共有台帳 `budget.jsonl` を保存（0600）。新規3版のpeak推計累計は **$0.476445**（上限$1）です。
+
+## 道具方式の試作（Issue [#54](https://github.com/phni3j9a/kifumate/issues/54)、2026-11-20）
+
+- 最初に渡すのは視点・終局・要所の見出し／参照・相談内容だけ。必要になった資料はモデルが道具で取り、確認できた事実と解釈を分けて説明する。Worker・アプリへの組み込みは未実施。
+- `container/coach_tools.py` の17道具は、対局データと `{ply, moves?}` を受ける。`ply` は本譜着手直後（開始は0）、`moves` はKIFの仮の着手列。曖昧な着手は合法候補を返し、勝手に選ばない。
+- 局面：盤面・升・駒の利き・当たり／浮き駒・玉の周囲・合法手。幾何的な利きにはピンや味方駒がいる升も含む。合法な取り方は別に調べる。
+- 手順：着手ごとの捕獲・成り・王手、手の比較、駒の損得、詰み。エンジンは起動しない。詰みはcshogiのDfPn（最大1万ノード／深さ15）で別途確認でき、未発見は非詰みの証明ではない。
+- 保存済み解析：候補と読み筋、#51と共通の要所抽出、本譜。知識：26件の短い独自解説と、アプリの戦法・囲い分類器（esbuildで再利用、未分類は未確認）。入玉宣言は[日本将棋連盟の公式FAQ](https://www.shogi.or.jp/faq/rules/)に準拠。
+- 検証：型付きの主張を盤面と照合。下書きと最終出力はNodeから既存の `validateOutput`／`notationIssue`／`contradicts` を呼ぶ。主張の提出は任意で、検査通過だけでは本文の正しさは保証しない。
+- DeepSeekはChat Completionsの推論`max`、道具を渡す全ターンで過去の`reasoning_content`を再送。TerraはResponsesの推論`high`で、[公式手順](https://developers.openai.com/api/docs/guides/migrate-to-responses)に従い`store:false`と`reasoning.encrypted_content`でサーバー側の応答保存に依存しない。
+- 道具は最大30回、回答は最大600秒。残り時間や道具の上限が近づいたら`tool_choice:none`で最終回答を求める。調査中の推論本文やAPIキーは保存しない。
+- `.local/coach-tools/budget.jsonl` で両社の$3枠を共有。毎ターン保守的に予約し、usageで精算。失敗などusage不明時は予約を維持。料金は2026-11-20に[OpenAI](https://developers.openai.com/api/docs/pricing)・[DeepSeek](https://api-docs.deepseek.com/quick_start/pricing)で確認。DeepSeekはpeak料金で統一。
+
+```sh
+cd server
+container/.venv/bin/python scripts/compare_coach_tools.py --self-test
+# 料金を再確認してから（2反復・実費）。同じ台帳を残し、出力には新規ファイル名を指定。
+set -a; . ~/.config/kifumate/llm.env; set +a
+container/.venv/bin/python scripts/compare_coach_tools.py deepseek --output .local/coach-tools/deepseek-new.json
+container/.venv/bin/python scripts/compare_coach_tools.py terra --output .local/coach-tools/terra-new.json
+unset OPENAI_API_KEY DEEPSEEK_API_KEY
+```
+
+### 同じ8条件での比較
+
+全文・道具の引数と結果サイズ・ターン別usage・手採点は `.local/coach-tools/`（0600）。v3は第3版の既存データを再利用し、再実行していない。
+
+| 方式 | 誤りのある回答（うち検査通過） | 拒否／未完了 | 具体的な手・理由・代案・練習がそろう | 秒 中央値／最大 | 道具の回数 平均／最大 | USD/試行 | 100試行USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| v3（DeepSeek、一括） | 8/16（8） | 0／0 | 10/16 | 36.5／94.6 | 0／0 | 0.0110 | 1.10 |
+| DeepSeek＋道具 | 6/14（6） | 1／1 | 8/16 | 80.4／147.0 | 21.0／30 | 0.0230 | 2.30 |
+| Terra＋道具 | 0/16（0） | 0／0 | 10/16 | 42.9／62.1 | 19.9／30 | 0.0311 | 3.11 |
+
+- 両モデル各16試行、計224 APIターン、**$0.866329**で精算完了（$3枠内、未精算なし）。上の誤りの分母は本文を採点できた回答数。DeepSeekの拒否1件は不正JSON、未完了1件は出力上限。
+- 合計トークン（入力／キャッシュ読込／書込／出力、そのうち推論）：v3 **89,786／53,120／—／136,845（125,129）**、DeepSeek **2,251,433／1,982,848／—／230,200（179,595）**、Terra **788,872／573,349／215,025／39,934（16,221）**。
+- Terraは飛と龍の交換を実戦と代案に分け、保存時は未証明の詰みをcshogiで別途証明した。DeepSeekは利きのある升への角打ちを非合法と誤解し、その回答は検査を通った。モデル自身の主張はDeepSeek 33/33件、Terra 2/2件一致したが、本文全体はカバーしていない。
+- 1ドル150円と仮定すると、月100試行のAPI費用はv3約165円、DeepSeek約346円、Terra約467円。全局の条件だけで月100試行なら約283円、564円、752円。月780円に対し、Terraの全局利用ではインフラや税・ストア手数料を入れる前から余裕が少ない。
+- **次の検証はTerraを推奨。** 今回はDeepSeekより速く、誤り・拒否も少ない。8条件だけでは本番品質を保証できない。別の棋譜での再評価、全局の費用・待ち時間、自由文の利き・合法性・手順を照合する仕組みを要確認。
