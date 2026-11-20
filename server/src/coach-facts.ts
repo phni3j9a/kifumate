@@ -27,24 +27,26 @@ function matchesMove(m: RegExpMatchArray, source?: string) {
   return notation(m).every((part, i) => ((i === 0 || i === 4) && !part) || part === expected[i]);
 }
 
-export function notationIssue(text: string, facts?: CoachFacts): string | undefined {
+export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts'): string | undefined {
   text = text.normalize('NFKC');
   if (USI.test(text)) return 'usi';
   if (/[+−‒–—-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
-  const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r['読み筋'] ?? []).map((m: any) => m['表記'])) ?? [])];
-  const move = new RegExp(KIF, 'g');
-  for (const mention of text.matchAll(move)) {
-    if (!proven.some(source => matchesMove(mention, source))) return 'unknown_move';
+  if (kind === 'facts') {
+    const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r['読み筋'] ?? []).map((m: any) => m['表記'])) ?? [])];
+    const move = new RegExp(KIF, 'g');
+    for (const mention of text.matchAll(move)) {
+      if (!proven.some(source => matchesMove(mention, source))) return 'unknown_move';
+    }
+    if (/[▲△☗☖]/.test(text.replace(move, ''))) return 'unknown_move';
   }
-  if (/[▲△☗☖]/.test(text.replace(move, ''))) return 'unknown_move';
   for (const mention of text.matchAll(/([0-9]+)\s*手目/g)) {
     const [, n] = mention;
     const suffix = text.slice(mention.index! + mention[0].length);
     const ply = Number(n);
-    if (ply < 1 || ply > played.length) return 'ply_out_of_range';
+    if (ply > played.length) return 'ply_out_of_range';
     const attached = suffix.match(new RegExp(`^\\s*(?:の|[:(])?\\s*${KIF}`));
-    if (attached && !matchesMove(attached, played[ply - 1][1])) return 'move_does_not_match_ply';
+    if (attached && !matchesMove(attached, played[ply - 1]?.[1])) return 'move_does_not_match_ply';
   }
 }
 

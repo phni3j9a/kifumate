@@ -158,7 +158,7 @@ export function validateOutput(value: unknown, refs: Reference[], facts?: CoachF
       const s = record(value); keys(s, ['kind', 'title', 'text', 'refs']);
       if (!['facts', 'advice'].includes(s.kind)) throw new Error();
       const title = text(s.title, 80), body = text(s.text, 2000);
-      if (notationIssue(title + '。' + body, facts)) throw new Error();
+      if (notationIssue(title + '。' + body, facts, s.kind)) throw new Error();
       if (!Array.isArray(s.refs) || s.refs.length > 10 || (s.kind === 'facts' && !s.refs.length)) throw new Error();
       const selected = s.refs.map((id: unknown) => {
         const ref = refs.find(r => r.id === id); if (!ref || facts && !hasFactReference(ref.id, facts)) throw new Error(); return ref;

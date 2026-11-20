@@ -94,15 +94,23 @@ describe('出力の手数・KIF照合', () => {
     '候補は二六歩、続いて△同成桂(34)や▲3五角打。',
     '指す前に候補を2つ読み、1手詰めも確認しましょう。',
     '練習では一歩ずつ、駒の利きを確認します。',
+    '開始局面（0手目）を開きます。',
   ])('資料の表記や通常の数字を許可: %s', text => {
     expect(() => validateOutput(section(text), all, sample)).not.toThrow();
   });
   it.each([
     '▲2四歩', '△7六歩', '1手目 ▲7六歩(78)', '▲7六歩成', '▲3五角', '△同成銀',
-    '1手目 ▲2六歩', '2手目 △同成桂', '1手目 △3四歩', '0手目', '1手目と３手目', '▲',
+    '1手目 ▲2六歩', '2手目 △同成桂', '1手目 △3四歩', '0手目 ▲7六歩', '1手目と３手目', '▲',
     '評価値-1200', '＋３５０', '評価値は − 1200', '評価値は500', '2g2f',
   ])('未知・不一致の手、評価値、USIを拒否: %s', text => {
     expect(() => validateOutput(section(text), all, sample)).toThrow('invalid_output');
+  });
+  it('助言では一般的な着手案を許可するが、実戦の手数・符号の組と評価値は検査する', () => {
+    const advice = (text: string) => ({sections: [{kind: 'advice', title: '次の練習', text, refs: []}]});
+    expect(() => validateOutput(advice('別の局面で▲6八玉も試しましょう。'), all, sample)).not.toThrow();
+    for (const wrong of ['1手目 ▲6八玉', '3手目', '0手目 ▲7六歩', '評価値は＋600です。']) {
+      expect(() => validateOutput(advice(wrong), all, sample)).toThrow('invalid_output');
+    }
   });
   it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
     const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
