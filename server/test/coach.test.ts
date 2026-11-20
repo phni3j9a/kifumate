@@ -3,6 +3,7 @@ import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { Device } from '../src/index';
 import { Coach, PROOF_LIFETIME, checkNames, complete, messages, parseCoach, references, signAnalysis, validateOutput, verifyAnalysis, type CoachEnv } from '../src/coach';
+import { MODEL_PROFILES } from '../src/coach-models';
 import { monthStart, nextMonth, sha256 } from '../src/model';
 
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
@@ -158,6 +159,32 @@ describe('提供元', () => {
     }
     await expect(complete({...config, ENVIRONMENT: 'production'}, p, refs, new AbortController().signal)).rejects.toThrow('provider_unavailable');
     await expect(complete({...config, COACH_PROVIDER: 'openai-compatible'}, p, refs, new AbortController().signal)).rejects.toThrow('provider_unavailable');
+  });
+  it('gpt-6.1-terraはChat Completionsでmax_completion_tokensと最大推論を使う', async () => {
+    const p = parseCoach(await payload('device'));
+    expect(MODEL_PROFILES['gpt-6.1-terra']).toMatchObject({
+      id: 'gpt-6.1-terra', tokenParameter: 'max_completion_tokens', reasoningEffort: 'max', maxOutputTokens: 128000,
+      pricePerMillion: {input: 1, cachedInput: 0.05, output: 5, cacheWrite30m: 1.25},
+    });
+    const base = {...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: 'https://api.openai.com/v1', COACH_MODEL: 'gpt-6.1-terra', COACH_TOKEN_PARAMETER: 'max_tokens', COACH_API_KEY: 'secret'};
+    const transport = async (url: any, init: any) => {
+      expect(url).toBe('https://api.openai.com/v1/chat/completions');
+      const body = JSON.parse(init.body);
+      expect(body).toMatchObject({model: 'gpt-6.1-terra', max_completion_tokens: 32768, reasoning_effort: 'max', stream: false, response_format: {type: 'json_object'}});
+      expect(body.max_tokens).toBeUndefined();
+      return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
+    };
+    expect(await complete(base, p, refs, new AbortController().signal, transport)).toEqual(safe);
+    const raised = async (_url: any, init: any) => {
+      expect(JSON.parse(init.body).max_completion_tokens).toBe(128000);
+      return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
+    };
+    await complete({...base, COACH_MAX_TOKENS: '128000'}, p, refs, new AbortController().signal, raised);
+    const fallback = async (_url: any, init: any) => {
+      expect(JSON.parse(init.body).max_completion_tokens).toBe(32768);
+      return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
+    };
+    await complete({...base, COACH_MAX_TOKENS: '128001'}, p, refs, new AbortController().signal, fallback);
   });
   it('WorkersのネイティブRequestで提供元の送信オプションを受理でき、リダイレクトを追わない', async () => {
     const p = parseCoach(await payload('device'));

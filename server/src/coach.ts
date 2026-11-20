@@ -1,5 +1,6 @@
 import prompt from './coach-prompt.txt';
 import { contradicts, type CoachFacts } from './coach-facts';
+import { modelProfile } from './coach-models';
 import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
@@ -133,10 +134,13 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
   let stage = 'provider_fetch', httpStatus: number | undefined;
   try {
     // Workersはredirect:errorを受理しない。manualで追従せず、非2xxとして拒否する。
+    const model = env.COACH_MODEL ?? 'deepseek-flash';
+    const profile = modelProfile(model);
+    const tokenParameter = profile?.tokenParameter ?? (env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens');
     const response = await transport(url.toString(), {method: 'POST', signal, redirect: 'manual', headers: {'Authorization': `Bearer ${env.COACH_API_KEY}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({model: env.COACH_MODEL ?? 'deepseek-flash', messages: messages(input, refs, facts), stream: false,
-        response_format: {type: 'json_object'}, reasoning_effort: 'max',
-        [env.COACH_TOKEN_PARAMETER === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: setting(env.COACH_MAX_TOKENS, 32768, 65536)})});
+      body: JSON.stringify({model, messages: messages(input, refs, facts), stream: false,
+        response_format: {type: 'json_object'}, reasoning_effort: profile?.reasoningEffort ?? 'max',
+        [tokenParameter]: setting(env.COACH_MAX_TOKENS, 32768, profile?.maxOutputTokens ?? 65536)})});
     httpStatus = response.status;
     stage = 'provider_http';
     if (!response.ok) { await response.body?.cancel(); throw new ApiError(502, 'provider_failed'); }

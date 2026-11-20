@@ -302,6 +302,8 @@ POST本文（追加キー・人名フィールドは拒否）：
 
 `reasoning_effort:max`、`response_format:{type:json_object}`を送ります。キー未設定は503で、偽提供元が既定になることはありません。DeepSeekの[公式仕様](https://api-docs.deepseek.com/api/create-chat-completion/)・[料金](https://api-docs.deepseek.com/quick_start/pricing)を確認しています。実測の最大80.669秒に対し、日本語化・ネットワーク・揺らぎを含め240秒を維持します。**モデル変更と無関係に署名鍵は維持**してください。
 
+`COACH_MODEL=gpt-6.1-terra`（GPT-6.1 Terra）も選べます。既定の `deepseek-flash` と wrangler の vars は変えません。このモデルだけは `COACH_TOKEN_PARAMETER` が `max_tokens` でも `max_completion_tokens` を送り、`COACH_MAX_TOKENS` は公式の最大出力 128000 まで受けます（未設定は 32768）。`COACH_BASE_URL` は `https://api.openai.com/v1` にします。Chat Completions のままです。標準・272K入力以下の料金は、100万トークンあたり入力 $1、キャッシュ読込 $0.05、30分キャッシュ書込 $1.25、出力 $5 です。資料は [モデル](https://developers.openai.com/api/docs/models/gpt-6.1-terra) と [料金](https://developers.openai.com/api/docs/pricing)。アプリにモデル選択画面はありません。
+
 LLMへ送る根拠は`container/coach_facts.py`で決定的に作る日本語だけです。本譜・候補・読み筋を合法盤面からKIF表記へ変換し、先後記号・同・移動元・成／不成／打、駒名と捕獲駒、あなた／相手（観戦は先手／後手）、形勢・段階・変化・印・詰み確認・宣言可能な側を明示します。cshogiの省略字（杏・圭・全）は成香・成桂・成銀に補完します。形勢は絶対値150未満を互角、500未満をやや有利、1500未満を有利、3000未満を大きく有利、それ以上を勝勢とし、後手視点の不利も反転します。印は指した側の損失200以上を疑問手、500以上を悪手とする目安で、境界値や詰みスコアを数値比較しません。
 
 盤面の詰みは勝者・敗者・終局理由を確定できますが、**既存の署名入力には投了・実際の宣言などの終局記録がありません**。その場合は勝敗・終局理由を不明とし、宣言可能という探索結果から実戦の宣言勝ちを作りません。**サーバーが解析から作る事実**には生USI・SFEN・符号付き評価を含めず、日本語化してLLMへ渡します。利用者が質問・プロフィール・履歴に書いた数値（「評価が＋600なのはなぜ？」など）は、全角・半角や符号を変えずに保持します。これは解析で確認した事実ではなく参考文です。自由文のUSIの既存伏字と、出力本文の数値禁止は維持します。アプリへ返す署名済み`references`のUSI・評価は従来どおりです。
