@@ -1,7 +1,10 @@
+type Direction = '前進' | '後退' | '横移動' | '打つ';
+interface PositionSide { 玉: string | null; 盤上: Record<string, string[]>; 持駒: Record<string, number> }
+
 // 生USIや評価の数値はこの型に入れない。表記・局面の確定はPython/cshogi側で行う。
 export interface CoachFacts {
   視点: string;
-  実戦手: [手数: number, 表記: string, 印: string, 形勢: string, 境界値?: string][];
+  実戦手: [手数: number, 表記: string, 印: string, 形勢: string, 移動: Direction, 境界値?: string][];
   終局: Record<string, any>;
   参照: Record<string, any>[];
 }
@@ -9,22 +12,27 @@ export interface CoachFacts {
 const ACTORS = 'あなた|相手|先手|後手';
 const PIECES = '成香|成桂|成銀|と金|飛車|歩|香|桂|銀|金|角|飛|玉|王|と(?!いう)|馬|龍|竜';
 const RANKS = '一二三四五六七八九';
-const KIF = `([▲△☗☖]\\s*)?([1-9${RANKS}][1-9${RANKS}]|同)\\s*(${PIECES})(不成|成|打)?(?:\\(([1-9]{2})\\))?`;
+const SQUARE = `[1-9${RANKS}][1-9${RANKS}]`;
+const PV = '仮の読み筋（実戦とは別）';
+const KIF = `([▲△☗☖]\\s*)?(${SQUARE}|同)\\s*(${PIECES})(不成|成|打)?(?:\\(([1-9]{2})\\))?`;
 const USI = /(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/;
 
 function piece(s: string) {
   return s.replace('飛車', '飛').replace('と金', 'と').replace('竜', '龍').replace('王', '玉');
 }
+function squareNumber(s: string) {
+  return s.replace(/[一二三四五六七八九]/g, c => String(RANKS.indexOf(c) + 1));
+}
 function notation(match: RegExpMatchArray) {
-  const [, side, square, name, suffix, origin] = match;
-  return [side?.trim().replace('☗', '▲').replace('☖', '△') ?? '',
-    square.replace(/[一二三四五六七八九]/g, c => String(RANKS.indexOf(c) + 1)), piece(name), suffix ?? '', origin ?? ''];
+  const [, side, square, name, suffix] = match;
+  return [side?.trim().replace('☗', '▲').replace('☖', '△') ?? '', squareNumber(square), piece(name), suffix ?? ''];
 }
 function matchesMove(m: RegExpMatchArray, source?: string) {
   const actual = source?.match(new RegExp(`^${KIF}$`));
   if (!actual) return false;
   const expected = notation(actual);
-  return notation(m).every((part, i) => ((i === 0 || i === 4) && !part) || part === expected[i]);
+  // 省略できる「打」や補足の移動元は判定を左右しない。「打」と明記した移動手は別の手。
+  return notation(m).every((part, i) => i === 0 && !part || i === 3 && !part && expected[i] === '打' || part === expected[i]);
 }
 
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts'): string | undefined {
@@ -33,7 +41,7 @@ export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 
   if (/[+−‒–—-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
   if (kind === 'facts') {
-    const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r['読み筋'] ?? []).map((m: any) => m['表記'])) ?? [])];
+    const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r[PV] ?? []).map((m: any) => m['表記'])) ?? [])];
     const move = new RegExp(KIF, 'g');
     for (const mention of text.matchAll(move)) {
       if (!proven.some(source => matchesMove(mention, source))) return 'unknown_move';
@@ -69,6 +77,44 @@ export function hasFactReference(id: string, facts: CoachFacts): boolean {
   return facts.参照.some(r => r.id === id) || /^(\d+):position$/.test(id) && !!facts.実戦手[Number(id.split(':')[0]) - 1];
 }
 
+const OWNER_FIRST = new RegExp(`(${ACTORS})(?:の)?(${PIECES})(?:は|が|も)?\\s*(${SQUARE})(?=$|[\\s・。）、，]|です|でした|に(?:い|あ|位置))`, 'g');
+const SQUARE_FIRST = new RegExp(`(${SQUARE})\\s*の\\s*(${ACTORS})(?:の)?(${PIECES})`, 'g');
+
+function contradictsPosition(clause: string, refs: Record<string, any>[], facts: CoachFacts) {
+  // shortcut: 現在位置の明示だけを照合。前後・候補・時間の混ざる文まで扱うには時系列の解析が必要。
+  if (/取|交換|打[つちっ]|進[むみめ]|移動|逃げ|動[くかきい]|[前後]に|これから|予想|想定|練習|読み筋|候補/.test(clause)) return false;
+  const boards: Record<string, PositionSide>[] = refs.flatMap(r => r['局面'] ?? []);
+  if (!boards.length) return false;
+  const claims = [...Array.from(clause.matchAll(OWNER_FIRST), m => [m[1], m[2], m[3]]),
+    ...Array.from(clause.matchAll(SQUARE_FIRST), m => [m[2], m[3], m[1]])];
+  return claims.some(([side, name, square]) => {
+    name = piece(name);
+    const actor = facts.視点 !== '観戦' && ['先手', '後手'].includes(side)
+      ? facts.視点.includes(`あなたが${side}`) ? 'あなた' : '相手' : side;
+    return boards.every(board => {
+      const position = board[actor];
+      if (!position) return false;
+      const occupied = name === '玉' ? [position.玉] : position.盤上[name] ?? [];
+      return !occupied.some(sq => sq && squareNumber(sq) === squareNumber(square));
+    });
+  });
+}
+
+function contradictsDirection(clause: string, refs: Record<string, any>[], facts: CoachFacts) {
+  const withVerb = new RegExp(`${KIF}\\s*と\\s*(引[いきく]|上が|上げ|前進|後退|横移動)`, 'g');
+  if (!withVerb.test(clause)) return false;
+  withVerb.lastIndex = 0;
+  const moves: [string, Direction | undefined][] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
+    ...refs.flatMap(r => (r[PV] ?? []).map((m: any) => [m['表記'], m['移動']]))];
+  for (const m of clause.matchAll(withVerb)) {
+    if (!m[1]) continue;
+    const expected = /^(引|後退)/.test(m[6]) ? '後退' : m[6] === '横移動' ? '横移動' : '前進';
+    const matched = moves.filter(([kif]) => matchesMove(m, kif));
+    if (matched.length && matched.every(([, direction]) => direction && direction !== expected)) return true;
+  }
+  return false;
+}
+
 export function contradicts(text: string, selected: string[], facts: CoachFacts): boolean {
   if (facts.視点 === '観戦' && /あなた/.test(text)) return true;
   const refs = selected.flatMap(id => facts.参照.find(r => r.id === id) ?? compactPosition(id, facts) ?? []);
@@ -76,6 +122,7 @@ export function contradicts(text: string, selected: string[], facts: CoachFacts)
     // shortcut: 明示的な主語と断定だけを検査。省略・比喩まで扱うには別の評価器が必要。
     // 否定・仮定・目的を含む文は安全側に許可し、確かな断定だけを照合する。
     if (/ない|なく|なかった|ません|なら|たら|れば|せば|けば|てば|場合|仮に|仮定|もし|かもしれ|でしょう|だろう|ように|ために/.test(clause)) continue;
+    if (contradictsPosition(clause.normalize('NFKC'), refs, facts) || contradictsDirection(clause.normalize('NFKC'), refs, facts)) return true;
     const subjects = [...clause.matchAll(new RegExp(`(${ACTORS})(?:側|の側)?(?:が|は|に)`, 'g'))];
     for (const [i, match] of subjects.entries()) {
       const actor = match[1];
@@ -90,7 +137,7 @@ export function contradicts(text: string, selected: string[], facts: CoachFacts)
       if (key && refs.length && !refs.some(r => r[key] === actor)) return true;
       const mentioned = new RegExp(`^(?:その|この)?(?:の)?(${PIECES})(?:を(?:動かしました|進めました|引きました|上がりました)|で(?:取りました|取った手です))$`).exec(rest);
       if (mentioned && refs.length) {
-        const moves = refs.flatMap(r => r['読み筋'] ?? (r['直前の実戦手'] ? [r['直前の実戦手']] : []));
+        const moves = refs.flatMap(r => r[PV] ?? (r['直前の実戦手'] ? [r['直前の実戦手']] : []));
         if (moves.length && !moves.some(m => m['指した側'] === actor && piece(m['動いた駒']) === piece(mentioned[1]))) return true;
       }
     }

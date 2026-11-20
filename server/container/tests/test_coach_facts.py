@@ -22,9 +22,10 @@ def test_kif_same_capture_promotion_and_drop():
         f, previous = move_fact(board, usi, previous, 'observer')
         line.append(f)
     assert line[0]['表記'] == '▲7六歩(77)'
-    assert line[4] == {'表記': '▲2二角成(88)', '指した側': '先手', '動いた駒': '角', '取った駒': '角'}
-    assert line[5] == {'表記': '△同　銀(31)', '指した側': '後手', '動いた駒': '銀', '取った駒': '馬'}
+    assert line[4] == {'表記': '▲2二角成(88)', '指した側': '先手', '動いた駒': '角', '取った駒': '角', '移動': '前進'}
+    assert line[5] == {'表記': '△同　銀(31)', '指した側': '後手', '動いた駒': '銀', '取った駒': '馬', '移動': '前進'}
     assert line[6]['表記'] == '▲4五角打'
+    assert [f['移動'] for f in line] == ['前進', '前進', '前進', '前進', '前進', '前進', '打つ']
 
 
 def test_explicit_nonpromotion_and_promoted_piece():
@@ -44,7 +45,7 @@ def test_handicap_white_turn_and_branch_same_square():
     facts = build_facts(d)
     assert facts['要所'][0]['実戦手']['取った駒'] == '角'
     ref = next(r for r in facts['参照'] if r['id'] == '3:candidate:1')
-    assert ref['読み筋'][0]['表記'] == '△同　銀(31)'
+    assert ref['仮の読み筋（実戦とは別）'][0]['表記'] == '△同　銀(31)'
     assert ref['読み筋の得失']['失う駒'] == {'あなた': {'馬': 1}}
 
 
@@ -57,10 +58,11 @@ def test_perspective_mark_and_no_raw_notation(perspective, state, side):
     facts = build_facts(data(['7g7f'], perspective))
     assert facts['参照'][-1]['形勢'] == state
     assert facts['参照'][-1]['優勢な側'] == side
-    assert facts['実戦手'][0] == [1, '▲7六歩(77)', '悪手', state.removeprefix('あなたから見て')]
+    assert facts['実戦手'][0] == [1, '▲7六歩(77)', '悪手', state.removeprefix('あなたから見て'), '前進']
     key = facts['要所'][0]
     assert key['手数'] == 1 and key['指した後'] == state
-    assert '先手の持駒：なし' in key['指す前の局面図']
+    start = facts['参照'][0]['局面']
+    assert all(side['玉'] and side['持駒'] == {} for side in start.values())
     assert facts['終局']['勝敗'] == '不明'
     sent = json.dumps(facts)
     for raw in ('7g7f', 'startpos', 'value', '-600', 'score', 'sfen'):
@@ -146,7 +148,7 @@ def test_keypoint_recommendation_and_missed_proven_mate():
     refs = {r['id']: r for r in out['参照']}
     assert '0:candidate:2' not in refs
     assert refs['0:mate']['詰まされる側'] == '相手'
-    assert refs['0:candidate:1']['読み筋'][0]['表記'] == '▲1三飛不成(23)'
+    assert refs['0:candidate:1']['仮の読み筋（実戦とは別）'][0]['表記'] == '▲1三飛不成(23)'
     d['results'][1]['score'] = d['results'][0]['score']
     assert '詰みの見逃し' not in build_facts(d)['要所'][0]
 
@@ -173,5 +175,29 @@ def test_long_game_keeps_compact_main_line_and_drops_unused_candidates():
     assert not any(r['id'].endswith((':candidate:2', ':candidate:3')) for r in out['参照'])
     serialized = json.dumps(out, ensure_ascii=False, separators=(',', ':'))
     approximate_tokens = sum(0.5 if c.isascii() else 1 for c in serialized)
-    assert approximate_tokens < 15_000
+    assert approximate_tokens < 17_000  # 512手の上限に近い人工局は概算で余裕を持たせる。
     assert serialized.count('注意') == 1
+
+
+
+def test_structured_position_names_sides_kings_promoted_pieces_and_hands():
+    d = data(initial='4k4/9/4+l4/9/9/9/9/9/K8 w BG2p 1', perspective='gote')
+    assert build_facts(d)['参照'][0]['局面'] == {
+        'あなた': {'玉': '5一', '盤上': {'成香': ['5三']}, '持駒': {'歩': 2}},
+        '相手': {'玉': '9九', '盤上': {}, '持駒': {'角': 1, '金': 1}},
+    }
+
+
+def test_main_line_continuation_is_separate_and_directions_follow_mover():
+    d = data(CYCLE * 2, initial=KINGS, perspective='observer')
+    d['question'] = '1手目はどうですか'
+    d['results'][1]['candidates'] = [{'rank': 1, 'score': None, 'pv': ['5a5b', '4i4h', '5b5a']}]
+    facts = build_facts(d)
+    key = facts['要所'][0]
+    assert key['実戦手']['移動'] == '横移動'
+    assert [(f['手数'], f['表記'], f['移動']) for f in key['実戦の続き']] == [
+        (2, '△4一玉(51)', '横移動'), (3, '▲5九玉(49)', '横移動'), (4, '△5一玉(41)', '横移動'),
+    ]
+    reply = next(r for r in facts['参照'] if r['id'] == key['実戦手への応手の参照'])
+    line = reply['仮の読み筋（実戦とは別）']
+    assert [(f['表記'], f['移動']) for f in line] == [('△5二玉(51)', '前進'), ('▲4八玉(49)', '前進'), ('△5一玉(52)', '後退')]

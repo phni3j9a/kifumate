@@ -17,22 +17,50 @@ def label(side, perspective):
     return ('先手', '後手')[side] if perspective == 'observer' else ('あなた' if name == perspective else '相手')
 
 
+RANKS = '一二三四五六七八九'
+
+
+def position_fact(board, perspective):
+    sides = {label(side, perspective): {'玉': None, '盤上': {}, '持駒': {}}
+             for side in (cshogi.BLACK, cshogi.WHITE)}
+    for square in range(81):
+        if not (p := board.piece(square)):
+            continue
+        side = sides[label(p >> 4, perspective)]
+        piece = piece_name(cshogi.PIECE_JAPANESE_SYMBOLS[board.piece_type(square)])
+        coordinate = str(square // 9 + 1) + RANKS[square % 9]
+        if piece == '玉':
+            side['玉'] = coordinate
+        else:
+            side['盤上'].setdefault(piece, []).append(coordinate)
+    for side, hand in enumerate(board.pieces_in_hand):
+        sides[label(side, perspective)]['持駒'] = {cshogi.HAND_PIECE_JAPANESE_SYMBOLS[i]: count
+                                                   for i, count in enumerate(hand) if count}
+    return sides
+
+
 def move_fact(board, usi, previous, perspective):
     move = board.move_from_usi(usi)
     if not move or not board.is_legal(move):
         raise ValueError('不正な指し手')
     side = board.turn
     notation = move_to_kif(move, previous)
+    drop = cshogi.move_is_drop(move)
+    ranks = (cshogi.move_from(move) % 9, cshogi.move_to(move) % 9) if not drop else None
+    if drop:
+        direction = '打つ'
+    else:
+        advance = (ranks[0] - ranks[1]) * (1 if side == cshogi.BLACK else -1)
+        direction = '前進' if advance > 0 else '後退' if advance < 0 else '横移動'
     # KIFは移動元で同種駒を区別する。省略せず残し、成れる手の不成を補う。
-    if not cshogi.move_is_drop(move) and not cshogi.move_is_promotion(move):
+    if not drop and not cshogi.move_is_promotion(move):
         piece = cshogi.move_from_piece_type(move)
-        ranks = (cshogi.move_from(move) % 9, cshogi.move_to(move) % 9)
         if piece in (1, 2, 3, 4, 5, 6) and any(r <= 2 if side == 0 else r >= 6 for r in ranks):
             notation = notation.replace('(', '不成(')
     notation = piece_name(notation).translate(str.maketrans('１２３４５６７８９', '123456789'))
-    moved = cshogi.PIECE_JAPANESE_SYMBOLS[cshogi.move_from_piece_type(move)] if not cshogi.move_is_drop(move) else cshogi.HAND_PIECE_JAPANESE_SYMBOLS[cshogi.move_drop_hand_piece(move)]
+    moved = cshogi.PIECE_JAPANESE_SYMBOLS[cshogi.move_from_piece_type(move)] if not drop else cshogi.HAND_PIECE_JAPANESE_SYMBOLS[cshogi.move_drop_hand_piece(move)]
     captured = cshogi.PIECE_JAPANESE_SYMBOLS[board.piece_type(cshogi.move_to(move))] if board.piece_type(cshogi.move_to(move)) else 'なし'
-    fact = {'表記': ('▲', '△')[side] + notation, '指した側': label(side, perspective), '動いた駒': piece_name(moved), '取った駒': piece_name(captured)}
+    fact = {'表記': ('▲', '△')[side] + notation, '指した側': label(side, perspective), '動いた駒': piece_name(moved), '取った駒': piece_name(captured), '移動': direction}
     board.push(move)
     return fact, move
 
@@ -152,7 +180,7 @@ def build_facts(data):
         if id_ not in refs:
             sfen, prev = boards[ply]
             line, summary = line_fact(cshogi.Board(sfen), r['pv'], prev, perspective)
-            ref = {'id': id_, '手数': ply, '読み筋': line, '確認済みの詰み': mate}
+            ref = {'id': id_, '手数': ply, '仮の読み筋（実戦とは別）': line, '確認済みの詰み': mate}
             if mate:
                 ref.update({'詰ませる側': positions[ply]['手番'], '詰まされる側': positions[ply]['詰まされる側']})
             else:
@@ -166,8 +194,9 @@ def build_facts(data):
         before, after = positions[n-1], positions[n]
         for ref in (before, after):
             refs[ref['id']] = ref
-        key = {'手数': n, '実戦手': played[n-1], '指す前': before['形勢'], '指した後': after['形勢'],
-               '指す前の局面図': piece_name(cshogi.Board(boards[n-1][0]).to_bod()),
+        before['局面'] = position_fact(cshogi.Board(boards[n-1][0]), perspective)
+        key = {'手数': n, '実戦手': played[n-1],
+               '実戦の続き': [{'手数': i + 1, **played[i]} for i in range(n, min(n + 3, len(played)))], '指す前': before['形勢'], '指した後': after['形勢'],
                '指す前の参照': before['id'], '指した後の参照': after['id']}
         if (c := best(n-1)) and c['pv'][0] != moves[n-1]:
             key['推奨手の参照'] = branch(n-1, c)
@@ -188,12 +217,12 @@ def build_facts(data):
     for ply in proofs[:1] + proofs[-1:]:
         branch(ply)
     if not moves:
-        positions[0]['局面図'] = piece_name(board.to_bod())
+        positions[0]['局面'] = position_fact(board, perspective)
         if not proofs and (c := best(0)):
             branch(0, c)
     return {
         '視点': '観戦' if perspective == 'observer' else label(0, perspective) + 'が先手、' + label(1, perspective) + 'が後手',
-        '実戦手': [[n, f['表記'], f['印'], positions[n]['形勢'].removeprefix('あなたから見て'),
+        '実戦手': [[n, f['表記'], f['印'], positions[n]['形勢'].removeprefix('あなたから見て'), f['移動'],
                    *(['境界値'] if positions[n].get('境界値') else [])] for n, f in enumerate(played, 1)],
         '終局': outcome, '要所': keypoints, '参照': list(refs.values()),
         '注意': '境界値と探索上の詰みは未確定。宣言可能は宣言済みではない。読み筋は冒頭のみで実戦とは別。投了・宣言の記録は入力にない。',
