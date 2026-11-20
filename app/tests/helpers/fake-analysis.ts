@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import type {
   RealtimeInput,
   RealtimeReply,
+  RealtimeResult,
 } from "../../src/analysis/realtime-types";
 import { Color, Move, Position, Square } from "tsshogi";
 import { legalMoves } from "../../src/core/kif";
@@ -64,7 +65,10 @@ export async function fakeAnalysis(
       sessionId: null as string | null,
       sequence: 0,
       input: null as RealtimeInput | null,
-      result: undefined as AnalysisResult | null | undefined,
+      result: undefined as RealtimeResult | null | undefined,
+      searching: false,
+      gets: 0,
+
       requests: [] as {
         method: string;
         input: RealtimeInput;
@@ -73,7 +77,7 @@ export async function fakeAnalysis(
       stops: 0,
       remainingMs: 18000000,
       low: false,
-      idleMs: 30000,
+      idleMs: undefined as number | undefined,
     },
   };
   page.on("pageerror", (e) => state.errors.push(e.message));
@@ -165,7 +169,11 @@ export async function fakeAnalysis(
         }
         const input = req.postDataJSON();
         rt.sequence = input.sequence ?? 0;
-        rt.input = { initial: input.initial, moves: input.moves };
+        rt.input = {
+          initial: input.initial,
+          moves: input.moves,
+          hold: input.hold,
+        };
         rt.requests.push({
           method: req.method(),
           input,
@@ -177,23 +185,33 @@ export async function fakeAnalysis(
         rt.stops++;
         rt.sessionId = null;
       }
+      if (req.method() === "GET") rt.gets++;
       const generated = rt.input
         ? makeResults({ ...rt.input, mode: "std" }).at(-1)!
         : null;
+      const idleMs = rt.idleMs ?? (rt.input?.hold ? 300000 : 30000);
+      const status = rt.sessionId ? rt.status : "off";
       await send(
         {
           paid: state.paid,
           sessionId: rt.sessionId,
           sequence: rt.sequence,
-          status: rt.sessionId ? rt.status : "off",
+          status,
+          searching:
+            !!rt.sessionId &&
+            rt.searching &&
+            ["preparing", "analyzing", "ready"].includes(status),
           result:
             rt.sessionId && ["ready", "paused", "limit"].includes(rt.status)
               ? rt.result === undefined
-                ? generated
+                ? generated && {
+                    ...generated,
+                    depth: generated.candidates[0]?.depth ?? null,
+                  }
                 : rt.result
               : null,
           error: null,
-          idleMs: rt.idleMs,
+          idleMs,
           quota: {
             monthStart: 1793458800000,
             resetsAt: 1796050800000,

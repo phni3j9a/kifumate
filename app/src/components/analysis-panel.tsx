@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { Color } from "tsshogi";
 import { useAnalysis } from "../analysis/provider";
-import { cp, percent, type CandidateRow } from "../analysis/display";
+import { cp, percent, scoreText, type CandidateRow } from "../analysis/display";
 import {
   needsRetryConfirmation,
   partialSaved,
@@ -18,7 +18,7 @@ import { BarStripes } from "./chance-bar";
 import { ask, toast } from "./overlay";
 import { colors, font, line, radius, shadow } from "./theme";
 import { Button } from "./ui";
-import type { RealtimeState } from "../analysis/realtime-types";
+import type { RealtimeResult, RealtimeState } from "../analysis/realtime-types";
 import { realtimeInfo } from "./realtime-controls";
 export function ChancePie({
   score,
@@ -81,6 +81,9 @@ export function AnalysisPanel({
   ending,
   received = true,
   realtime,
+  realtimeResult,
+  realtimeRow,
+  resumeRealtime,
   retryRealtime,
   toggleRealtime,
   onCoach,
@@ -98,6 +101,9 @@ export function AnalysisPanel({
   ending?: string;
   received?: boolean;
   realtime?: RealtimeState;
+  realtimeResult?: RealtimeResult | null;
+  realtimeRow?: CandidateRow;
+  resumeRealtime?: () => void;
   retryRealtime?: () => void;
   toggleRealtime?: () => void;
   onCoach?: () => void;
@@ -111,14 +117,17 @@ export function AnalysisPanel({
   const waiting = !!t && job?.status === "queued";
   const running = !branch && !!t && !waiting && !confirmation;
   const realtimeBusy =
-    branch &&
-    (realtime?.status === "preparing" || realtime?.status === "analyzing");
+    realtime?.status === "preparing" || realtime?.status === "analyzing";
   const monthlyLimit =
-    branch &&
     realtime?.paid !== false &&
-    realtime?.enabled &&
+    (realtime?.hold || realtime?.enabled) &&
     realtime.status === "limit";
-  const limitTitle = "今月の分岐中の解析は残り0分";
+  const depth = realtimeResult?.depth;
+  const depthLabel = depth == null ? "" : `（深さ${depth}）`;
+  const searchingLabel =
+    realtimeResult && realtime?.searching ? "読み進めています" : "";
+  const paused = realtime?.status === "paused";
+  const limitTitle = "今月のリアルタイム解析は残り0分";
   const limitSub = "月が変わると、また300分使えます";
   const showReset = monthlyLimit
     ? () =>
@@ -195,12 +204,21 @@ export function AnalysisPanel({
       toast("中止を保存できませんでした。もう一度お試しください");
     }
   }
+  const retry = () => (
+    <Button size="sm" onPress={() => retryRealtime?.()}>
+      もう一度試す
+    </Button>
+  );
+  const failedTitle =
+    realtime?.error === "realtime_busy"
+      ? "いまは解析が混み合っています"
+      : "解析できませんでした";
   let title = "",
     sub = "",
     action: React.ReactNode = null;
   if (branch) {
     title = row?.text || "自由に指して試せます";
-    sub = row ? "保存した読み筋" : "この先の評価値は、分岐中の解析で出ます";
+    sub = row ? "保存した読み筋" : "この先の評価値は、リアルタイム解析で出ます";
     if (realtime?.status === "preparing" || realtime?.status === "analyzing") {
       title = realtime.status === "preparing" ? "準備中" : "解析中";
       sub =
@@ -208,10 +226,10 @@ export function AnalysisPanel({
           ? "解析の準備をしています"
           : "この局面の評価値と最善手を調べています";
     } else if (row) {
-      sub = row.move ? "" : "この先は、分岐中の解析で調べられます";
+      sub = row.move ? "" : "この先は、リアルタイム解析で調べられます";
     } else if (realtime?.paid !== false) {
       if (!realtime?.enabled) {
-        title = "分岐中の解析はオフ";
+        title = "リアルタイム解析はオフ";
         sub = "駒は自由に動かせます。時間は使いません";
         action = (
           <Button size="sm" kind="pri" onPress={() => toggleRealtime?.()}>
@@ -221,27 +239,17 @@ export function AnalysisPanel({
       } else if (realtime.status === "offline") {
         title = "通信できません";
         sub = "つながると、評価値と最善手が出ます";
-        action = (
-          <Button size="sm" onPress={() => retryRealtime?.()}>
-            もう一度試す
-          </Button>
-        );
+        action = retry();
       } else if (realtime.status === "limit") {
         title = limitTitle;
         sub = limitSub;
       } else if (realtime.status === "failed") {
-        title =
-          realtime.error === "realtime_busy"
-            ? "いまは解析が混み合っています"
-            : "解析できませんでした";
+        title = failedTitle;
         sub = "時間をおいて、もう一度お試しください";
-        action = (
-          <Button size="sm" onPress={() => retryRealtime?.()}>
-            もう一度試す
-          </Button>
-        );
+        action = retry();
       } else {
-        title = realtime.status === "paused" ? "休止中" : "分岐中の解析はオン";
+        title =
+          realtime.status === "paused" ? "休止中" : "リアルタイム解析はオン";
         sub = "次に指すと、評価値と最善手が出ます";
       }
     }
@@ -356,7 +364,7 @@ export function AnalysisPanel({
           <>
             {tab(row?.move ? row.label : "分岐")}
             {realtime?.paid === false &&
-              tab("分岐中の解析", realtimeInfo, false, true)}
+              tab("リアルタイム解析", realtimeInfo, false, true)}
           </>
         ) : t ? (
           <>
@@ -455,7 +463,7 @@ export function AnalysisPanel({
             >
               {title}
             </Text>
-            {realtimeBusy && <WaitingDots />}
+            {branch && realtimeBusy && <WaitingDots />}
             {running && (
               <Text
                 style={font(700, offline ? 9 : 10, 1.3, colors.ink2)}
@@ -518,6 +526,11 @@ export function AnalysisPanel({
               </Text>
             </Pressable>
           )}
+          {branch && realtimeResult && (
+            <Text style={font(700, 10.5, 1.3, colors.ink2)}>
+              {`リアルタイム解析${depthLabel}${paused ? "・休止中" : searchingLabel ? `・${searchingLabel}` : ""}`}
+            </Text>
+          )}
           {running && (
             <View style={s.progress}>
               <View
@@ -540,7 +553,56 @@ export function AnalysisPanel({
           action
         )}
       </View>
-      {monthlyLimit && row && (
+      {!branch && realtime?.hold && (!monthlyLimit || realtimeResult) && (
+        <View
+          style={[
+            s.card,
+            { marginTop: 8, minHeight: 54 + u * 1.4, paddingVertical: 6 },
+          ]}
+        >
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={font(900, 12.5, 1.4)}>
+              {realtimeResult
+                ? `深く読んだ結果${depthLabel}`
+                : "リアルタイム解析"}
+            </Text>
+            {realtimeResult && (
+              <Text numberOfLines={1} style={font(900, 15.5, 1.4)}>
+                {realtimeRow?.text || "読み筋はここまで"}　
+                {scoreText(realtimeResult.score, self)}
+              </Text>
+            )}
+            <Text numberOfLines={1} style={font(700, 11.5, 1.45, colors.ink2)}>
+              {paused
+                ? "休止中"
+                : realtime.status === "offline"
+                  ? "通信できません"
+                  : realtime.status === "failed" || realtime.status === "off"
+                    ? failedTitle
+                    : realtimeBusy
+                      ? realtime.status === "preparing"
+                        ? "準備中"
+                        : "解析中"
+                      : [
+                          searchingLabel,
+                          realtimeRow?.reading?.slice(1).join(" "),
+                        ]
+                          .filter(Boolean)
+                          .join("　")}
+            </Text>
+          </View>
+          {paused ? (
+            <Button size="sm" onPress={() => resumeRealtime?.()}>
+              再開
+            </Button>
+          ) : realtimeBusy ? (
+            <WaitingDots />
+          ) : ["offline", "failed", "off"].includes(realtime.status) ? (
+            retry()
+          ) : null}
+        </View>
+      )}
+      {monthlyLimit && (row || !branch) && (
         <View
           style={[
             s.card,

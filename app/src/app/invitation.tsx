@@ -63,7 +63,7 @@ export default function Invitation() {
         </Card>
         <SectionTitle>コードを入力</SectionTitle>
         <Hint style={{ marginTop: 0 }}>
-          招待コードで、精密解析・分岐中の解析・AIコーチが使えます。この端末で有効になります。
+          招待コードで、精密解析・リアルタイム解析・AIコーチが使えます。この端末で有効になります。
         </Hint>
         <Input
           accessibilityLabel="招待コード"

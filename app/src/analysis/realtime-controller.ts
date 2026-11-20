@@ -14,6 +14,8 @@ export class RealtimeController {
   snapshot: RealtimeState = {
     paid: null,
     enabled: true,
+    hold: false,
+    searching: false,
     status: "idle",
     result: null,
     positionKey: null,
@@ -48,6 +50,7 @@ export class RealtimeController {
   constructor(
     private api: API,
     private pollMs = 350,
+    private deepPollMs = 1000,
   ) {}
   private clearTimers() {
     clearTimeout(this.timer);
@@ -57,7 +60,7 @@ export class RealtimeController {
     return (
       this.visible &&
       this.foreground &&
-      this.snapshot.enabled &&
+      (this.snapshot.hold || this.snapshot.enabled) &&
       this.snapshot.paid === true
     );
   }
@@ -87,10 +90,44 @@ export class RealtimeController {
     void this.stop();
   }
   move(input: RealtimeInput) {
-    this.desired = { initial: input.initial, moves: [...input.moves] };
+    if (this.snapshot.hold) void this.stop();
+    this.setPosition(input);
+  }
+  startReading(input: RealtimeInput) {
+    if (
+      !this.visible ||
+      !this.foreground ||
+      this.snapshot.paid === false ||
+      this.snapshot.hold
+    )
+      return;
+    if (this.desired) this.leaveBranch();
+    this.emit({ hold: true, status: "preparing" });
+    this.setPosition({ ...input, hold: true });
+    if (this.snapshot.paid === null) void this.resume();
+  }
+  showMain(input: RealtimeInput) {
+    if (!this.snapshot.hold) {
+      if (this.desired) this.leaveBranch();
+      return;
+    }
+    if (this.snapshot.positionKey !== positionKey(input))
+      this.setPosition({ ...input, hold: true });
+  }
+  resumeReading = () => {
+    if (this.snapshot.hold && this.snapshot.status === "paused" && this.desired)
+      this.setPosition(this.desired);
+  };
+  private setPosition(input: RealtimeInput) {
+    this.desired = { ...input, moves: [...input.moves] };
     this.revision++;
     this.clearTimers();
-    this.emit({ result: null, positionKey: positionKey(input), error: null });
+    this.emit({
+      result: null,
+      searching: false,
+      positionKey: positionKey(input),
+      error: null,
+    });
     if (this.allowed) void this.send();
   }
   leaveBranch() {
@@ -116,7 +153,13 @@ export class RealtimeController {
     this.clearTimers();
     const id = this.session;
     this.session = null;
-    this.emit({ result: null, status: this.snapshot.enabled ? "idle" : "off" });
+    if (this.snapshot.hold) this.desired = null;
+    this.emit({
+      hold: false,
+      result: null,
+      searching: false,
+      status: this.snapshot.enabled ? "idle" : "off",
+    });
     const creating = this.creating;
     this.stopping = Promise.all([
       this.stopping,
@@ -148,7 +191,12 @@ export class RealtimeController {
         quota: reply.quota,
         error: null,
         result: null,
-        status: this.snapshot.enabled ? "idle" : "off",
+        searching: false,
+        status: this.snapshot.hold
+          ? "preparing"
+          : this.snapshot.enabled
+            ? "idle"
+            : "off",
       });
       if (reply.status === "off" || reply.status === "failed")
         this.session = null;
@@ -185,6 +233,7 @@ export class RealtimeController {
       this.emit({ quota: error.quota });
     this.emit({
       result: null,
+      searching: false,
       status:
         error instanceof ApiError
           ? error.code === "monthly_limit"
@@ -210,6 +259,7 @@ export class RealtimeController {
     const input = this.desired;
     if (!this.session) {
       this.emit({ status: "preparing" });
+      const sentAt = Date.now();
       const create = async () => {
         let reply: RealtimeReply;
         let recovered = false;
@@ -230,7 +280,7 @@ export class RealtimeController {
         }
         this.session = reply.sessionId;
         this.sequence = reply.sequence;
-        this.activityAt = Date.now();
+        this.activityAt = sentAt;
         if (recovered)
           this.revision++; // 回収した局面は不明。必ずPUTして現在局面と照合する。
         else if (revision === this.revision)
@@ -286,8 +336,10 @@ export class RealtimeController {
     }
     const result =
       reply.result?.ply === this.desired?.moves.length ? reply.result : null;
+    const searching = reply.status === "ready" && reply.searching === true;
     this.emit({
       status: reply.status,
+      searching,
       result,
       quota: reply.quota,
       error: reply.error,
@@ -297,8 +349,12 @@ export class RealtimeController {
       this.timer = setTimeout(() => {
         void this.poll(epoch, revision, sequence);
       }, this.pollMs);
+    } else if (searching) {
+      this.timer = setTimeout(() => {
+        void this.poll(epoch, revision, sequence);
+      }, this.deepPollMs);
     } else if (reply.status === "ready") {
-      // readyで短いGETを止める。無操作期限／月上限の時だけ、休止完了を確認する。
+      // 探索完了後は定期取得を止め、無操作期限／月上限で停止状態だけ確認する。
       const deadline = Math.min(
         this.activityAt + reply.idleMs,
         Date.now() + reply.quota.remainingMs,

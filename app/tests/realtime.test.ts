@@ -15,6 +15,7 @@ const reply = (patch: Partial<RealtimeReply> = {}): RealtimeReply => ({
   sessionId: "session-a",
   sequence: 0,
   status: "ready",
+  searching: false,
   result: {
     ply: 1,
     score: { kind: "cp", value: 25 },
@@ -74,7 +75,7 @@ function setup() {
       return reply({ status: "off" });
     },
   };
-  const controller = new RealtimeController(api, 5);
+  const controller = new RealtimeController(api, 5, 10);
   return { api, calls, controller };
 }
 async function enter(c: RealtimeController) {
@@ -82,7 +83,7 @@ async function enter(c: RealtimeController) {
   await flush();
 }
 
-test("認証・トークンを共用し、分岐APIには局面とsequence以外を送らない", async () => {
+test("認証・トークンを共用し、リアルタイムAPIは局面とsequence、指定時だけholdを送る", async () => {
   const bodies: {
     path: string;
     method: string;
@@ -111,14 +112,23 @@ test("認証・トークンを共用し、分岐APIには局面とsequence以外
     name: "送らない",
   } as RealtimeInput);
   await api.updateRealtime("a/b", input(2), 1);
+  await api.startRealtime({ ...input(1), hold: true });
+  await api.updateRealtime("a/b", { ...input(2), hold: true }, 2);
   await api.stopRealtime("a/b");
   assert.deepEqual(
     bodies.map((b) => b.body),
-    [null, input(1), { ...input(2), sequence: 1 }, null],
+    [
+      null,
+      input(1),
+      { ...input(2), sequence: 1 },
+      { ...input(1), hold: true },
+      { ...input(2), sequence: 2, hold: true },
+      null,
+    ],
   );
   assert.equal(bodies[2]!.path, "https://example.test/v1/realtime/a%2Fb");
   assert.ok(bodies.every((b) => b.auth === `Bearer ${"a".repeat(64)}`));
-  assert.equal(bodies[3]!.method, "DELETE");
+  assert.equal(bodies[5]!.method, "DELETE");
 });
 test("準備→解析→結果、readyで短いポーリングを止める", async () => {
   const { controller: c, api, calls } = setup();
@@ -419,5 +429,97 @@ for (const scene of ["画面離脱", "バックグラウンド"] as const) {
     assert.equal(c.snapshot.result, null);
     assert.equal(calls.posts.length, 0);
     await c.stop();
+  });
+}
+
+test("readyの結果を残したまま深まりを取得し、searching=falseで定期取得を止める", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  const result = { ...reply().result!, depth: 10 };
+  api.startRealtime = async () => reply({ searching: true, result });
+  api.realtime = async () => {
+    calls.gets++;
+    return reply({
+      searching: calls.gets === 2,
+      result: {
+        ...result,
+        depth: 10 + calls.gets,
+        score: { kind: "cp", value: 30 + calls.gets },
+      },
+    });
+  };
+  c.move(input(1));
+  await flush();
+  assert.equal(c.snapshot.status, "ready");
+  assert.equal(c.snapshot.result?.depth, 10);
+  t.mock.timers.tick(9);
+  await flush();
+  assert.equal(calls.gets, 1);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(c.snapshot.result?.depth, 12);
+  t.mock.timers.tick(10);
+  await flush();
+  assert.equal(c.snapshot.result?.depth, 13);
+  assert.equal(c.snapshot.result?.score?.value, 33);
+  assert.equal(c.snapshot.searching, false);
+  t.mock.timers.tick(100);
+  await flush();
+  assert.equal(calls.gets, 3);
+  await c.stop();
+});
+
+for (const scene of [
+  "終了",
+  "画面離脱",
+  "バックグラウンド",
+  "分岐に入る",
+] as const) {
+  test(`本譜は明示開始のみ。休止から再開し、${scene}で終了する`, async () => {
+    const { controller: c, api, calls } = setup();
+    await enter(c);
+    c.toggle(); // 分岐の設定と「深く読む」は独立。
+    c.showMain(input(0));
+    c.showMain(input(1));
+    await flush();
+    assert.deepEqual(calls.posts, []);
+    c.startReading(input(1));
+    await flush();
+    assert.deepEqual(calls.posts, [{ ...input(1), hold: true }]);
+    const puts: RealtimeInput[] = [];
+    api.updateRealtime = async (_id, i, sequence) => {
+      puts.push(i);
+      return reply({
+        sequence,
+        status: "paused",
+        result: { ...reply().result!, ply: i.moves.length },
+      });
+    };
+    c.showMain(input(2));
+    await flush();
+    assert.equal(c.snapshot.status, "paused");
+    assert.equal(c.snapshot.result?.ply, 2);
+    c.resumeReading();
+    await flush();
+    c.showMain(input(1));
+    await flush();
+    assert.deepEqual(
+      puts,
+      [input(2), input(2), input(1)].map((i) => ({ ...i, hold: true })),
+    );
+    if (scene === "終了") await c.stop();
+    if (scene === "画面離脱") c.setVisible(false);
+    if (scene === "バックグラウンド") c.setForeground(false);
+    if (scene === "分岐に入る") c.move(input(2));
+    await flush();
+    assert.equal(c.snapshot.hold, false);
+    assert.equal(c.snapshot.result, null);
+    assert.deepEqual(calls.stops, ["session-a"]);
+    await enter(c);
+    c.setForeground(true);
+    c.showMain(input(1));
+    await flush();
+    assert.equal(calls.posts.length, 1);
   });
 }
