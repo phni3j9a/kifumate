@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """USI 中継。外部へは Worker 経由だけで到達させる。棋譜の個人情報は受け取らない。"""
-from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -96,11 +95,8 @@ def prepare(data, *, realtime=False):
             raise InvalidInput()
         board.push(move)
     target = target or board.sfen()
-    repetition = False
-    if realtime:
-        # 同一局面は手数を除いた盤面・手番・持駒が4回一致した時点で終局。
-        positions.append(target.rsplit(' ', 1)[0])
-        repetition = any(count >= 4 for count in Counter(positions).values())
+    # 解析対象と同じ局面が過去に3回ある場合だけ千日手。打開後は探索を続ける。
+    repetition = realtime and positions.count(target.rsplit(' ', 1)[0]) == 3
     return cshogi.Board(target), initial, moves, mode, ply, repetition
 
 

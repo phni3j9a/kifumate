@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import threading
+from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -197,11 +198,23 @@ def test_realtime_fourfold_repetition_is_terminal(monkeypatch):
         def unexpected_search(command):
             raise AssertionError(f'千日手成立後のUSIコマンド: {command}')
         monkeypatch.setattr(engine, 'send', unexpected_search)
-        for moves in (cycle * 3, cycle * 3 + ['7g7f']):
-            result = engine.analyze(payload(moves=moves, ply=len(moves)), movetime_ms=250)
-            assert result == {'ply': len(moves), 'score': None, 'candidates': [], 'mate': None, 'terminal': True}
+        result = engine.analyze(payload(moves=cycle * 3 + ['7g7f'], ply=12), movetime_ms=250)
+        assert result == {'ply': 12, 'score': None, 'candidates': [], 'mate': None, 'terminal': True}
     finally:
         engine.close()
+
+
+def test_realtime_searches_after_breaking_repetition():
+    moves = ['5i5h', '5a5b', '5h5i', '5b5a'] * 3 + ['7g7f', '3c3d']
+    engine = Mock(spec=bridge.Engine, mode='std')
+    engine.until.return_value = ['info depth 4 score cp 123 pv 2g2f', 'bestmove 2g2f']
+
+    result = bridge.Engine.analyze(engine, payload(moves=moves, ply=len(moves)), movetime_ms=250)
+
+    engine.send.assert_any_call('go movetime 250')
+    assert result['terminal'] is False
+    assert result['score'] == {'kind': 'cp', 'value': 123}
+    assert result['candidates'][0]['pv'] == ['2g2f']
 
 
 def test_realtime_stop_drains_bestmove_and_reuses_process():
