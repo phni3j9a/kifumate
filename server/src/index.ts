@@ -96,7 +96,7 @@ export class Device extends DurableObject<Env> {
       const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
       const response = await this.env.PRECISE.getByName('slot-' + slot).fetch('http://container/coach-facts', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, signal,
-        body: JSON.stringify({initial: input.input.initial, moves: input.input.moves, results: input.results, perspective: input.perspective}),
+        body: JSON.stringify({initial: input.input.initial, moves: input.input.moves, results: input.results, perspective: input.perspective, question: input.question}),
       });
       if (!response.ok) throw new ApiError(502, 'facts_unavailable');
       return await response.json();

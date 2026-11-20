@@ -50,7 +50,7 @@ def prose(value):
 def body(payload, provider, prompt=None, reasoning_effort="none", max_tokens=2000, api="chat"):
     _, model, _, token_parameter = PROVIDERS[provider]
     a = payload["analysis"]
-    data = {"facts": build_facts({"initial": a["initial"], "moves": a["moves"], "results": a["results"], "perspective": payload["perspective"]}),
+    data = {"facts": build_facts({"initial": a["initial"], "moves": a["moves"], "results": a["results"], "perspective": payload["perspective"], "question": payload.get("question")}),
             "perspective": payload["perspective"], "profile": {"practice": [prose(p) for p in payload["profile"].get("practice", [])], "goal": prose(payload["profile"].get("goal", ""))}, "style": payload["style"],
             "history": [{"role": h["role"], "content": prose(h["content"])} for h in payload["history"]], "question": prose(payload.get("question", "対局を振り返ってください"))}
     messages = [{"role": "system", "content": PROMPT.read_text() if prompt is None else prompt},

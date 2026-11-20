@@ -78,6 +78,40 @@ describe('日本語事実の矛盾検査', () => {
   });
 });
 
+describe('出力の手数・KIF照合', () => {
+  const rows: CoachFacts['実戦手'] = [
+    [1, '▲7六歩(77)', '疑問手', '互角'], [2, '△3四歩(33)', '判定なし', '不利'],
+  ];
+  const results = [{...analysis.results[0], candidates: [{rank: 1, score: null, pv: ['2g2f']}, {rank: 2, score: null, pv: ['5g5f']}]},
+    analysis.results[1], {ply: 2, score: null, candidates: [], mate: null}];
+  const all = references(results);
+  const sample: CoachFacts = {...facts, 実戦手: rows, 参照: [...facts.参照, {
+    id: '0:candidate:1', 読み筋: [{表記: '▲2六歩(27)'}, {表記: '△同　成桂(34)'}, {表記: '▲3五角打'}],
+  }]};
+  it.each([
+    '1手目 ▲7六歩(77)から、2手目の△3四歩まで進みました。',
+    '１ 手目：☗７六歩。おすすめは ▲2六歩。',
+    '候補は二六歩、続いて△同成桂(34)や▲3五角打。',
+    '指す前に候補を2つ読み、1手詰めも確認しましょう。',
+    '練習では一歩ずつ、駒の利きを確認します。',
+  ])('資料の表記や通常の数字を許可: %s', text => {
+    expect(() => validateOutput(section(text), all, sample)).not.toThrow();
+  });
+  it.each([
+    '▲2四歩', '△7六歩', '1手目 ▲7六歩(78)', '▲7六歩成', '▲3五角', '△同成銀',
+    '1手目 ▲2六歩', '2手目 △同成桂', '1手目 △3四歩', '0手目', '1手目と３手目', '▲',
+    '評価値-1200', '＋３５０', '評価値は − 1200', '評価値は500', '2g2f',
+  ])('未知・不一致の手、評価値、USIを拒否: %s', text => {
+    expect(() => validateOutput(section(text), all, sample)).toThrow('invalid_output');
+  });
+  it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
+    const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
+    expect(() => validateOutput(output('2:position', '2手目 △3四歩。相手は歩を進めました。相手が有利です。'), all, sample)).not.toThrow();
+    expect(() => validateOutput(output('2:position', 'あなたは歩を進めました。'), all, sample)).toThrow('invalid_output');
+    expect(() => validateOutput(output('0:candidate:2', '振り返りましょう。'), all, sample)).toThrow('invalid_output');
+  });
+});
+
 describe('依頼と取得の分離', () => {
   it('切断・DO再生成後もalarmで完了し、再取得では一度しか数えない', async () => fixture(async state => {
     const c = new Coach(state.storage, config, 'device', () => true), p = await payload();
@@ -194,9 +228,10 @@ describe('実APIの接続', () => {
         expect(url).toBe('http://container/coach-facts');
         const body = JSON.parse(init.body as string);
         expect(body.initial).toBe('startpos'); expect(body.perspective).toBe('sente');
+        expect(body.question).toBe('1手目はどうでしたか？');
         received = true; return Response.json(facts);
       }})};
-      const p = await payload();
+      const p = {...await payload(), question: '1手目はどうでしたか？'};
       p.proof = await signAnalysis('key', instance.ctx.id.toString(), 'job', {initial: analysis.initial, moves: analysis.moves, mode: analysis.mode}, analysis.results);
       const request = post(p); request.headers.set('X-Dev-Paid', '1');
       const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {

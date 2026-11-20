@@ -245,8 +245,8 @@ def test_coach_facts_http_does_not_start_engine(monkeypatch):
             {'ply': i, 'score': None, 'candidates': [], 'mate': None} for i in range(2)]}
         with urlopen(Request(f'http://127.0.0.1:{server.server_port}/coach-facts', json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
             facts = json.load(response)
-        assert facts['実戦手'][0]['指した側'] == '相手'
-        assert facts['実戦手'][0]['表記'] == '▲7六歩(77)'
+        assert facts['視点'] == '相手が先手、あなたが後手'
+        assert facts['実戦手'][0][1] == '▲7六歩(77)'
         assert bridge.engine is None
     finally:
         server.shutdown(); server.server_close(); serving.join()
