@@ -523,3 +523,18 @@ for (const scene of [
     assert.equal(calls.posts.length, 1);
   });
 }
+
+test("権利確認前に深く読むを押しても、無料と分かれば待機を終えPOSTしない", async () => {
+  const { controller: c, api, calls } = setup();
+  const pending = deferred<RealtimeReply>();
+  api.realtime = async () => pending.promise;
+  c.setVisible(true);
+  c.startReading(input(1));
+  await flush();
+  assert.equal(c.snapshot.hold, true);
+  pending.resolve(reply({ paid: false, sessionId: null, status: "off" }));
+  await flush();
+  assert.equal(c.snapshot.hold, false);
+  assert.equal(c.snapshot.paid, false);
+  assert.deepEqual(calls.posts, []);
+});

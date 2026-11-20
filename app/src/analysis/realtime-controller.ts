@@ -186,6 +186,11 @@ export class RealtimeController {
       )
         await this.remove(reply.sessionId);
       if (epoch !== this.epoch || !this.visible || !this.foreground) return;
+      if (reply.paid !== true && this.snapshot.hold) {
+        this.emit({ quota: reply.quota });
+        this.fail(new ApiError(403, "paid_required"));
+        return;
+      }
       this.emit({
         paid: reply.paid ?? false,
         quota: reply.quota,
