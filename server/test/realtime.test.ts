@@ -88,6 +88,16 @@ describe('リアルタイム解析', () => {
     expect(f.calls).toHaveLength(times.length);
     expect(f.stops()).toBe(0);
   }));
+  it('旧スキーマのセッション・利用時間を保持してhold列を追加する', async () => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    f.advance(1234);
+    f.sql.exec('ALTER TABLE rt_sessions DROP COLUMN hold');
+    f.restart();
+    const existing = await f.request();
+    expect(existing.sessionId).toBe(first.sessionId); expect(existing.idleMs).toBe(30_000);
+    expect(existing.result.depth).toBeNull(); expect(existing.quota.usedMs).toBe(1234);
+    await f.request('DELETE', undefined, 'a', true, first.sessionId);
+  }));
   it('holdは5分。PUTごとに数え直し、省略・falseは通常の期限に戻す', async () => fixture(async f => {
     const update = (sequence: number, extra = {}) => f.request('PUT', {...position, sequence, ...extra}, 'a', true, first.sessionId);
     const first = await f.request('POST', {...position, hold: true});
