@@ -1,5 +1,7 @@
 import prompt from './coach-prompt.txt';
-import { contradicts, hasFactReference, notationIssue, type CoachFacts } from './coach-facts';
+import toolsPrompt from './coach-tools-prompt.txt';
+import { abortable, RESPONSES_TOOLS, responsesWithTools, type RunTools } from './coach-tools';
+import { contradicts, hasFactReference, lineOrigin, notationIssue, type CoachFacts } from './coach-facts';
 import { ApiError, json, monthStart, nextMonth, parseInput, readJson, sha256, type Input } from './model';
 
 export interface CoachEnv {
@@ -12,6 +14,7 @@ export interface CoachEnv {
   COACH_MONTHLY_LIMIT?: string;
   COACH_MAX_TOKENS?: string;
   COACH_TOKEN_PARAMETER?: string;
+  COACH_REASONING_EFFORT?: string;
   COACH_TIMEOUT_MS?: string;
 }
 export interface Proof {
@@ -102,13 +105,26 @@ export const SYSTEM_PROMPT = prompt;
 function prose(value: string) {
   return value.replace(/(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])/g, '（指し手は参照で確認）');
 }
-export function messages(input: CoachInput, _refs: Reference[], facts?: CoachFacts) {
-  return [{role: 'system', content: SYSTEM_PROMPT}, {role: 'user', content: JSON.stringify({
-    facts: facts ?? {視点: input.perspective === 'observer' ? '観戦' : input.perspective === 'sente' ? 'あなたが先手、相手が後手' : '相手が先手、あなたが後手', 参照: _refs.map(r => ({id: r.id}))},
-    perspective: input.perspective, profile: {practice: input.profile.practice.map(prose), goal: prose(input.profile.goal)}, style: input.style,
-    // 履歴を会話ロールとして昇格させず、同じ棋譜の参考データとして渡す。
+function consultation(input: CoachInput) {
+  return {
+    profile: {practice: input.profile.practice.map(prose), goal: prose(input.profile.goal)}, style: input.style,
+    // 履歴は会話ロールへ昇格させず、棋譜の参考データとして渡す。
     history: input.history.map(h => ({role: h.role, content: prose(h.content)})), question: prose(input.question ?? '対局を振り返ってください'),
+  };
+}
+export function messages(input: CoachInput, _refs: Reference[], facts?: CoachFacts) {
+  const {詰みの別応手: _, ...modelFacts} = facts ?? {};
+  return [{role: 'system', content: SYSTEM_PROMPT}, {role: 'user', content: JSON.stringify({
+    facts: facts ? modelFacts : {視点: input.perspective === 'observer' ? '観戦' : input.perspective === 'sente' ? 'あなたが先手、相手が後手' : '相手が先手、あなたが後手', 参照: _refs.map(r => ({id: r.id}))},
+    perspective: input.perspective, ...consultation(input),
   })}];
+}
+function toolsContext(input: CoachInput, facts: CoachFacts) {
+  return {
+    視点: facts.視点, 終局: facts.終局, 対局手数: input.input.moves.length,
+    要所: (facts.要所 ?? []).map(({実戦手, 実戦の続き: _, ...key}) => ({...key, 実戦手: 実戦手.表記})),
+    ...consultation(input),
+  };
 }
 function setting(value: string | undefined, fallback: number, max: number) {
   const n = Number(value ?? fallback); return Number.isSafeInteger(n) && n > 0 && n <= max ? n : fallback;
@@ -119,16 +135,31 @@ function errorType(error: unknown) {
   return error instanceof ApiError ? 'ApiError' : error instanceof TypeError ? 'TypeError' : error instanceof SyntaxError ? 'SyntaxError'
     : error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name) ? error.name : 'Error';
 }
-export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch, facts?: CoachFacts): Promise<unknown> {
+export async function complete(env: CoachEnv, input: CoachInput, refs: Reference[], signal: AbortSignal, transport: typeof fetch = fetch, facts?: CoachFacts,
+  runTools?: RunTools, deadline = Date.now() + timeoutMs(env)): Promise<unknown> {
   if (env.COACH_PROVIDER === 'fake') {
     if (!['local', 'staging'].includes(env.ENVIRONMENT)) throw new ApiError(503, 'provider_unavailable');
     return {sections: [{kind: 'facts', title: '対局の振り返り', text: '解析結果をもとに振り返りましょう。', refs: [refs[0].id]},
       {kind: 'advice', title: '次の練習', text: '気になった局面を盤の上で確かめましょう。', refs: []}]};
   }
-  if (env.COACH_PROVIDER && env.COACH_PROVIDER !== 'openai-compatible') throw new ApiError(503, 'provider_unavailable');
+  const withTools = env.COACH_PROVIDER === RESPONSES_TOOLS;
+  if (env.COACH_PROVIDER && env.COACH_PROVIDER !== 'openai-compatible' && !withTools) throw new ApiError(503, 'provider_unavailable');
   if (!env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
-  const url = new URL((env.COACH_BASE_URL ?? 'https://api.deepseek.com').replace(/\/$/, '') + '/chat/completions');
+  const base = env.COACH_BASE_URL ?? (withTools ? 'https://api.openai.com/v1' : 'https://api.deepseek.com');
+  const url = new URL(base.replace(/\/$/, '') + (withTools ? '/responses' : '/chat/completions'));
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new ApiError(503, 'provider_unavailable');
+  if (withTools) {
+    if (!facts || !runTools) throw new ApiError(502, 'facts_unavailable');
+    const value = await responsesWithTools({url: url.toString(), key: env.COACH_API_KEY, model: env.COACH_MODEL ?? 'gpt-6.1-terra',
+      effort: env.COACH_REASONING_EFFORT ?? 'high', maxTokens: setting(env.COACH_MAX_TOKENS, 5400, 65536), deadline,
+      reserveMs: Math.min(30_000, timeoutMs(env) / 4), prompt: toolsPrompt, userContext: toolsContext(input, facts),
+      facts, signal, transport, runTools, inspect: (raw, evidence) => {
+        try { return inspectDraft(JSON.parse(raw), refs, evidence); }
+        catch { return {accepted: false, issues: [{code: 'invalid_json'}]}; }
+      },
+    });
+    return withoutClaims(value);
+  }
   const started = Date.now();
   let stage = 'provider_fetch', httpStatus: number | undefined;
   try {
@@ -150,6 +181,24 @@ export async function complete(env: CoachEnv, input: CoachInput, refs: Reference
     throw error;
   }
 }
+function publicReferenceIds(ids: unknown[], refs: Reference[], facts?: CoachFacts) {
+  if (!Array.isArray(ids)) throw new Error();
+  const origins = new Set<string>();
+  const unique = new Set<string>();
+  for (const id of ids) {
+    if (typeof id !== 'string') throw new Error();
+    const origin = facts && lineOrigin(id, facts);
+    const publicId = origin ?? id;
+    if (!refs.some(r => r.id === publicId) || facts && !hasFactReference(publicId, facts)) throw new Error();
+    unique.add(publicId);
+    if (origin) origins.add(origin);
+  }
+  if (!origins.size && ids.length > 10) throw new Error();
+  // 上限を超える場合は、仮の手順を根拠にした起点を優先して元の順に返す。
+  const kept = new Set([...origins, ...unique].slice(0, 10));
+  return [...unique].filter(id => kept.has(id));
+}
+
 export function validateOutput(value: unknown, refs: Reference[], facts?: CoachFacts) {
   try {
     const x = record(value); keys(x, ['sections']);
@@ -158,21 +207,55 @@ export function validateOutput(value: unknown, refs: Reference[], facts?: CoachF
       const s = record(value); keys(s, ['kind', 'title', 'text', 'refs']);
       if (!['facts', 'advice'].includes(s.kind)) throw new Error();
       const title = text(s.title, 80), body = text(s.text, 2000);
-      if (notationIssue(title + '。' + body, facts, s.kind)) throw new Error();
-      if (!Array.isArray(s.refs) || s.refs.length > 10 || (s.kind === 'facts' && !s.refs.length)) throw new Error();
-      const selected = s.refs.map((id: unknown) => {
-        const ref = refs.find(r => r.id === id); if (!ref || facts && !hasFactReference(ref.id, facts)) throw new Error(); return ref;
-      });
-      if (facts && contradicts(title + '。' + body, s.refs, facts)) throw new Error();
-      return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected};
+      if (!Array.isArray(s.refs)) throw new Error();
+      const selected = publicReferenceIds(s.refs, refs, facts);
+      if (s.kind === 'facts' && !selected.length) throw new Error();
+      if (notationIssue(title + '。' + body, facts, s.kind, selected)) throw new Error();
+      if (facts && contradicts(title + '。' + body, selected, facts)) throw new Error();
+      return {kind: s.kind as 'facts' | 'advice', title, text: body, references: selected.map(id => refs.find(r => r.id === id)!)};
     })};
   } catch { throw new ApiError(502, 'invalid_output'); }
+}
+
+function withoutClaims(value: unknown) {
+  if (value && typeof value === 'object' && 'claims' in value && Array.isArray(value.claims) && !Array.isArray(value)) {
+    const {claims: _, ...output} = value;
+    return output;
+  }
+  return value;
+}
+
+export function inspectDraft(draft: unknown, refs: Reference[], facts: CoachFacts, includeOutput = false) {
+  const issues: {section?: number; field?: string; code: string}[] = [];
+  const output: any = withoutClaims(draft);
+  try {
+    const published = validateOutput(output, refs, facts);
+    return {accepted: true, issues, ...(includeOutput ? {published} : {})};
+  } catch { /* 以下は診断のみ */ }
+  if (Array.isArray(output?.sections)) output.sections.forEach((s: any, section: number) => {
+    try { validateOutput({sections: [s]}, refs, facts); return; } catch { /* 不合格の節だけを検査 */ }
+    const count = issues.length;
+    if (s && ['facts', 'advice'].includes(s.kind)) {
+      let selected: string[] = [];
+      try { selected = publicReferenceIds(s.refs, refs, facts); }
+      catch { issues.push({section, field: 'refs', code: 'invalid_reference'}); }
+      for (const field of ['title', 'text']) {
+        if (typeof s[field] !== 'string') continue;
+        const issue = notationIssue(s[field], facts, s.kind, selected);
+        if (issue) issues.push({section, field, code: issue});
+        if (Array.isArray(s.refs) && contradicts(s[field], selected, facts)) issues.push({section, field, code: 'contradicts'});
+      }
+    }
+    if (count === issues.length) issues.push({section, code: 'invalid_output'});
+  });
+  return {accepted: false, issues: issues.length ? issues : [{code: 'invalid_output'}]};
 }
 
 export class Coach {
   private active = new Map<string, AbortController>();
   constructor(private storage: DurableObjectStorage, private env: CoachEnv, private device: string, private paid: () => boolean,
-    private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>, private refreshPaid?: () => Promise<void>) {
+    private loadFacts?: (input: CoachInput, signal: AbortSignal) => Promise<CoachFacts | undefined>, private refreshPaid?: () => Promise<void>,
+    private runTools?: (input: CoachInput, calls: Parameters<RunTools>[0], signal: AbortSignal) => Promise<unknown[]>) {
     storage.sql.exec(`CREATE TABLE IF NOT EXISTS coach_usage (month INTEGER PRIMARY KEY, used INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
@@ -231,10 +314,12 @@ export class Coach {
       if (!this.paid()) throw new ApiError(403, 'paid_required');
       if (this.env.COACH_PROVIDER !== 'fake' && !this.env.COACH_API_KEY) throw new ApiError(503, 'provider_unavailable');
       stage = 'load_facts';
-      const facts = this.loadFacts ? await this.loadFacts(input, signal) : undefined;
+      const loadFacts = this.loadFacts;
+      const facts = loadFacts ? await abortable(signal, () => loadFacts(input, signal)) : undefined;
       if (!facts && this.env.COACH_PROVIDER !== 'fake' && this.loadFacts) throw new ApiError(502, 'facts_unavailable');
       stage = 'complete';
-      const value = await complete(this.env, input, refs, signal, fetch, facts);
+      const value = await complete(this.env, input, refs, signal, fetch, facts,
+        this.runTools && ((calls, signal) => this.runTools!(input, calls, signal)), deadline);
       stage = 'validate_output';
       const output = validateOutput(value, refs, facts);
       stage = 'commit';

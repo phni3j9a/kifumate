@@ -28,7 +28,7 @@
   "env": {
     "staging": {
       "name": "kifumate-analysis-staging",
-      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "32768", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-compatible", "COACH_BASE_URL": "https://api.deepseek.com", "COACH_MODEL": "deepseek-flash", "COACH_TOKEN_PARAMETER": "max_tokens"},
+      "vars": {"ENVIRONMENT": "staging", "ALLOW_DEV_PAID": "true", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "5400", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-responses-tools", "COACH_BASE_URL": "https://api.openai.com/v1", "COACH_MODEL": "gpt-6.1-terra", "COACH_REASONING_EFFORT": "high"},
       "durable_objects": {
         "bindings": [
           {"name": "DEVICES", "class_name": "Device"},
@@ -60,7 +60,7 @@
     },
     "production": {
       "name": "kifumate-analysis-production",
-      "vars": {"ENVIRONMENT": "production", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "32768", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-compatible", "COACH_BASE_URL": "https://api.deepseek.com", "COACH_MODEL": "deepseek-flash", "COACH_TOKEN_PARAMETER": "max_tokens"},
+      "vars": {"ENVIRONMENT": "production", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000", "COACH_MONTHLY_LIMIT": "100", "COACH_MAX_TOKENS": "5400", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-responses-tools", "COACH_BASE_URL": "https://api.openai.com/v1", "COACH_MODEL": "gpt-6.1-terra", "COACH_REASONING_EFFORT": "high"},
       "durable_objects": {
         "bindings": [
           {"name": "DEVICES", "class_name": "Device"},

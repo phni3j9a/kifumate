@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """コーチ用の確定情報。盤面とKIF表記は解析と同じcshogiで扱う。"""
 import re
+import time
 import unicodedata
 from collections import Counter
 
@@ -107,7 +108,34 @@ def line_fact(board, pv, previous, perspective):
     return line, summary
 
 
-def build_facts(data):
+# 保存済み応手の表記変換だけを行う。探索はせず、異常に大きい資料で本体の生成を遅らせない。
+MATE_REPLY_LIMIT = 4096
+MATE_REPLY_SECONDS = 0.25
+
+
+def mate_reply_facts(results, boards, perspective):
+    deadline = time.monotonic() + MATE_REPLY_SECONDS
+    count = 0
+    replies = {}
+    for ply, row in enumerate(results):
+        proof = row.get('mate')
+        if not proof:
+            continue
+        pv = proof['pv']
+        for branch in proof.get('branches', []):
+            if count >= MATE_REPLY_LIMIT or time.monotonic() >= deadline:
+                return replies
+            count += 1
+            suffix = [branch['reply'], branch['mate']]
+            if suffix == pv[1:]:
+                continue  # 代表手順は従来の参照に含まれる。
+            sfen, prev = boards[ply]
+            line, _ = line_fact(cshogi.Board(sfen), [pv[0], *suffix], prev, perspective)
+            replies.setdefault(f'{ply}:mate', []).append(line[1:])
+    return replies
+
+
+def build_facts(data, *, include_mate_replies=False):
     # 署名照合済みの資料。合法性は本譜と実際に提示する読み筋を確認する。
     initial, moves, results, perspective = (data[k] for k in ('initial', 'moves', 'results', 'perspective'))
     if perspective not in ('sente', 'gote', 'observer') or len(results) != len(moves) + 1:
@@ -225,5 +253,6 @@ def build_facts(data):
         '実戦手': [[n, f['表記'], f['印'], positions[n]['形勢'].removeprefix('あなたから見て'), f['移動'],
                    *(['境界値'] if positions[n].get('境界値') else [])] for n, f in enumerate(played, 1)],
         '終局': outcome, '要所': keypoints, '参照': list(refs.values()),
+        **({'詰みの別応手': mate_reply_facts(results, boards, perspective)} if include_mate_replies else {}),
         '注意': '境界値と探索上の詰みは未確定。宣言可能は宣言済みではない。読み筋は冒頭のみで実戦とは別。投了・宣言の記録は入力にない。',
     }
