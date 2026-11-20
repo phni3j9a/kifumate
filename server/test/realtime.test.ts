@@ -8,20 +8,20 @@ import { MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realt
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const position = {initial: 'startpos', moves: []};
 const origin = Date.parse('2026-11-17T00:00:00Z');
-async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
+async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000, holdIdleMs = 300_000) {
   const stub = devices.getByName(await sha256(crypto.randomUUID()));
   await runInDurableObject(stub, async (_instance, state) => {
     let now = origin, stops = 0, due = 0;
     const tasks: Promise<void>[] = [], calls: any[] = [];
     const backend: RealtimeBackend = {
-      analyze: async (input, session, sequence, signal) => {
-        calls.push({input, session, sequence, signal});
-        return Response.json({ply: input.moves.length, score: {kind: 'cp', value: sequence}, candidates: [], mate: null});
+      analyze: async (input, session, sequence, round, movetimeMs, signal) => {
+        calls.push({input, session, sequence, round, movetimeMs, signal});
+        return Response.json({ply: input.moves.length, score: {kind: 'cp', value: sequence}, candidates: [], mate: null, terminal: true});
       },
       stop: async () => { stops++; now += 5; },
       schedule: async when => { due = when; },
     };
-    let rt = new RealtimeSessions(state.storage, backend, idleMs, () => now);
+    let rt = new RealtimeSessions(state.storage, backend, idleMs, holdIdleMs, () => now);
     const send = async (request: Request, owner = 'a', paid = true, checkPaid?: () => Promise<boolean>) => {
       const response = await rt.fetch(request, owner, paid, work => tasks.push(work), checkPaid);
       return {httpStatus: response.status, ...await response.json() as any};
@@ -34,12 +34,12 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000) {
       advance: (ms: number) => { now += ms; }, time: (value: number) => { now = value; },
       drain: async () => { await Promise.all(tasks.splice(0)); }, expire: () => rt.expire(),
       stops: () => stops, due: () => due, disconnected: () => rt.disconnected(),
-      restart: () => { rt = new RealtimeSessions(state.storage, backend, idleMs, () => now); },
+      restart: () => { rt = new RealtimeSessions(state.storage, backend, idleMs, holdIdleMs, () => now); },
     });
   });
 }
 
-describe('分岐中の解析', () => {
+describe('リアルタイム解析', () => {
   it('本文受信後の外部権利再照会で取消を検知し、コンテナを起動しない', async () => {
     await runInDurableObject(devices.getByName(crypto.randomUUID()), async (_, state) => {
       let starts = 0;
@@ -60,6 +60,77 @@ describe('分岐中の解析', () => {
     expect(nextMonth(Date.parse('2026-12-31T15:00:00Z'))).toBe(Date.parse('2027-01-31T15:00:00Z'));
     expect(nextMonth(Date.parse('2028-02-28T15:00:00Z'))).toBe(Date.parse('2028-02-29T15:00:00Z'));
   });
+  it('同じsequenceで結果を更新し、時間を倍増して60秒を繰り返す。終局で探索だけ終了する', async () => fixture(async f => {
+    const pending: ((response: Response) => void)[] = [];
+    f.backend.analyze = async (_input: unknown, session: string, sequence: number, round: number, ms: number) => {
+      f.calls.push({session, sequence, round, ms});
+      return new Promise<Response>(resolve => { pending.push(resolve); });
+    };
+    const first = await f.request('POST', position);
+    expect(first.searching).toBe(true);
+    expect(first.result).toBeNull();
+    const times = [250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000];
+    for (const [round, ms] of times.entries()) {
+      await expect.poll(() => pending.length).toBe(round + 1);
+      expect(f.calls[round]).toEqual({session: first.sessionId, sequence: 0, round, ms});
+      f.advance(250);
+      const terminal = round === times.length - 1;
+      pending[round](Response.json({ply: 0, candidates: [{rank: 1, depth: round + 5}], terminal}));
+      await expect.poll(async () => (await f.request()).result?.depth).toBe(round + 5);
+      const latest = await f.request();
+      expect(latest.status).toBe('ready'); expect(latest.sequence).toBe(0);
+      expect(latest.searching).toBe(!terminal);
+      expect(latest.result).not.toHaveProperty('terminal');
+      expect(f.due()).toBe(origin + 30_000);
+      expect(latest.quota.usedMs).toBe((round + 1) * 250);
+    }
+    await f.drain();
+    expect(f.calls).toHaveLength(times.length);
+    expect(f.stops()).toBe(0);
+  }));
+  it('holdは5分。PUTごとに数え直し、省略・falseは通常の期限に戻す', async () => fixture(async f => {
+    const update = (sequence: number, extra = {}) => f.request('PUT', {...position, sequence, ...extra}, 'a', true, first.sessionId);
+    const first = await f.request('POST', {...position, hold: true});
+    await f.drain();
+    expect(first.idleMs).toBe(300_000); expect(f.due()).toBe(origin + 300_000);
+    f.advance(30_000);
+    f.restart();
+    const kept = await f.request();
+    expect(kept.status).toBe('ready'); expect(kept.idleMs).toBe(300_000);
+    expect((await update(1, {hold: true})).idleMs).toBe(300_000);
+    await f.drain();
+    expect(f.due()).toBe(origin + 330_000);
+    f.advance(270_000); await f.expire();
+    expect(f.stops()).toBe(0);
+    f.advance(30_000); await f.expire();
+    const paused = await f.request();
+    expect(paused.status).toBe('paused'); expect(paused.searching).toBe(false);
+    expect(paused.quota.usedMs).toBe(330_005);
+    expect((await update(2)).idleMs).toBe(30_000);
+    expect((await update(3, {hold: true})).idleMs).toBe(300_000);
+    expect((await update(4, {hold: false})).idleMs).toBe(30_000);
+    await f.drain();
+    expect(f.due()).toBe(origin + 360_005);
+  }));
+  it.each([false, true])('探索中の休止・月上限では古い結果を保存しない（上限=%s）', async limited => fixture(async f => {
+    if (limited) f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 1000);
+    let signal!: AbortSignal, release!: (response: Response) => void;
+    f.backend.analyze = async (_input: unknown, _id: string, _sequence: number, round: number, _ms: number, abort: AbortSignal) => {
+      if (round === 0) return Response.json({ply: 0, candidates: [{rank: 1, depth: 5}], terminal: false});
+      signal = abort;
+      return new Promise<Response>(resolve => { release = resolve; });
+    };
+    await f.request('POST', position);
+    await expect.poll(() => !!release).toBe(true);
+    f.advance(1000); await f.expire();
+    expect(signal.aborted).toBe(true);
+    release(Response.json({ply: 0, candidates: [{rank: 1, depth: 9}], terminal: false}));
+    await f.drain();
+    const end = await f.request();
+    expect(end.status).toBe(limited ? 'limit' : 'paused');
+    expect(end.searching).toBe(false); expect(end.result.depth).toBe(5);
+    expect(end.quota.usedMs).toBe(limited ? MONTHLY_MS : 1005);
+  }, 1000));
   it('探索済みの待機時間も数え、GETでは休止期限を延長しない。休止・再開・明示停止', async () => fixture(async f => {
     const first = await f.request('POST', position);
     expect(first.httpStatus).toBe(202); expect(first.sequence).toBe(0);
@@ -89,9 +160,9 @@ describe('分岐中の解析', () => {
     };
     const first = await f.request('POST', position);
     f.advance(2000); expect((await f.request()).quota.usedMs).toBe(2000);
-    f.backend.analyze = async () => Response.json({ply: 1, score: {kind: 'cp', value: 99}});
+    f.backend.analyze = async () => Response.json({ply: 1, score: {kind: 'cp', value: 99}, terminal: true});
     const latest = await f.request('PUT', {...position, moves: ['7g7f'], sequence: 2}, 'a', true, first.sessionId);
-    expect(latest.httpStatus).toBe(202); expect(f.calls[0][3].aborted).toBe(true);
+    expect(latest.httpStatus).toBe(202); expect(f.calls[0][5].aborted).toBe(true);
     expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).error).toBe('stale_sequence');
     expect((await f.request('PUT', {...position, sequence: 2}, 'a', true, first.sessionId)).error).toBe('stale_sequence');
     release(Response.json({ply: 0, score: {kind: 'cp', value: -999}})); await f.drain();
@@ -220,7 +291,11 @@ describe('分岐中の解析', () => {
   it('追加フィールド・不正なsequenceを拒否する', async () => fixture(async f => {
     expect((await f.request('POST', {...position, mode: 'precise'})).httpStatus).toBe(400);
     expect((await f.request('POST', {...position, name: '名前'})).httpStatus).toBe(400);
+    expect((await f.request('POST', {...position, hold: 'true'})).httpStatus).toBe(400);
     const first = await f.request('POST', position); await f.drain();
+    for (const extra of [{round: 1}, {mode: 'std'}, {hold: null}, {hold: 1}]) {
+      expect((await f.request('PUT', {...position, sequence: 1, ...extra}, 'a', true, first.sessionId)).httpStatus).toBe(400);
+    }
     for (const sequence of [-1, 0, 1.5, '1']) {
       expect((await f.request('PUT', {...position, sequence}, 'a', true, first.sessionId)).httpStatus).toBe(400);
     }

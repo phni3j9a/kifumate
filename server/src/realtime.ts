@@ -1,28 +1,34 @@
 import { ApiError, RETENTION_MS, json, monthStart, nextMonth, parseInput, readJson, type Input } from './model';
 
 export const MONTHLY_MS = 300 * 60_000;
+export const MAX_REALTIME_SEARCH_MS = 60_000;
 export interface RealtimeBackend {
-  analyze(input: Input, session: string, sequence: number, signal: AbortSignal): Promise<Response>;
+  analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal): Promise<Response>;
   stop(): Promise<void>;
   schedule(when: number): Promise<void>;
 }
 interface Session extends Record<string, SqlStorageValue> {
   owner: string; id: string; sequence: number; status: string; result: string | null;
-  error: string | null; charged: number | null; activity: number;
+  error: string | null; charged: number | null; activity: number; hold: number;
 }
 
-/** 分岐用の各枠を一端末へ排他的に貸与。探索完了後の待機も停止完了まで集計する。 */
+/** リアルタイム解析の各枠を一端末へ排他的に貸与。探索完了後の待機も停止完了まで集計する。 */
 export class RealtimeSessions {
   private abort?: AbortController;
   private stopping?: Promise<void>;
   private entitlements = new Map<string, {paid: boolean; pending: number}>();
   private sql: SqlStorage;
-  constructor(private storage: DurableObjectStorage, private backend: RealtimeBackend, private idleMs: number, private now = Date.now) {
+  constructor(private storage: DurableObjectStorage, private backend: RealtimeBackend,
+    private idleMs = 30_000, private holdIdleMs = 300_000, private now = Date.now) {
     this.sql = storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS rt_usage (owner TEXT, month INTEGER, ms INTEGER NOT NULL, PRIMARY KEY(owner,month));
       CREATE TABLE IF NOT EXISTS rt_sessions (owner TEXT PRIMARY KEY, id TEXT NOT NULL, sequence INTEGER NOT NULL,
-        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL);`);
+        status TEXT NOT NULL, result TEXT, error TEXT, charged INTEGER, activity INTEGER NOT NULL, hold INTEGER NOT NULL DEFAULT 0);`);
+    if (!this.sql.exec<{name: string}>('PRAGMA table_info(rt_sessions)').toArray().some(column => column.name === 'hold')) {
+      this.sql.exec('ALTER TABLE rt_sessions ADD COLUMN hold INTEGER NOT NULL DEFAULT 0');
+    }
   }
+  private idleFor(session?: Session) { return session?.hold ? this.holdIdleMs : this.idleMs; }
   private session(owner: string): Session | undefined {
     return this.sql.exec<Session>('SELECT * FROM rt_sessions WHERE owner=?', owner).toArray()[0];
   }
@@ -57,15 +63,18 @@ export class RealtimeSessions {
   }
   private view(owner: string) {
     const quota = this.quota(owner), session = this.session(owner);
+    const result = session?.result ? JSON.parse(session.result) : null;
     return {sessionId: session?.id ?? null, sequence: session?.sequence ?? 0,
-      status: session?.status ?? 'off', result: session?.result ? JSON.parse(session.result) : null,
-      error: session?.error ?? null, idleMs: this.idleMs, quota};
+      status: session?.status ?? 'off', result: result && {...result, depth: result.candidates?.[0]?.depth ?? null},
+      searching: !!session && session.charged !== null && ['preparing', 'analyzing', 'ready'].includes(session.status)
+        && this.abort?.signal.aborted === false,
+      error: session?.error ?? null, idleMs: this.idleFor(session), quota};
   }
   private async schedule() {
     const session = this.active();
     if (!session) return;
     const now = this.now(), remaining = this.quota(session.owner).remainingMs;
-    await this.backend.schedule(Math.max(now + 1, Math.min(session.activity + this.idleMs, now + remaining, nextMonth(now))));
+    await this.backend.schedule(Math.max(now + 1, Math.min(session.activity + this.idleFor(session), now + remaining, nextMonth(now))));
   }
   private async halt(status: string, error: string | null = null) {
     if (this.stopping) return this.stopping;
@@ -83,15 +92,15 @@ export class RealtimeSessions {
     catch (error) { await this.backend.schedule(this.now() + 1000); throw error; }
     finally { this.stopping = undefined; }
   }
-  async expire() {
+  async expire(reschedule = true) {
     if (this.stopping) await this.stopping;
     const session = this.active();
     if (!session) return;
     const quota = this.quota(session.owner), current = this.session(session.owner)!;
     if (['off', 'failed'].includes(current.status)) await this.halt(current.status, current.error);
     else if (!quota.remainingMs || current.status === 'limit') await this.halt('limit');
-    else if (this.now() >= session.activity + this.idleMs) await this.halt('paused');
-    else await this.schedule();
+    else if (current.status === 'paused' || this.now() >= session.activity + this.idleFor(session)) await this.halt('paused');
+    else if (reschedule) await this.schedule();
   }
   disconnected() {
     if (this.stopping) return;
@@ -127,13 +136,14 @@ export class RealtimeSessions {
       if (!creating && !(request.method === 'PUT' && match)) throw new ApiError(404, 'not_found');
       const raw = await readJson(request) as Record<string, unknown>;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'invalid_input');
-      const {sequence, ...position} = raw;
+      const {sequence, hold = false, ...position} = raw;
       if (creating ? sequence !== undefined : !Number.isSafeInteger(sequence) || (sequence as number) < 1) throw new ApiError(400, 'invalid_sequence');
+      if (typeof hold !== 'boolean' || 'mode' in position) throw new ApiError(400, 'invalid_input');
       const input = parseInput({...position, mode: 'std'});
-      if ('mode' in position) throw new ApiError(400, 'invalid_input');
-      // readJson は await するため、ここでも最新の貸与・権利・期限を確認する。
-      await this.expire();
+      // 本文待機・権利照会の後、最新の貸与と期限を確認してから受理する。
       if (checkPaid && !await checkPaid()) entitlement.paid = false;
+      await this.expire(false);
+      while (this.stopping) await this.stopping;
       if (!entitlement.paid) {
         if (this.active()?.owner === owner) await this.halt('off', 'paid_required');
         throw new ApiError(403, 'paid_required');
@@ -146,14 +156,14 @@ export class RealtimeSessions {
       if (!creating && (sequence as number) <= current!.sequence) throw new ApiError(409, 'stale_sequence');
       const id = creating ? crypto.randomUUID() : current!.id;
       const seq = creating ? 0 : sequence as number, now = this.now();
-      this.abort?.abort(); this.abort = new AbortController();
-      this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?)
+      this.abort?.abort();
+      const controller = this.abort = new AbortController();
+      this.sql.exec(`INSERT INTO rt_sessions VALUES (?,?,?,'preparing',NULL,NULL,?,?,?)
         ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
-        result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
-        owner, id, seq, now, now);
-      const signal = this.abort.signal;
+        result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity,hold=excluded.hold`,
+        owner, id, seq, now, now, Number(hold));
       await this.schedule();
-      waitUntil(this.run(owner, id, seq, input, signal));
+      waitUntil(this.run(owner, id, seq, input, controller));
       return json(this.view(owner), 202);
     } catch (error) {
       if (error instanceof ApiError) return json({...this.view(owner), error: error.code}, error.status);
@@ -162,25 +172,33 @@ export class RealtimeSessions {
       if (--entitlement.pending === 0) this.entitlements.delete(owner);
     }
   }
-  private async run(owner: string, id: string, sequence: number, input: Input, signal: AbortSignal) {
+  private async run(owner: string, id: string, sequence: number, input: Input, controller: AbortController) {
+    const {signal} = controller;
     try {
-      if (signal.aborted) return;
-      const response = await this.backend.analyze(input, id, sequence, signal);
-      await this.expire();
-      const current = this.session(owner);
-      if (signal.aborted || current?.id !== id || current.sequence !== sequence || current.charged === null) return;
-      if (!response.ok) {
-        await this.halt('failed', response.status === 422 ? 'invalid_position_or_move' : 'analysis_unavailable');
-        return;
+      await this.expire(false);
+      for (let round = 0, ms = 250; !signal.aborted; round++, ms = Math.min(ms * 2, MAX_REALTIME_SEARCH_MS)) {
+        const response = await this.backend.analyze(input, id, sequence, round, ms, signal);
+        if (signal.aborted) return;
+        const {terminal, ...result} = response.ok ? await response.json() as {terminal?: boolean; ply?: number} : {};
+        if (signal.aborted) return;
+        // 結果の読み取り後にも期限を確認する。再探索は休止期限を延ばさない。
+        await this.expire(false);
+        const current = this.session(owner);
+        if (signal.aborted || current?.id !== id || current.sequence !== sequence || current.charged === null
+          || ['limit', 'paused', 'off', 'failed'].includes(current.status)) return;
+        if (!response.ok) {
+          await this.halt('failed', response.status === 422 ? 'invalid_position_or_move' : 'analysis_unavailable');
+          return;
+        }
+        if (result.ply !== input.moves.length || typeof terminal !== 'boolean') throw new Error('invalid_result');
+        this.sql.exec("UPDATE rt_sessions SET status='ready',result=? WHERE owner=?", JSON.stringify(result), owner);
+        if (terminal) return;
       }
-      const result = await response.json() as {ply?: number};
-      if (result.ply !== input.moves.length) throw new Error('invalid_result');
-      // JSON の読み取り中に次の局面へ進んだ場合も古い結果を保存しない。
-      this.sql.exec("UPDATE rt_sessions SET status='ready',result=? WHERE owner=? AND id=? AND sequence=? AND charged IS NOT NULL AND status NOT IN ('limit','off','failed')",
-        JSON.stringify(result), owner, id, sequence);
     } catch {
       const current = this.session(owner);
       if (!signal.aborted && current?.id === id && current.sequence === sequence) await this.halt('failed', 'analysis_unavailable');
+    } finally {
+      if (this.abort === controller) this.abort = undefined;
     }
   }
 }

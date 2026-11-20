@@ -54,14 +54,31 @@ def test_all_moves_validated_before_analysis():
     assert board.turn == cshogi.WHITE
 
 
-def test_fake_engine_usi_protocol():
+def test_fake_engine_usi_protocol(monkeypatch):
     engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    commands = []
+    send = engine.send
+    def record(command):
+        commands.append(command)
+        send(command)
+    monkeypatch.setattr(engine, 'send', record)
     try:
         result = engine.analyze(payload())
         assert result['score'] == {'kind': 'cp', 'value': 123}
         assert result['candidates'][0]['pv'] == ['7g7f', '3c3d']
         assert result['mate'] is None
         assert 'INTERNAL_NAME' not in json.dumps(result)
+        assert commands == ['setoption name Threads value 1', 'setoption name MultiPV value 1',
+                            'isready', 'usinewgame', 'position startpos', 'go movetime 250']
+        assert 'terminal' not in result
+        commands.clear()
+        for ms in (500, 60_000):
+            assert engine.analyze(payload(), movetime_ms=ms)['terminal'] is False
+        assert commands == ['position startpos', 'go movetime 500', 'position startpos', 'go movetime 60000']
+        commands.clear()
+        assert 'terminal' not in engine.analyze(payload(mode='precise'))
+        assert commands == ['setoption name Threads value 2', 'setoption name MultiPV value 3',
+                            'isready', 'usinewgame', 'position startpos', 'go movetime 1000']
     finally:
         engine.close()
 
@@ -153,6 +170,21 @@ def test_declaration_win_is_not_a_move_or_proven_mate(sfen, winner):
         assert 'move' not in result['candidates'][0]
         assert result['candidates'][0]['pv'] == []
         assert result['mate'] is None
+        assert engine.analyze(payload(initial=sfen), movetime_ms=250) == {**result, 'terminal': True}
+    finally:
+        engine.close()
+
+
+def test_realtime_checkmate_is_terminal():
+    sample = json.loads((ROOT.parents[1] / 'mock/data/sample-game.json').read_text())
+    board = cshogi.Board(next(p['sfen'] for p in sample['positions'] if (p.get('tsume') or {}).get('len') == 1))
+    board.push(board.mate_move_in_1ply())
+    assert board.is_check() and board.is_game_over()
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py'), '--resign'])
+    try:
+        result = engine.analyze(payload(initial=board.sfen()), movetime_ms=250)
+        assert result['terminal'] is True and result['candidates'] == []
+        assert result['score'] == {'kind': 'mate', 'value': 0, 'winner': 'gote' if board.turn == cshogi.BLACK else 'sente'}
     finally:
         engine.close()
 
@@ -193,13 +225,13 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     # 新しい要求はエンジンの直列ロックを待つ前に旧要求を止める。
     entered, cancelled = threading.Event(), threading.Event()
     class FakeEngine:
-        def analyze(self, data, cancel):
+        def analyze(self, data, cancel, movetime_ms):
             if data['ply'] == 0:
                 entered.set()
                 assert cancel.wait(2)
                 cancelled.set()
                 raise bridge.Superseded()
-            return {'ply': data['ply'], 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None}
+            return {'ply': data['ply'], 'terminal': False, 'movetime': movetime_ms}
         def close(self):
             pass
     monkeypatch.setattr(bridge, 'engine', FakeEngine())
@@ -210,8 +242,8 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     serving.start()
     url = f'http://127.0.0.1:{server.server_port}/realtime'
     session = 'a' * 36
-    def send(sequence, moves):
-        data = payload(moves=moves, ply=len(moves), sessionId=session, sequence=sequence)
+    def send(sequence, moves, round_number=0, movetime_ms=250, session_id=session):
+        data = payload(moves=moves, ply=len(moves), sessionId=session_id, sequence=sequence, round=round_number, movetimeMs=movetime_ms)
         try:
             with urlopen(Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
                 return response.status, json.load(response)
@@ -222,12 +254,23 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     try:
         first.start(); assert entered.wait(1)
         before = time.monotonic()
-        assert send(2, ['7g7f'])[0] == 200
+        assert send(2, ['7g7f']) == (200, {'ply': 1, 'terminal': False, 'movetime': 250})
         assert time.monotonic() - before < 0.5 and cancelled.is_set()
         first.join(timeout=1)
         assert old == [(409, {'error': 'superseded'})]
-        assert send(1, ['7g7f'])[0] == 409
-        assert send(2, ['7g7f'])[0] == 409
+        assert send(2, ['7g7f'], round_number=2, movetime_ms=60_000)[1]['movetime'] == 60_000
+        latest = bridge.realtime_cancel
+        assert send(1, ['7g7f'], round_number=100)[0] == 409
+        assert send(2, ['7g7f'], round_number=1)[0] == 409
+        assert send(2, ['7g7f'], round_number=2)[0] == 409
+        assert send(99, ['7g7f'], session_id='b' * 36)[0] == 409
+        for ms in (0, 249, 60_001, True, '500', 250.5):
+            assert send(3, ['7g7f'], movetime_ms=ms)[0] == 422
+        for number in (-1, True, '3', 3.5):
+            assert send(3, ['7g7f'], round_number=number)[0] == 422
+        assert bridge.realtime_cancel is latest and not latest.is_set()
+        assert send(3, ['7g7f'])[0] == 200
+        assert latest.is_set()
     finally:
         server.shutdown(); server.server_close(); serving.join(); first.join(timeout=1)
 

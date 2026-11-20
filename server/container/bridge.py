@@ -17,6 +17,7 @@ from coach_facts import build_facts
 
 MAX_MOVES = 512
 MODES = {"std": (250, 1, 1), "precise": (1000, 2, 3)}
+MAX_REALTIME_SEARCH_MS = 60_000
 MOVE = re.compile(r"(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])\Z")
 
 
@@ -248,9 +249,11 @@ class Engine:
             if len(lines) > 10000 or time.monotonic() >= deadline:
                 raise RuntimeError("analysis_timeout")
 
-    def analyze(self, data, cancel=None):
+    def analyze(self, data, cancel=None, movetime_ms=None):
         board, initial, moves, mode, ply = prepare(data)
         ms, threads, multipv = MODES[mode]
+        if movetime_ms is not None:
+            ms = movetime_ms
         if self.mode != mode:
             self.send(f"setoption name Threads value {threads}")
             self.send(f"setoption name MultiPV value {multipv}")
@@ -271,16 +274,24 @@ class Engine:
                 candidates[info["rank"]] = info
         ordered = [candidates[k] for k in sorted(candidates)]
         # 宣言勝ちは着手でも詰みでもない。bestmove の終端を見て専用結果にする。
-        if lines[-1].split()[1:2] == ["win"]:
+        bestmove = lines[-1].split()[1:2]
+        if bestmove == ["win"]:
             score = {"kind": "declaration", "value": None, "winner": "sente" if board.turn == cshogi.BLACK else "gote"}
             candidate = {"rank": 1, "depth": 0, "score": score, "declarationWin": True, "pv": []}
-            return {"ply": ply, "score": score, "candidates": [candidate], "mate": None}
-        score = ordered[0]["score"] if ordered else None
-        if board.is_check() and not list(board.legal_moves):
-            score = score_for_sente("mate", "0", board.turn)
-        if not ordered and score is None and not board.is_game_over():
-            raise RuntimeError("analysis_unavailable")
-        return {"ply": ply, "score": score, "candidates": ordered, "mate": mate_proof(board)}
+            result = {"ply": ply, "score": score, "candidates": [candidate], "mate": None}
+            terminal = True
+        else:
+            game_over = board.is_game_over()
+            score = ordered[0]["score"] if ordered else None
+            if game_over and board.is_check():
+                score = score_for_sente("mate", "0", board.turn)
+            terminal = game_over or bestmove in (["resign"], ["none"])
+            if not ordered and score is None and not (terminal if movetime_ms is not None else game_over):
+                raise RuntimeError("analysis_unavailable")
+            result = {"ply": ply, "score": score, "candidates": ordered, "mate": mate_proof(board)}
+        if movetime_ms is not None:
+            result['terminal'] = terminal
+        return result
 
     def close(self):
         self.process.kill()
@@ -297,16 +308,20 @@ realtime_latest = None
 realtime_cancel = None
 
 
-def replace_search(session, sequence):
+def replace_search(session, sequence, round_number):
     global realtime_latest, realtime_cancel
-    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session) or type(sequence) is not int or sequence < 0:
+    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session) or not all(
+        type(n) is int and 0 <= n <= 2**53 - 1 for n in (sequence, round_number)
+    ):
         raise InvalidInput()
+    order = (sequence, round_number)
     with realtime_lock:
-        if realtime_latest and realtime_latest[0] == session and sequence <= realtime_latest[1]:
+        # 次のセッションは destroy 後に別プロセスで開始する。
+        if realtime_latest and (realtime_latest[0] != session or order <= realtime_latest[1:]):
             raise Superseded()
         if realtime_cancel is not None:
             realtime_cancel.set()
-        realtime_latest = (session, sequence)
+        realtime_latest = (session, *order)
         realtime_cancel = threading.Event()
         return realtime_cancel
 
@@ -342,23 +357,24 @@ class Handler(BaseHTTPRequestHandler):
                 if data["initial"] != "startpos":
                     validate_sfen(data["initial"])
                 return self.respond(200, build_facts(data))
-            cancel = None
+            cancel = movetime_ms = None
             if self.path == '/realtime':
-                if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:
+                if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence', 'round', 'movetimeMs'}:
                     raise InvalidInput()
-                session, sequence = data.pop('sessionId'), data.pop('sequence')
-                if data['mode'] != 'std' or data['ply'] != len(data['moves']):
+                session, sequence, round_number, movetime_ms = (data.pop(k) for k in ('sessionId', 'sequence', 'round', 'movetimeMs'))
+                if (data['mode'] != 'std' or data['ply'] != len(data['moves']) or
+                        type(movetime_ms) is not int or not MODES['std'][0] <= movetime_ms <= MAX_REALTIME_SEARCH_MS):
                     raise InvalidInput()
             prepare(data)
             if self.path == '/realtime':
-                cancel = replace_search(session, sequence)
+                cancel = replace_search(session, sequence, round_number)
             with lock:
                 try:
                     if cancel is not None and cancel.is_set():
                         raise Superseded()
                     if engine is None:
                         engine = Engine()
-                    result = engine.analyze(data, cancel)
+                    result = engine.analyze(data, cancel, movetime_ms)
                 except Superseded:
                     raise
                 except Exception:

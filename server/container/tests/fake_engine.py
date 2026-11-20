@@ -17,6 +17,8 @@ for command in sys.stdin:
         if '--win' in sys.argv:
             print('info depth 0 score mate 1 pv win')
             print('bestmove win', flush=True)
+        elif '--resign' in sys.argv:
+            print('bestmove resign', flush=True)
         else:
             print('info depth 4 multipv 1 score cp 123 nodes 50 pv 7g7f 3c3d')
             print('bestmove 7g7f', flush=True)
