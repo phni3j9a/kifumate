@@ -197,6 +197,16 @@ describe('Responsesの道具ループ', () => {
     } finally { logs.mockRestore(); }
   });
 
+  it('組み込みfetchをレシーバーなしで呼ぶ（WorkersのIllegal invocation対策）', async () => {
+    const transport = vi.fn(function (this: unknown) {
+      if (this !== undefined) throw new TypeError('Illegal invocation');
+      return Promise.resolve(turn(call('p')));
+    }) as unknown as typeof fetch;
+    await expect(completeWith(transport, async () => [])).rejects.toThrow('provider_failed');
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(transport).mock.results[0].type).toBe('return');
+  });
+
   it('精密コンテナの応答が欠けたら、追加の提供元ターンは実行しない', async () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('p')));
     await expect(completeWith(transport, async () => [])).rejects.toThrow('provider_failed');
