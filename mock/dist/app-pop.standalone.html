@@ -356,6 +356,26 @@ body[data-plan="free"] .vc .aib{background:#fff}
 .vc .mr .me2{font-weight:900;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
 .vc .mr.cur{background:var(--you)}
 .vc .mrh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 8px;padding:8px 10px;border:1.5px dashed rgba(36,40,70,.45);border-radius:12px;font:700 11.5px/1.4 var(--f-maru);color:var(--ink2)}
+/* turning points: one row per move, tapped to go there. Read deeply: a white box with the engine's answer */
+.vc .tpn{display:flex;align-items:center;gap:8px;width:calc(100% - 4px);min-height:44px;margin:0 2px 8px;padding:8px 10px;border:1.5px dashed rgba(36,40,70,.45);border-radius:12px;text-align:left;font:700 11.5px/1.4 var(--f-maru);color:var(--ink2)}
+.vc .tpn span{flex:1}
+.vc .tpn .ic{flex:none;width:13px;height:13px;stroke-width:2.2}
+.vc .tph{padding:0 10px 2px;text-align:right;font:700 10.5px/1.3 var(--f-maru);color:var(--ink2)}
+.vc .tp{display:flex;flex-direction:column;justify-content:center;width:100%;min-height:44px;padding:10px;border-radius:10px;text-align:left}
+.vc .tp.cur{background:var(--you)}
+.vc .tp .t1{display:flex;align-items:center;gap:6px;min-width:0;font:700 13.5px/1.2 var(--f-maru);white-space:nowrap}
+.vc .tp .no{flex:none;width:34px;display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.vc .tp .no i{flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--ink);background:var(--opp)}
+.vc .tp .no i.you{background:var(--you)}
+.vc .tp .mm,.vc .tp .hm{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.vc .tp .tm{flex:none;display:flex;align-items:center;gap:3px;font:900 10.5px/1.2 var(--f-maru)}
+.vc .tp .tm svg{width:16px;height:16px;overflow:visible}
+.vc .tp .pr2{flex:none;margin-left:auto;font:900 12.5px/1.2 var(--f-maru);font-variant-numeric:tabular-nums}
+.vc .tp .th{margin:3px 0 0 40px;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc .tp .td{margin:5px 0 0 40px;padding:5px 8px;border:1.5px solid var(--ink);border-radius:10px;background:#fff}
+.vc .tp .td .t1,.vc .tp .td .pr2{font:900 12.5px/1.4 var(--f-maru)}
+.vc .tp .td em{flex:none;padding:0 6px;border:1.5px solid var(--ink);border-radius:99px;background:#C9F3EA;font:900 9.5px/1.4 var(--f-maru)}
+.vc .tp .td .p{display:block;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vc .mn2{display:flex;align-items:center;gap:12px;width:100%;min-height:50px;padding:4px 6px;border-radius:12px;text-align:left;font:700 14px/1.3 var(--f-maru)}
 .vc .mn2 + .mn2{border-top:var(--hair);border-radius:0}
 .vc .mn2 .mi{width:32px;height:32px;flex:none;border-radius:50%;border:var(--ol);background:#fff;display:grid;place-items:center}
@@ -868,7 +888,7 @@ body[data-plan="free"] .vc .aib{background:#fff}
             <div class="bdw" data-b="board"></div>
             <div class="col" data-who="you"><span class="tray" data-b="youhand"></span></div>
           </div>
-          <div class="nmr b"><button type="button" class="brl bk2" data-b="brl2" data-a="exitbr" aria-label="本譜に戻る" hidden></button><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
+          <div class="nmr b"><button type="button" class="brl" data-b="brl2" data-a="turns" hidden></button><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
           <i class="sp"></i>
           <div class="ct">
             <button type="button" class="rb" data-a="step" data-v="first" data-b="bfirst" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
@@ -917,6 +937,7 @@ body[data-plan="free"] .vc .aib{background:#fff}
         <button type="button" data-jump="import">取り込み</button>
         <button type="button" data-jump="fresh">取り込み直後（未解析）</button>
         <button type="button" data-jump="game">解析画面</button>
+        <button type="button" data-jump="turns">勝負所の一覧</button>
         <button type="button" data-jump="branch">分岐して試す</button>
         <button type="button" data-jump="ai">AIコーチ</button>
         <button type="button" data-jump="stats">戦績</button>
@@ -1045,6 +1066,8 @@ function gameFromData(G, an, fav) {
     tags: { s: t(m.tags.sente), g: t(m.tags.gote) }, an, fav: !!fav, data: G, ai: null, edited: false,
   };
 }
+// shortcut: 見本の深読み済みの局面は、30・31手目と悪手の前後に固定する。実際はサーバーが勝率の下がり幅で選ぶので、選定の確認は製品テストで行う
+function deepOf(G) { return [...new Set([30, 31, ...G.positions.flatMap((p, i) => (p.mark === '悪手' ? [i - 1, i] : []))])]; }
 const I = '居飛車', F = '振り飛車';
 /* the state the mock normally opens in: an app that has been used for a few months */
 function seedData() {
@@ -1084,6 +1107,7 @@ function seedData() {
     mkGame('2026-08-15', 'kogera', 's', 'w', 84, '投了', [I, '棒銀'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
   ];
   GAME1 = DB.games.find((g) => g.data === window.KIFU);
+  GAME1.deep = deepOf(window.KIFU);
 }
 /* a first launch: nothing saved, no names registered, nothing analysed yet */
 function clearData() {
@@ -1975,6 +1999,42 @@ function branchMovesHTML() {
   return h + '</div>';
 }
 
+/* ---------- turning points: the marked moves, and the moves read deeply on both sides (even without a mark), in move order ---------- */
+function turns() {
+  const deep = new Set(CUR.deep || []), out = [];
+  for (let i = 1; i <= N; i++) { const d = deep.has(i - 1) && deep.has(i); if (rawKind(P[i]) || d) out.push({ i, deep: d }); }
+  return out;
+}
+function turnsHTML() {
+  const mode = anMode();
+  if (mode !== 'done') return `<p class="empty">${mode === 'run' || waiting() ? '解析が終わると、印の付いた手がここに並びます。' : '解析すると、悪手・疑問手・好手など<br>印の付いた手がここに並びます。'}</p>`;
+  const list = turns();
+  if (!list.length) return '<p class="empty">印の付いた手はありませんでした。<br>印は、31手目より後で形勢が大きく動いた手に付きます。</p>';
+  /* one note for the whole list, not a lock on every row: an analysis without deep reading says what the paid plan adds */
+  const up = (CUR.deep || []).length ? '' : !paid() ? 'plan' : CUR.an === 'std' ? 'redo' : '';
+  let h = up ? `<button type="button" class="tpn" data-a="deeplock"><svg class="ic"><use href="#${up === 'redo' ? 'i-refresh' : 'i-lock'}"/></svg><span>${up === 'redo' ? '精密解析' : '有料プラン'}では、勝負所を5秒ずつ深く読みます</span><svg class="ic"><use href="#i-next"/></svg></button>` : '';
+  h += `<div class="tph">${YOU()}の勝率</div>`;
+  for (const { i, deep } of list) {
+    const p = P[i], prev = P[i - 1], self = moverSide(i) === SELF;
+    const t = p.missedTsume && prev.tsume ? prev.tsume : null, best = t ? t.line[0] : (prev.cands || [])[0];
+    const rec = best && best.usi !== p.move.usi ? `${OWN && self ? 'おすすめは' : '最善は'} ${mv(best.ja)}` : '';
+    const hint = deep ? rec || '最善の手' : t ? `${t.len}手詰めあり` : rec;
+    const name = p.missedTsume ? '詰み逃し' : p.mark || '', rate = `${pct(wrSelf(prev))}% → ${pct(wrSelf(p))}%`;
+    const score = t ? `${t.len}手詰め` : best ? fmtVal(best) : '', pv = (t ? t.line.map((m) => m.ja) : (best && best.pv) || []).slice(1).map(mv).join(' ');
+    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint} 評価値 ${score}` : hint, deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
+    h += `<button type="button" class="tp${i === S.ply ? ' cur' : ''}" data-a="jump" data-v="${i}" aria-label="${label}"><span class="t1"><span class="no"><i${self ? ' class="you"' : ''}></i>${i}</span><span class="mm">${mv(p.move.ja)}</span>${name ? `<span class="tm">${onbMark(p.missedTsume ? 'dub' : MKC[p.mark])}${name}</span>` : ''}<b class="pr2">${rate}</b></span>`;
+    h += deep ? `<span class="td"><span class="t1"><em>深読み</em><b class="hm">${hint}</b><b class="pr2">${score}</b></span>${pv ? `<span class="p">${pv}</span>` : ''}</span>` : hint ? `<span class="th">${hint}</span>` : '';
+    h += '</button>';
+  }
+  return h;
+}
+A.turns = () => {
+  openSheet(`勝負所${anMode() === 'done' ? `（${turns().length}手）` : ''}`, turnsHTML(), { id: 'tp' });
+  ensureVisible(R.shc, R.shc.querySelector('.tp.cur'));
+};
+/* the dialog is its own layer in the app, so the sheet closes first (the same as deleting a record) */
+A.deeplock = () => { closeSheet(); if (paid()) redoPrecise(); else A.lockinfo('deep'); };
+
 /* ---------- rendering ---------- */
 function ensureVisible(box, row) {
   if (!box || !row || !box.clientHeight || !row.offsetParent) return;
@@ -2042,7 +2102,12 @@ function renderNow() {
   R.bfirst.classList.toggle('warn', !!e);
   R.bfirst.setAttribute('aria-label', e ? '本譜に戻る' : '最初へ');
   R.bfirst.innerHTML = `<svg class="ic"><use href="#${e ? 'i-undo' : 'i-first'}"/></svg>`;
-  R.brl1.hidden = false; R.brl2.hidden = !e;
+  R.brl1.hidden = false; R.brl2.hidden = false;
+  /* the free half of the lower name row: the way back on a branch, the list of turning points on the game line */
+  const tn = !e && anMode() === 'done' ? turns().length : null;
+  R.brl2.classList.toggle('bk2', !!e);
+  R.brl2.dataset.a = e ? 'exitbr' : 'turns';
+  R.brl2.setAttribute('aria-label', e ? '本譜に戻る' : `勝負所の一覧${tn == null ? '' : `、${tn}手`}`);
   R.brl1.dataset.a = e ? 'rttoggle' : 'deepread';
   R.brl1.classList.toggle('hold', S.rtHold);
   R.brl1.removeAttribute('aria-label');
@@ -2053,6 +2118,7 @@ function renderNow() {
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   } else {
     R.brl1.innerHTML = S.rtHold ? '<b>終了</b>' : '<svg class="ic"><use href="#i-bolt"/></svg><b>深く読む</b>' + (paid() ? '' : '<svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl2.innerHTML = `<svg class="ic"><use href="#i-flag"/></svg>勝負所${tn == null ? '' : ` <b>${tn}</b>`}`;
   }
 }
 function renderPly() {
@@ -2199,6 +2265,7 @@ const LOCKS = () => ({
   cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
   precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
   rt: ['リアルタイム解析は、有料プランで使えます', '本譜の「深く読む」や分岐で、その局面の評価値・最善手・読み筋が出ます。'],
+  deep: ['深読みは、有料プランで使えます', `精密解析（有料プラン）では、形勢が大きく動いた局面を5秒ずつ深く読み直し、おすすめの手・評価値・読み筋をこの一覧に出します。週${DB.usage.preciseMax}局まで使えます。`],
 });
 A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
@@ -2307,8 +2374,7 @@ function tickRun() {
     r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
     if (r.done >= r.total) {
       if (r.kind !== 'pre' || r.total <= 31) { finishRun(); return; }
-      // shortcut: 見た目の確認用に30・31手目を固定で使う。探索結果や選定規則の検証は製品テストで行う。
-      r.deep = { total: 2, done: 0 };
+      r.deep = { total: deepOf(gm.data).length, done: 0 };
       r.deepNextAt = performance.now() + 420;
       refreshWaiting(gm);
     }
@@ -2329,11 +2395,12 @@ function finishRun() {
   RUN = null;
   if (!gm) return;
   gm.an = r.kind;
-  gm.deep = r.deep ? [30, 31] : undefined;
+  gm.deep = r.deep ? deepOf(gm.data) : undefined;
   if (!paid()) DB.usage.free++;
   else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
     renderGame();
+    if (UI.sheet === 'tp') A.turns();
     if (AI.open) renderAI();
     if (DB.celebrated) toast('解析が終わりました');
     else {
@@ -3404,6 +3471,7 @@ const JUMPS = {
     openRecord(GAME1, Math.max(0, b - 1));
     if (anMode() === 'done') { S.sel = 0; A.playline(); }
   },
+  turns: () => { JUMPS.game(); A.turns(); },
   ai: () => { resetTo('list'); openRecord(GAME1); openAI(); },
   stats: () => resetTo('stats'),
   set: () => resetTo('set'),

@@ -290,6 +290,31 @@ export async function fakeAnalysis(
     coach: await fakeCoach(page, () => state.paid),
   });
 }
+/** モックの見本データ（mock/data/sample-game*.json）を、解析結果の形にする。 */
+export function sampleResults(sample: any): AnalysisResult[] {
+  const score = (p: any) =>
+    p.mate != null
+      ? { kind: "mate", value: p.mate, winner: p.mate < 0 ? "gote" : "sente" }
+      : { kind: "cp", value: p.cp };
+  return sample.positions.map((p: any) => ({
+    ply: p.ply,
+    score: score(p),
+    candidates: p.cands.map((c: any, i: number) => ({
+      rank: i + 1,
+      depth: 10,
+      score: score(c),
+      move: c.usi,
+      pv: c.pvUsi,
+    })),
+    mate: p.tsume
+      ? {
+          plies: p.tsume.len,
+          pv: p.tsume.line.map((m: any) => m.usi),
+          branches: [],
+        }
+      : null,
+  }));
+}
 export function makeResults(input: Input): AnalysisResult[] {
   const p = new Position();
   if (input.initial !== "startpos") p.resetBySFEN(input.initial);

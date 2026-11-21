@@ -102,6 +102,10 @@ for (const screen of ["info", "game/[id]"]) {
         [`${prefix}/components/icons`]: stub(["Icon"]),
         [`${prefix}/components/analysis-panel`]: stub(["AnalysisPanel"]),
         [`${prefix}/components/realtime-controls`]: stub(["RealtimeToggle"]),
+        [`${prefix}/components/turning-points`]: stub([
+          "TurningPointsButton",
+          "TurningPointsSheet",
+        ]),
         [`${prefix}/coach/sheet`]: stub(["CoachSheet"]),
         [`${prefix}/coach/provider`]: {
           useCoach: () => ({ controller: {}, records: {} }),

@@ -86,6 +86,7 @@ const JUMPS = {
     openRecord(GAME1, Math.max(0, b - 1));
     if (anMode() === 'done') { S.sel = 0; A.playline(); }
   },
+  turns: () => { JUMPS.game(); A.turns(); },
   ai: () => { resetTo('list'); openRecord(GAME1); openAI(); },
   stats: () => resetTo('stats'),
   set: () => resetTo('set'),

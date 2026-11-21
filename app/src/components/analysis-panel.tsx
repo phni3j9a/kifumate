@@ -21,6 +21,13 @@ import { colors, font, line, radius, shadow } from "./theme";
 import { Button } from "./ui";
 import type { RealtimeResult, RealtimeState } from "../analysis/realtime-types";
 import { realtimeInfo } from "./realtime-controls";
+export const redoPrecise = (start: (mode: Mode) => void) =>
+  ask({
+    title: "精密解析でやり直しますか",
+    text: "精密解析を1局分使います。新しい解析に成功すると、いまの結果に置きかわります。",
+    ok: "精密解析する",
+    onOk: () => start("precise"),
+  });
 export function ChancePie({
   score,
   self,
@@ -391,15 +398,7 @@ export function AnalysisPanel({
           saved?.mode === "std" &&
           tab(
             "2位・3位",
-            () =>
-              quota?.paid
-                ? ask({
-                    title: "精密解析でやり直しますか",
-                    text: "精密解析を1局分使います。新しい解析に成功すると、いまの結果に置きかわります。",
-                    ok: "精密解析する",
-                    onOk: () => start("precise"),
-                  })
-                : preciseInfo(),
+            () => (quota?.paid ? redoPrecise(start) : preciseInfo()),
             false,
             true,
           )}

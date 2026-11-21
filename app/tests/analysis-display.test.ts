@@ -10,6 +10,7 @@ import {
   readingText,
   scoreText,
   startPly,
+  turningPoints,
 } from "../src/analysis/display";
 import { readKif } from "../src/core/kif";
 import type { AnalysisResult, Score } from "../src/analysis/types";
@@ -25,6 +26,11 @@ function record() {
   }
   return r;
 }
+// 見本データの指し手（▲２四歩）を、画面の書き方（▲2四歩）にそろえる
+const toHalf = (text: string) =>
+  text
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/　/g, "");
 const result = (ply: number, value: number): AnalysisResult => ({
   ply,
   score: { kind: "cp", value },
@@ -200,6 +206,123 @@ test("深読みの証明済み詰みと好手も前後がそろったときだ�
   assert.equal(pts(good)?.mark, "好手");
   assert.equal(
     pointsFor(r, [{ ...prev, deep: good }, current], Color.BLACK)[ply]?.mark,
+    undefined,
+  );
+});
+
+test("勝負所は印の付いた手と前後とも深読みの手を手数順に並べ、どちらもなければ空", () => {
+  const r = record();
+  const results: AnalysisResult[] = sample.positions.map((p: any) =>
+    result(p.ply, p.ply >= 36 ? 1000 : p.ply >= 33 ? -1000 : 0),
+  );
+  // 41手目は印なしで前後とも深読み、50手目は片側だけ深読み
+  for (const ply of [40, 41, 50])
+    results[ply] = { ...results[ply]!, deep: result(ply, 1000) };
+  const list = turningPoints(
+    r,
+    results,
+    pointsFor(r, results, Color.WHITE),
+    Color.WHITE,
+  );
+  assert.deepEqual(
+    list.map((t) => [t.ply, t.mark, t.self, t.before, t.after, !!t.deep]),
+    [
+      [33, "悪手", false, 50, 84, false],
+      [36, "悪手", true, 84, 16, false],
+      [41, undefined, false, 16, 16, true],
+    ],
+  );
+  assert.equal(list[0]?.text, toHalf(sample.positions[33].move.ja));
+  assert.deepEqual(
+    turningPoints(r, [], pointsFor(r, [], Color.BLACK), Color.BLACK),
+    [],
+  );
+  const unmarked = results.map((x) => result(x.ply, 0));
+  assert.deepEqual(
+    turningPoints(
+      r,
+      unmarked,
+      pointsFor(r, unmarked, Color.BLACK),
+      Color.BLACK,
+    ),
+    [],
+  );
+});
+
+test("勝負所のおすすめは判定に使った段階から出し、深読みの評価と読み筋・逃した詰みを添える", () => {
+  const r = record();
+  const candidate = (ply: number, n: number, value: number) => {
+    const c = sample.positions[ply].cands[n];
+    return {
+      rank: 1,
+      depth: 20,
+      move: c.usi as string,
+      pv: c.pvUsi as string[],
+      score: { kind: "cp" as const, value },
+    };
+  };
+  const played = (ply: number) => sample.positions[ply].move.usi as string;
+  const other = (ply: number) =>
+    sample.positions[ply - 1].cands.findIndex(
+      (c: any) => c.usi !== played(ply),
+    );
+  const results: AnalysisResult[] = sample.positions.map((p: any) =>
+    result(p.ply, p.ply >= 36 ? 1000 : 0),
+  );
+  // 36手目：1段目のおすすめだけ。40手目：前後とも深読みで、深読みのおすすめ・評価・読み筋を出す
+  const shallow = candidate(35, other(36), 0);
+  results[35] = { ...results[35]!, candidates: [shallow] };
+  const deep = candidate(39, other(40), 800);
+  results[39] = {
+    ...results[39]!,
+    candidates: [candidate(39, 0, 1000)],
+    deep: { ...result(39, 800), candidates: [deep] },
+  };
+  results[40] = { ...results[40]!, deep: result(40, 1000) };
+  // 44手目：深読みで見つかった詰みを逃した
+  const mate = {
+    plies: 3 as const,
+    pv: [sample.positions[43].cands[other(44)].usi as string],
+    branches: [],
+  };
+  results[43] = { ...results[43]!, deep: { ...result(43, 1000), mate } };
+  results[44] = { ...results[44]!, deep: result(44, 1000) };
+  const list = turningPoints(
+    r,
+    results,
+    pointsFor(r, results, Color.WHITE),
+    Color.WHITE,
+  );
+  assert.deepEqual(
+    list.map((t) => t.ply),
+    [36, 40, 44],
+  );
+  r.goto(35);
+  assert.equal(list[0]?.mark, "悪手");
+  assert.equal(list[0]?.best, readingText(r.position, [shallow.move])[0]);
+  assert.equal(list[0]?.deep, undefined);
+  r.goto(39);
+  const line = readingText(r.position, deep.pv);
+  assert(line.length > 1);
+  assert.equal(list[1]?.mark, undefined);
+  assert.equal(list[1]?.best, line[0]);
+  assert.deepEqual(list[1]?.deep, { score: "−800", reading: line.slice(1) });
+  r.goto(43);
+  assert.equal(list[2]?.mark, "詰み逃し");
+  assert.equal(list[2]?.mate, 3);
+  assert.equal(list[2]?.best, readingText(r.position, mate.pv)[0]);
+  assert.equal(list[2]?.deep?.score, "3手詰め");
+  // 本譜がおすすめと同じなら、おすすめは出さない
+  results[39]!.deep!.candidates = [
+    { ...deep, move: played(40), pv: [played(40)] },
+  ];
+  assert.equal(
+    turningPoints(
+      r,
+      results,
+      pointsFor(r, results, Color.WHITE),
+      Color.WHITE,
+    )[1]?.best,
     undefined,
   );
 });

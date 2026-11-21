@@ -43,7 +43,11 @@ import {
 import { useGame } from "../../components/use-game";
 import { dateParts, moveText } from "../../core/format";
 import { Branch, gameOutcome, legalMoves, readStoredKif } from "../../core/kif";
-import { AnalysisPanel } from "../../components/analysis-panel";
+import { AnalysisPanel, redoPrecise } from "../../components/analysis-panel";
+import {
+  TurningPointsButton,
+  TurningPointsSheet,
+} from "../../components/turning-points";
 import { useAnalysis, useRealtime } from "../../analysis/provider";
 import { positionKey } from "../../analysis/realtime-types";
 import {
@@ -66,6 +70,7 @@ import {
   scoreText,
   startPly,
   signed,
+  turningPoints,
 } from "../../analysis/display";
 import { needsRetryConfirmation, type Mode } from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
@@ -138,13 +143,14 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [promotion, setPromotion] = useState<Move[]>([]),
     [flipped, setFlipped] = useState(false),
     [sheet, setSheet] = useState<
-      "moves" | "menu" | "export" | "evaluation" | null
+      "moves" | "turns" | "menu" | "export" | "evaluation" | null
     >(null),
     [favorite, setFavorite] = useState<number | null>(null);
   const told = useRef(false);
   const opened = useRef(false);
   const [initialized, setInitialized] = useState(false);
-  const { records, offline, controller, ready, watchReview } = useAnalysis();
+  const { records, offline, controller, ready, watchReview, quota } =
+    useAnalysis();
   const undoBranch = useRef<(() => void) | null>(null);
   const clearBranchUndo = useCallback(() => {
     if (undoBranch.current) hideToast(undoBranch.current);
@@ -235,6 +241,20 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [record, results, game?.self_side],
   );
   const phases = useMemo(() => (record ? phaseRanges(record) : []), [record]);
+  // 勝負所の一覧は、解析がそろってから出す（解析中は好手の選び直しで行が入れかわる）
+  const turnsReady = !!analysis?.saved && !analysis.attempt;
+  const turns = useMemo(
+    () =>
+      record && turnsReady
+        ? turningPoints(
+            record,
+            results,
+            evaluated,
+            game?.self_side === "white" ? Color.WHITE : Color.BLACK,
+          )
+        : [],
+    [record, turnsReady, results, evaluated, game?.self_side],
+  );
   if (record && ready && !initialized) {
     setInitialized(true);
     if (analysis?.saved && !analysis.attempt) setPly(startPly(evaluated));
@@ -831,7 +851,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           }
           style={[s.nmr, { height: 21 + u * 0.2, justifyContent: "flex-end" }]}
         >
-          {branch && (
+          {branch ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="本譜に戻る"
@@ -844,6 +864,15 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 本譜（{plyLabel(branch.base)}）に戻る
               </Text>
             </Pressable>
+          ) : (
+            <TurningPointsButton
+              count={turnsReady ? turns.length : null}
+              onPress={() => {
+                clear();
+                hideToast(); // モックの openSheet と同じ。開いた直後の知らせが見出しに重ならないように
+                setSheet("turns");
+              }}
+            />
           )}
           <PlayerName
             name={nameOf(bottom)}
@@ -1184,6 +1213,37 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             })
           )}
         </Sheet>
+      )}
+      {sheet === "turns" && (
+        <TurningPointsSheet
+          onClose={() => setSheet(null)}
+          state={
+            turnsReady
+              ? "done"
+              : analysis?.attempt && !needsRetryConfirmation(analysis.attempt)
+                ? "running"
+                : "none"
+          }
+          list={turns}
+          ply={ply}
+          own={own}
+          you={own ? "あなた" : sideOf(self)}
+          opponent={own ? "相手" : "後手"}
+          upgrade={
+            results.some((r) => r.deep)
+              ? null
+              : !quota?.paid
+                ? "plan"
+                : analysis?.saved?.mode === "std"
+                  ? "redo"
+                  : null
+          }
+          onRedo={() => redoPrecise(start)}
+          onJump={(to) => {
+            setSheet(null);
+            jumpMain(to);
+          }}
+        />
       )}
       <Sheet
         auto

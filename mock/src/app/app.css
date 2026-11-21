@@ -344,6 +344,26 @@ body[data-plan="free"] .vc .aib{background:#fff}
 .vc .mr .me2{font-weight:900;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
 .vc .mr.cur{background:var(--you)}
 .vc .mrh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 8px;padding:8px 10px;border:1.5px dashed rgba(36,40,70,.45);border-radius:12px;font:700 11.5px/1.4 var(--f-maru);color:var(--ink2)}
+/* turning points: one row per move, tapped to go there. Read deeply: a white box with the engine's answer */
+.vc .tpn{display:flex;align-items:center;gap:8px;width:calc(100% - 4px);min-height:44px;margin:0 2px 8px;padding:8px 10px;border:1.5px dashed rgba(36,40,70,.45);border-radius:12px;text-align:left;font:700 11.5px/1.4 var(--f-maru);color:var(--ink2)}
+.vc .tpn span{flex:1}
+.vc .tpn .ic{flex:none;width:13px;height:13px;stroke-width:2.2}
+.vc .tph{padding:0 10px 2px;text-align:right;font:700 10.5px/1.3 var(--f-maru);color:var(--ink2)}
+.vc .tp{display:flex;flex-direction:column;justify-content:center;width:100%;min-height:44px;padding:10px;border-radius:10px;text-align:left}
+.vc .tp.cur{background:var(--you)}
+.vc .tp .t1{display:flex;align-items:center;gap:6px;min-width:0;font:700 13.5px/1.2 var(--f-maru);white-space:nowrap}
+.vc .tp .no{flex:none;width:34px;display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.vc .tp .no i{flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--ink);background:var(--opp)}
+.vc .tp .no i.you{background:var(--you)}
+.vc .tp .mm,.vc .tp .hm{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.vc .tp .tm{flex:none;display:flex;align-items:center;gap:3px;font:900 10.5px/1.2 var(--f-maru)}
+.vc .tp .tm svg{width:16px;height:16px;overflow:visible}
+.vc .tp .pr2{flex:none;margin-left:auto;font:900 12.5px/1.2 var(--f-maru);font-variant-numeric:tabular-nums}
+.vc .tp .th{margin:3px 0 0 40px;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc .tp .td{margin:5px 0 0 40px;padding:5px 8px;border:1.5px solid var(--ink);border-radius:10px;background:#fff}
+.vc .tp .td .t1,.vc .tp .td .pr2{font:900 12.5px/1.4 var(--f-maru)}
+.vc .tp .td em{flex:none;padding:0 6px;border:1.5px solid var(--ink);border-radius:99px;background:#C9F3EA;font:900 9.5px/1.4 var(--f-maru)}
+.vc .tp .td .p{display:block;font:500 11.5px/1.45 var(--f-maru);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vc .mn2{display:flex;align-items:center;gap:12px;width:100%;min-height:50px;padding:4px 6px;border-radius:12px;text-align:left;font:700 14px/1.3 var(--f-maru)}
 .vc .mn2 + .mn2{border-top:var(--hair);border-radius:0}
 .vc .mn2 .mi{width:32px;height:32px;flex:none;border-radius:50%;border:var(--ol);background:#fff;display:grid;place-items:center}

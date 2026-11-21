@@ -541,6 +541,42 @@ function branchMovesHTML() {
   return h + '</div>';
 }
 
+/* ---------- turning points: the marked moves, and the moves read deeply on both sides (even without a mark), in move order ---------- */
+function turns() {
+  const deep = new Set(CUR.deep || []), out = [];
+  for (let i = 1; i <= N; i++) { const d = deep.has(i - 1) && deep.has(i); if (rawKind(P[i]) || d) out.push({ i, deep: d }); }
+  return out;
+}
+function turnsHTML() {
+  const mode = anMode();
+  if (mode !== 'done') return `<p class="empty">${mode === 'run' || waiting() ? '解析が終わると、印の付いた手がここに並びます。' : '解析すると、悪手・疑問手・好手など<br>印の付いた手がここに並びます。'}</p>`;
+  const list = turns();
+  if (!list.length) return '<p class="empty">印の付いた手はありませんでした。<br>印は、31手目より後で形勢が大きく動いた手に付きます。</p>';
+  /* one note for the whole list, not a lock on every row: an analysis without deep reading says what the paid plan adds */
+  const up = (CUR.deep || []).length ? '' : !paid() ? 'plan' : CUR.an === 'std' ? 'redo' : '';
+  let h = up ? `<button type="button" class="tpn" data-a="deeplock"><svg class="ic"><use href="#${up === 'redo' ? 'i-refresh' : 'i-lock'}"/></svg><span>${up === 'redo' ? '精密解析' : '有料プラン'}では、勝負所を5秒ずつ深く読みます</span><svg class="ic"><use href="#i-next"/></svg></button>` : '';
+  h += `<div class="tph">${YOU()}の勝率</div>`;
+  for (const { i, deep } of list) {
+    const p = P[i], prev = P[i - 1], self = moverSide(i) === SELF;
+    const t = p.missedTsume && prev.tsume ? prev.tsume : null, best = t ? t.line[0] : (prev.cands || [])[0];
+    const rec = best && best.usi !== p.move.usi ? `${OWN && self ? 'おすすめは' : '最善は'} ${mv(best.ja)}` : '';
+    const hint = deep ? rec || '最善の手' : t ? `${t.len}手詰めあり` : rec;
+    const name = p.missedTsume ? '詰み逃し' : p.mark || '', rate = `${pct(wrSelf(prev))}% → ${pct(wrSelf(p))}%`;
+    const score = t ? `${t.len}手詰め` : best ? fmtVal(best) : '', pv = (t ? t.line.map((m) => m.ja) : (best && best.pv) || []).slice(1).map(mv).join(' ');
+    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint} 評価値 ${score}` : hint, deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
+    h += `<button type="button" class="tp${i === S.ply ? ' cur' : ''}" data-a="jump" data-v="${i}" aria-label="${label}"><span class="t1"><span class="no"><i${self ? ' class="you"' : ''}></i>${i}</span><span class="mm">${mv(p.move.ja)}</span>${name ? `<span class="tm">${onbMark(p.missedTsume ? 'dub' : MKC[p.mark])}${name}</span>` : ''}<b class="pr2">${rate}</b></span>`;
+    h += deep ? `<span class="td"><span class="t1"><em>深読み</em><b class="hm">${hint}</b><b class="pr2">${score}</b></span>${pv ? `<span class="p">${pv}</span>` : ''}</span>` : hint ? `<span class="th">${hint}</span>` : '';
+    h += '</button>';
+  }
+  return h;
+}
+A.turns = () => {
+  openSheet(`勝負所${anMode() === 'done' ? `（${turns().length}手）` : ''}`, turnsHTML(), { id: 'tp' });
+  ensureVisible(R.shc, R.shc.querySelector('.tp.cur'));
+};
+/* the dialog is its own layer in the app, so the sheet closes first (the same as deleting a record) */
+A.deeplock = () => { closeSheet(); if (paid()) redoPrecise(); else A.lockinfo('deep'); };
+
 /* ---------- rendering ---------- */
 function ensureVisible(box, row) {
   if (!box || !row || !box.clientHeight || !row.offsetParent) return;
@@ -608,7 +644,12 @@ function renderNow() {
   R.bfirst.classList.toggle('warn', !!e);
   R.bfirst.setAttribute('aria-label', e ? '本譜に戻る' : '最初へ');
   R.bfirst.innerHTML = `<svg class="ic"><use href="#${e ? 'i-undo' : 'i-first'}"/></svg>`;
-  R.brl1.hidden = false; R.brl2.hidden = !e;
+  R.brl1.hidden = false; R.brl2.hidden = false;
+  /* the free half of the lower name row: the way back on a branch, the list of turning points on the game line */
+  const tn = !e && anMode() === 'done' ? turns().length : null;
+  R.brl2.classList.toggle('bk2', !!e);
+  R.brl2.dataset.a = e ? 'exitbr' : 'turns';
+  R.brl2.setAttribute('aria-label', e ? '本譜に戻る' : `勝負所の一覧${tn == null ? '' : `、${tn}手`}`);
   R.brl1.dataset.a = e ? 'rttoggle' : 'deepread';
   R.brl1.classList.toggle('hold', S.rtHold);
   R.brl1.removeAttribute('aria-label');
@@ -619,6 +660,7 @@ function renderNow() {
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   } else {
     R.brl1.innerHTML = S.rtHold ? '<b>終了</b>' : '<svg class="ic"><use href="#i-bolt"/></svg><b>深く読む</b>' + (paid() ? '' : '<svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl2.innerHTML = `<svg class="ic"><use href="#i-flag"/></svg>勝負所${tn == null ? '' : ` <b>${tn}</b>`}`;
   }
 }
 function renderPly() {
@@ -765,6 +807,7 @@ const LOCKS = () => ({
   cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
   precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
   rt: ['リアルタイム解析は、有料プランで使えます', '本譜の「深く読む」や分岐で、その局面の評価値・最善手・読み筋が出ます。'],
+  deep: ['深読みは、有料プランで使えます', `精密解析（有料プラン）では、形勢が大きく動いた局面を5秒ずつ深く読み直し、おすすめの手・評価値・読み筋をこの一覧に出します。週${DB.usage.preciseMax}局まで使えます。`],
 });
 A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
@@ -873,8 +916,7 @@ function tickRun() {
     r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
     if (r.done >= r.total) {
       if (r.kind !== 'pre' || r.total <= 31) { finishRun(); return; }
-      // shortcut: 見た目の確認用に30・31手目を固定で使う。探索結果や選定規則の検証は製品テストで行う。
-      r.deep = { total: 2, done: 0 };
+      r.deep = { total: deepOf(gm.data).length, done: 0 };
       r.deepNextAt = performance.now() + 420;
       refreshWaiting(gm);
     }
@@ -895,11 +937,12 @@ function finishRun() {
   RUN = null;
   if (!gm) return;
   gm.an = r.kind;
-  gm.deep = r.deep ? [30, 31] : undefined;
+  gm.deep = r.deep ? deepOf(gm.data) : undefined;
   if (!paid()) DB.usage.free++;
   else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
     renderGame();
+    if (UI.sheet === 'tp') A.turns();
     if (AI.open) renderAI();
     if (DB.celebrated) toast('解析が終わりました');
     else {

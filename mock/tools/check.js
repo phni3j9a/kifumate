@@ -23,6 +23,9 @@ const fs = require('fs');
   const jump = async (j) => { await page.evaluate((x) => document.querySelector(`.jump [data-jump="${x}"]`).click(), j); await wait(350); };
   const ctl = async (sel) => { await page.evaluate((s) => document.querySelector(s).click(), sel); await wait(300); };
   const key = async (k, times = 1) => { for (let i = 0; i < times; i++) await page.keyboard.press(k); await wait(150); };
+  /* 勝負所の一覧（シートの中）と、盤の下の入口 */
+  const tp = (sel) => page.locator('#scr .shc ' + sel);
+  const tpEntry = (name) => page.locator('#scr').getByRole('button', { name, exact: true }).count();
   const card = async (name) => { await page.evaluate((n) => { const c = [...document.querySelectorAll('#scr [data-a="open"]')].find((e) => e.offsetParent !== null && e.textContent.includes(n)); c.click(); }, name); await wait(350); };
 
   // 0. names that must never appear in the app: the engine and its evaluation function, and other companies' services (README: 決まっていること)
@@ -33,10 +36,24 @@ const fs = require('fs');
   await has('あなた'); await has('相手が有利', 'opens at the first blunder');
   await key('End'); await has('あなたの勝ち！'); await has('85手で終局（詰み）');
 
+  // 1b. 勝負所の一覧: 印の付いた手と、前後とも深く読んだ手を手数順に。行を押すとその局面へ移る
+  await jump('game');
+  ok(await tpEntry('勝負所の一覧、11手') === 1, 'the entry under the board shows the count');
+  await act('turns'); await has('勝負所（11手）'); await has('あなたの勝率');
+  ok((await tp('.tp').evaluateAll((els) => els.map((e) => e.dataset.v).join())) === '31,40,42,49,52,62,63,65,66,68,81', 'marked moves and deeply read moves, in move order');
+  ok(await tp('.tp .td').count() === 6, 'the moves read deeply on both sides carry the deep result');
+  ok((await tp('.tp').first().getAttribute('aria-label')) === '31手目 ▲3三角成、あなたの手、あなたの勝率 51%から51%、深読み 最善の手 評価値 +29、読み筋 △同桂 ▲2四歩 △同歩 ▲同銀', 'a deeply read move is listed without a mark');
+  ok(await tp('.tpn').count() === 0, 'no note when the analysis has deep reading');
+  await click('#scr .tp[data-v="62"]'); ok(await page.locator('#scr [data-b="sheet"]').isHidden(), 'a row closes the sheet'); await has('62手目'); await has('深く読んだ局面');
+  await act('turns'); ok((await tp('.tp.cur').evaluateAll((els) => els.map((e) => e.dataset.v).join())) === '62', 'the move on the board is highlighted'); await act('closesheet');
+
   // 2. stop an analysis: asks first, and the quota is untouched
   await jump('fresh');
   await has('この対局を解析する'); await has('今週あと12局');
+  ok(await tpEntry('勝負所の一覧') === 1, 'no count before the analysis');
+  await act('turns'); await has('解析すると、悪手・疑問手・好手など 印の付いた手がここに並びます。'); await act('closesheet');
   await act('analyze'); await wait(900); await has('解析中');
+  await act('turns'); await has('解析が終わると、印の付いた手がここに並びます。'); await act('closesheet');
   await act('stopan'); await has('解析を中止しますか');
   await click('#scr .dla [data-a="dlgok"]'); await has('この対局を解析する', 'back to not analysed'); await has('今週あと12局', 'quota unchanged after stop');
 
@@ -55,8 +72,13 @@ const fs = require('fs');
   await ctl('.pg-ctl [data-state="lived"]'); await ctl('.pg-ctl [data-plan="free"]');
   await has('今週の解析 あと7局', 'free count on the list');
   await jump('fresh'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析 あと7局');
-  await act('analyze'); await wait(10500); await act('back'); await has('あと6局', 'free count after one analysis');
+  await act('analyze'); await wait(500); await act('turns'); await wait(10000); await has('勝負所（12手）', 'the open list fills in when the analysis ends');
+  ok(await tp('.tpn').count() === 1 && await tp('.tp .td').count() === 0, 'one note for the list, not a lock on every row');
+  await has('有料プランでは、勝負所を5秒ずつ深く読みます');
+  await act('deeplock'); await has('深読みは、有料プランで使えます'); await click('#scr .dla [data-a="dlgok"]'); await has('月額'); await act('back');
+  await act('back'); await has('あと6局', 'free count after one analysis');
   await jump('game'); await ctl('.pg-ctl [data-plan="free"]'); await has('2位', 'saved precise candidates readable on free');
+  await act('turns'); ok(await tp('.tp .td').count() === 6 && await tp('.tpn').count() === 0, 'saved deep results stay readable on the free plan'); await act('closesheet');
   await act('ai'); await has('AIコーチは有料プランの機能です'); await act('aiclose');
   await jump('limit'); await ctl('.pg-ctl [data-plan="free"]'); await has('今週の解析は残り0局'); await has('月曜の午前0時に、また10局使えます');
   await act('nav', 'plan'); await has('月額');
@@ -64,6 +86,7 @@ const fs = require('fs');
 
   // 4b. the coach works on a precise analysis only; an ordinary one can be done again as precise
   await jump('fresh'); await act('kind', 'std'); await has('候補1手・AIコーチなし'); await act('analyze'); await wait(10500);
+  await act('turns'); await has('精密解析では、勝負所を5秒ずつ深く読みます'); await act('deeplock'); await has('精密解析でやり直しますか'); await act('dlgno');
   await act('ai'); await has('AIコーチは、精密解析した対局で使えます'); await has('精密解析でやり直す');
   await act('aianalyze'); await has('精密解析でやり直しますか'); await click('#scr .dla [data-a="dlgok"]'); await has('解析しています');
   await wait(10500); await has('どこを中心に説明しますか', 'coach available after the precise analysis'); await act('aiclose');
@@ -83,6 +106,7 @@ const fs = require('fs');
 
   // 5. branch: play the recommended move, look at the line, return with the back button
   await jump('branch'); await wait(900); await has('分岐 1手目'); await has('本譜（48手目）に戻る');
+  ok(await page.locator('#scr [data-a="turns"]').count() === 0, 'on a branch the same place is the way back');
   await act('back'); await hasNot('分岐 1手目', 'back button leaves the branch first'); await has('48手目');
   await act('back'); await has('棋譜', 'second back leaves the game');
 
@@ -138,19 +162,20 @@ const fs = require('fs');
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
   await act('analyze'); await act('back');
   const pill = page.locator('#scr [data-runpill]');
-  for (let i = 0; i < 150 && await pill.innerText() !== '深読み中 1/2'; i++)
+  for (let i = 0; i < 150 && await pill.innerText() !== '深読み中 1/6'; i++)
     await page.clock.runFor(70);
-  ok(await pill.innerText() === '深読み中 1/2', 'list shows the second-stage progress');
+  ok(await pill.innerText() === '深読み中 1/6', 'list shows the second-stage progress');
   await ctl('.pg-ctl [data-net="off"]'); await page.clock.runFor(70);
   ok(await pill.innerText() === '中断中', 'offline pill does not use first-stage counts');
   await ctl('.pg-ctl [data-net="on"]'); await page.clock.runFor(70);
-  ok(await pill.innerText() === '深読み中 1/2', 'reconnection restores the same second-stage progress');
+  ok(await pill.innerText() === '深読み中 1/6', 'reconnection restores the same second-stage progress');
   await page.clock.resume();
 
   // 8. first launch: onboarding, empty library, sample record, import asks which side
   await ctl('.pg-ctl [data-state="first"]'); await has('kifumateへ ようこそ');
   await act('onbskip'); await has('まだ棋譜がありません');
   await act('sample'); await wait(500); await has('先手'); await has('最善');
+  await act('turns'); await has('先手の勝率'); await has('有料プランでは、勝負所を5秒ずつ深く読みます', 'the sample record has no deep reading'); await act('closesheet');
   await act('back'); await act('nav', 'import'); await act('imppaste'); await has('あなたはどちらですか？');
   await act('impside', 'g'); await has('あなたは後手');
   await act('impsave', '0'); await wait(2800); await has('この対局を解析する');
