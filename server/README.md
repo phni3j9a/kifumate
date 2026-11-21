@@ -13,9 +13,15 @@
 | モード | 1局面の探索 | Threads | MultiPV | インスタンス |
 | --- | --- | --- | --- | --- |
 | `std` | 250ms | 1 | 1 | `standard-2`（1 vCPU、6 GiB、12 GB） |
-| `precise` | 1000ms | 2 | 3 | `standard-3`（2 vCPU、8 GiB、16 GB） |
+| `precise` | 全局面1000ms＋勝負所5000ms | 両段2 | 両段3 | `standard-3`（2 vCPU、8 GiB、16 GB） |
 
 入力上限は512手、JSONは16 KiB。開始局面（0手目）と全着手後を解析するため、結果は「手数+1」局面です。
+
+### 精密の勝負所の深読み
+
+1段目の値から、31手目以降の着手側の勝率が下がった手を低下順（同点は手数の小さい順）に並べます。勝率は `100 / (1 + exp(-cp / 600))`（着手側のcp、詰み・宣言評価は勝つ側に+3000換算）。評価がない手と、前後にともに詰みの証明がある手は除外します。着手前後の局面を組で選び、重複は一度だけ解析。開始局面込みの全局面数の10%（切り捨て）を超える組は飛ばします。85手なら86局面のうち最大8局面です。
+
+2段目の失敗が続くか、更新前の中継が深読み用の入口に404を返した場合は、途中の深読みも破棄して1段目の結果だけで完了します。深読みの有無によらず精密1局分です。中止はどちらの段階でも予約を返却します。通常の `std` は従来どおりです。
 
 ### ジョブ・回数・保存期間
 
@@ -40,7 +46,7 @@
 | `GET /v1/quota` | `paid`, `weekStart`, `resetsAt`, `totalRemaining`, `preciseRemaining`, `completed`, `reserved` |
 | `POST /v1/jobs` | ジョブ作成。新規202、重複200。下記本文のみ許可 |
 | `GET /v1/jobs` | 保存中のジョブ一覧（結果本体なし）と`quota` |
-| `GET /v1/jobs/:id?from=n` | `n`局面目以降の差分結果とジョブ状態・`quota` |
+| `GET /v1/jobs/:id?from=n` | `n`局面目以降の差分結果とジョブ状態・`quota`。完了済みの精密は全件 |
 | `DELETE /v1/jobs/:id` | 実行中／待ちを中止。終了済みには何もしない |
 
 作成本文：
@@ -52,6 +58,10 @@
 `initial`は`startpos`または**`sfen `という接頭辞なし**のSFEN文字列。`moves`はUSI配列。対局者名等の追加キーは拒否します。形式は入口で検査し、駒配置や棋譜全体の合法性は中継で検査します。不正な棋譜はジョブの`failed / invalid_position_or_move`となり、回数には数えません。
 
 ジョブ応答には`id`, `mode`, `status`, `next`, `total`, `createdAt`, `finishedAt`, `expiresAt`, `error`, `results`があります。時刻はUnixミリ秒。状態は`queued / running / completed / cancelled / failed`です。`next`を次の`from`に渡してください。通信断後も最後に保存した`from`から再取得でき、結果の`ply`で重複を排除できます。
+
+`precise` のジョブには `deep: {total, done}` も付きます。`total` は2段目の対象局面数（選定前は0）、`done` は深読み済み局面数です。2段目も `status: "running"` のまま、`next` は1段目の終端（全局面数）で止まります。2段目を打ち切ったときは `total` は選定数、`done` は0です。中止・失敗時は `coachProof` は発行しません。
+
+**精密の `completed` 応答は `from` に関係なく全局面**を再送します。先に受信した1段目の結果を含め、局面の `ply` で上書きしてください。配布版0.1.2のソースでは、局面オブジェクトを分解せずに保存し、そのままコーチへ送ります。`std` は完了時も従来の差分です。
 
 各結果：
 
@@ -66,6 +76,7 @@
 }
 ```
 
+- 精密で深読みした局面は、完了時に任意の `deep: {ply, score, candidates, mate}`（5000msの結果）が付きます。外側は常に1段目の結果です。
 - `cp`は先手有利が正、後手有利が負。`bound`があれば`lowerbound / upperbound`も先手視点です。
 - 詰みスコアは`kind: "mate"`、符号も先手視点、`winner: "sente" | "gote"`で勝つ側を示します。距離不明の`+ / -`は`value: null`。すでに詰んだ局面は距離0です。
 - `score.kind === "mate"`は探索スコアであり、詰みの証明ではありません。画面で「詰みあり」と出せるのは`mate`があるときだけです。
@@ -238,6 +249,8 @@ POST本文（追加キー・人名フィールドは拒否）：
 }
 ```
 
+- 署名 `coachProof` は完了時の**全局面の結果（`deep` 込み）**に対して発行します。結果・署名は形を変えずに送ってください。従来の深読みなし解析・署名も受け付けます。コーチ本文全体は従来と同じ1 MiB以下です。候補の読み筋・詰みの全応手が長い棋譜では上限超過で413になることがあります（解析の取得は可能）。
+- 悪手・疑問手はアプリと同じく31手目以降の候補1位でない着手について、着手側の勝率が20ポイント以上低下で悪手、10ポイント以上低下で疑問手。前後の両方に `deep` があるときだけ深読み同士で比較し、それ以外は1段目同士です。
 - `perspective`: `sente / gote / observer`。自分が後手なら `gote`、他者の対局なら `observer`。
 - `focus`: `総合 / 序盤の駒組み / 中盤の攻防 / 終盤 / 悪手・改善点`。`detail`: `かんたん / ふつう / くわしく`。
 - 追加質問は同じ棋譜・結果・証明に `question` を付け、`history: [{role:"user"|"assistant",content:"本文"}]` を送ります。systemロールは禁止。解説の作り直しではquestionを省略しhistoryを空にします。
@@ -269,7 +282,7 @@ POST本文（追加キー・人名フィールドは拒否）：
 }
 ```
 
-本文は**プレーンテキスト**で表示し、HTMLとして解釈しないでください。`facts` は解析根拠とそれに基づく解釈、`advice` は個別の学習助言です。参照の `ply` はその局面までに指した手数、`pv` はそこからの読み筋です。`position` は局面評価、`candidate:rank` は候補、`mate` だけが証明済み詰み（`provenMate:true`）です。数値は先手視点。盤面リンク・再生できる読み筋・評価値は `references` から描画します。
+本文は**プレーンテキスト**で表示し、HTMLとして解釈しないでください。`facts` は解析根拠とそれに基づく解釈、`advice` は個別の学習助言です。参照の `ply` はその局面までに指した手数、`pv` はそこからの読み筋です。`position` は局面評価、`candidate:rank` は候補、`mate` だけが証明済み詰み（`provenMate:true`）です。数値は先手視点。深読みの参照IDは同じ局面・順位の1段目と区別して `30:deep:candidate:1` のように `:deep` が入ります。盤面リンク・再生できる読み筋・評価値は `references` から描画します。
 
 ### アプリ側に必要な処理
 
@@ -411,6 +424,8 @@ python3 scripts/measure_realtime.py \
   --url https://kifumate-analysis-staging.yuki-nakano-1020.workers.dev \
   --token-file .local/realtime-device.json
 ```
+
+精密の2段階は、新規の招待済み端末で `python3 scripts/measure.py --url <staging URL> --token-file <端末ファイル> --modes precise --expect-deep` を実行して確認します。提供元が設定され、コーチも1回だけ確認する場合は `--coach-once` を追加します。終わったら計測用の招待を取り消してください。
 
 計測後は全三つのContainer applicationで次を確認します（対象IDは`npx wrangler containers list --env staging`で確認）。`healthy / starting`は準備済み容量で、利用者の実行中とは区別してください。
 
