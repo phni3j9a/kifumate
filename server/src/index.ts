@@ -4,7 +4,7 @@ export { Invitations } from './invitations';
 import { Coach, parseCoach, signAnalysis, type CoachEnv } from './coach';
 import { coachTags, readCoachResponse } from './coach-tools';
 import { DurableObject } from 'cloudflare:workers';
-import { RealtimeSessions } from './realtime';
+import { RealtimeSessions, fetchRealtimeAnalysis } from './realtime';
 import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
@@ -20,6 +20,7 @@ export interface Env extends CoachEnv {
   WRITE_LIMITER?: RateLimit;
   INVITE_LIMITER?: RateLimit;
   REALTIME_IDLE_MS?: string;
+  REALTIME_HOLD_IDLE_MS?: string;
   ENVIRONMENT: string;
   ALLOW_DEV_PAID: string;
   DEV_PAID_HASHES?: string;
@@ -38,21 +39,19 @@ export class RealtimeContainer extends StandardContainer {
   private lifetime = new AbortController();
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
-    const configured = Number(env.REALTIME_IDLE_MS ?? 30_000);
-    const idleMs = Number.isSafeInteger(configured) && configured >= 1000 && configured <= 300_000 ? configured : 30_000;
+    const idleTime = (value: string | undefined, fallback: number) => {
+      const ms = Number(value);
+      return Number.isSafeInteger(ms) && ms >= 1000 && ms <= 300_000 ? ms : fallback;
+    };
     this.sessions = new RealtimeSessions(ctx.storage, {
-      analyze: async (input, sessionId, sequence, signal) => {
+      analyze: async (input, sessionId, sequence, round, movetimeMs, signal) => {
         if (this.boot || !ctx.container?.running) {
           // 局面変更では共通の初回起動まで中断しない。明示停止・休止だけが起動を打ち切る。
           const boot = this.boot ??= this.startAndWaitForPorts(8080, {abort: this.lifetime.signal});
           try { await boot; } finally { if (this.boot === boot) this.boot = undefined; }
         }
         if (signal.aborted) return new Response(null, {status: 409});
-        return this.containerFetch('http://container/realtime', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({...input, ply: input.moves.length, sessionId, sequence}),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]),
-        });
+        return fetchRealtimeAnalysis(this.containerFetch.bind(this), input, sessionId, sequence, round, movetimeMs, signal);
       },
       stop: async () => {
         this.lifetime.abort();
@@ -65,7 +64,7 @@ export class RealtimeContainer extends StandardContainer {
         this.deleteSchedules('expireRealtime');
         await this.schedule(new Date(when), 'expireRealtime');
       },
-    }, idleMs);
+    }, idleTime(env.REALTIME_IDLE_MS, 30_000), idleTime(env.REALTIME_HOLD_IDLE_MS, 300_000));
   }
   async expireRealtime() { await this.sessions.expire(); }
   async onActivityExpired() { await this.sessions.expire(); }

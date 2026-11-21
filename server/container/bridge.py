@@ -27,6 +27,7 @@ MAX_MATE_SECONDS = 0.75
 TOOL_SCHEMAS = {tool['name']: tool['parameters'] for tool in json.loads(Path(__file__).with_name('coach_tools_schema.json').read_text())}
 tool_slots = threading.BoundedSemaphore(2)
 MODES = {"std": (250, 1, 1), "precise": (1000, 2, 3)}
+MAX_REALTIME_SEARCH_MS = 60_000
 MOVE = re.compile(r"(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])\Z")
 
 
@@ -78,7 +79,7 @@ def validate_sfen(sfen):
         raise InvalidInput()
 
 
-def prepare(data):
+def prepare(data, *, realtime=False):
     if not isinstance(data, dict) or set(data) != {"initial", "moves", "mode", "ply"}:
         raise InvalidInput()
     initial, moves, mode, ply = (data[k] for k in ("initial", "moves", "mode", "ply"))
@@ -93,16 +94,22 @@ def prepare(data):
         raise InvalidInput()
     # 全列を先に検証し、不正な後半を含む棋譜を成功扱いにしない。
     target = None
+    positions = []
     for i, usi in enumerate(moves):
         if i == ply:
             target = board.sfen()
+        if realtime and i < ply:
+            positions.append(board.sfen().rsplit(' ', 1)[0])
         if not isinstance(usi, str) or not MOVE.fullmatch(usi):
             raise InvalidInput()
         move = board.move_from_usi(usi)
         if not move or not board.is_legal(move):
             raise InvalidInput()
         board.push(move)
-    return cshogi.Board(target or board.sfen()), initial, moves, mode, ply
+    target = target or board.sfen()
+    # 解析対象と同じ局面が過去に3回ある場合だけ千日手。打開後は探索を続ける。
+    repetition = realtime and positions.count(target.rsplit(' ', 1)[0]) == 3
+    return cshogi.Board(target), initial, moves, mode, ply, repetition
 
 
 def coach_facts(game, *, include_mate_replies=False):
@@ -364,9 +371,18 @@ class Engine:
             if len(lines) > 10000 or time.monotonic() >= deadline:
                 raise RuntimeError("analysis_timeout")
 
-    def analyze(self, data, cancel=None):
-        board, initial, moves, mode, ply = prepare(data)
+    def analyze(self, data, cancel=None, movetime_ms=None):
+        board, initial, moves, mode, ply, repetition = prepare(data, realtime=cancel is not None or movetime_ms is not None)
+        if repetition:
+            if cancel is not None and cancel.is_set():
+                raise Superseded()
+            result = {"ply": ply, "score": None, "candidates": [], "mate": None}
+            if movetime_ms is not None:
+                result['terminal'] = True
+            return result
         ms, threads, multipv = MODES[mode]
+        if movetime_ms is not None:
+            ms = movetime_ms
         if self.mode != mode:
             self.send(f"setoption name Threads value {threads}")
             self.send(f"setoption name MultiPV value {multipv}")
@@ -387,16 +403,24 @@ class Engine:
                 candidates[info["rank"]] = info
         ordered = [candidates[k] for k in sorted(candidates)]
         # 宣言勝ちは着手でも詰みでもない。bestmove の終端を見て専用結果にする。
-        if lines[-1].split()[1:2] == ["win"]:
+        bestmove = lines[-1].split()[1:2]
+        if bestmove == ["win"]:
             score = {"kind": "declaration", "value": None, "winner": "sente" if board.turn == cshogi.BLACK else "gote"}
             candidate = {"rank": 1, "depth": 0, "score": score, "declarationWin": True, "pv": []}
-            return {"ply": ply, "score": score, "candidates": [candidate], "mate": None}
-        score = ordered[0]["score"] if ordered else None
-        if board.is_check() and not list(board.legal_moves):
-            score = score_for_sente("mate", "0", board.turn)
-        if not ordered and score is None and not board.is_game_over():
-            raise RuntimeError("analysis_unavailable")
-        return {"ply": ply, "score": score, "candidates": ordered, "mate": mate_proof(board)}
+            result = {"ply": ply, "score": score, "candidates": [candidate], "mate": None}
+            terminal = True
+        else:
+            game_over = board.is_game_over()
+            score = ordered[0]["score"] if ordered else None
+            if game_over and board.is_check():
+                score = score_for_sente("mate", "0", board.turn)
+            terminal = game_over or bestmove in (["resign"], ["none"])
+            if not ordered and score is None and not (terminal if movetime_ms is not None else game_over):
+                raise RuntimeError("analysis_unavailable")
+            result = {"ply": ply, "score": score, "candidates": ordered, "mate": mate_proof(board)}
+        if movetime_ms is not None:
+            result['terminal'] = terminal
+        return result
 
     def close(self):
         self.process.kill()
@@ -413,16 +437,20 @@ realtime_latest = None
 realtime_cancel = None
 
 
-def replace_search(session, sequence):
+def replace_search(session, sequence, round_number):
     global realtime_latest, realtime_cancel
-    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session) or type(sequence) is not int or sequence < 0:
+    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session) or not all(
+        type(n) is int and 0 <= n <= 2**53 - 1 for n in (sequence, round_number)
+    ):
         raise InvalidInput()
+    order = (sequence, round_number)
     with realtime_lock:
-        if realtime_latest and realtime_latest[0] == session and sequence <= realtime_latest[1]:
+        # 次のセッションは destroy 後に別プロセスで開始する。
+        if realtime_latest and (realtime_latest[0] != session or order <= realtime_latest[1:]):
             raise Superseded()
         if realtime_cancel is not None:
             realtime_cancel.set()
-        realtime_latest = (session, sequence)
+        realtime_latest = (session, *order)
         realtime_cancel = threading.Event()
         return realtime_cancel
 
@@ -465,7 +493,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global engine
-        if self.path not in ("/analyze", "/realtime", "/coach-facts", "/coach-tools"):
+        deepening = self.path == '/realtime/deepen'
+        realtime = deepening or self.path == '/realtime'
+        if not realtime and self.path not in ("/analyze", "/coach-facts", "/coach-tools"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -489,23 +519,31 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length))
             if self.path == "/coach-facts":
                 return self.respond(200, coach_facts(data, include_mate_replies=True))
-            cancel = None
-            if self.path == '/realtime':
-                if not isinstance(data, dict) or set(data) != {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}:
+            cancel = movetime_ms = None
+            if realtime:
+                keys = {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}
+                if deepening:
+                    keys.update(('round', 'movetimeMs'))
+                if not isinstance(data, dict) or set(data) != keys:
                     raise InvalidInput()
                 session, sequence = data.pop('sessionId'), data.pop('sequence')
+                round_number = 0
+                if deepening:
+                    round_number, movetime_ms = data.pop('round'), data.pop('movetimeMs')
+                    if type(movetime_ms) is not int or not MODES['std'][0] <= movetime_ms <= MAX_REALTIME_SEARCH_MS:
+                        raise InvalidInput()
                 if data['mode'] != 'std' or data['ply'] != len(data['moves']):
                     raise InvalidInput()
             prepare(data)
-            if self.path == '/realtime':
-                cancel = replace_search(session, sequence)
+            if realtime:
+                cancel = replace_search(session, sequence, round_number)
             with lock:
                 try:
                     if cancel is not None and cancel.is_set():
                         raise Superseded()
                     if engine is None:
                         engine = Engine()
-                    result = engine.analyze(data, cancel)
+                    result = engine.analyze(data, cancel, movetime_ms)
                 except Superseded:
                     raise
                 except Exception:
