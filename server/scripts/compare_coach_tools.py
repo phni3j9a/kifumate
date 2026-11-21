@@ -40,6 +40,7 @@ GEMINI_ERROR_TYPES = {'INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'PERMISSION_DEN
                       'RESOURCE_EXHAUSTED', 'UNAUTHENTICATED', 'INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED',
                       'CANCELLED', 'ABORTED', 'UNKNOWN', 'ALREADY_EXISTS', 'OUT_OF_RANGE', 'UNIMPLEMENTED', 'DATA_LOSS'}
 NEON_JSON_MODE = 'application/json'
+OUTPUT_LIMITS = {'deepseek': (6500, 8000), 'terra': (4200, 5400), 'neon': (12000, 16000)}
 
 
 def dumps(x):
@@ -146,11 +147,14 @@ def unpack(provider, data, history):
         candidate = candidates[0]
         content = candidate.get('content') or {}
         parts = content.get('parts') or []
-        if parts:
-            history.append(content)
-        calls = [(t.get('id'), t['name'], dumps(t.get('args', {}))) for p in parts if (t := p.get('functionCall'))]
+        finish = candidate.get('finishReason', 'FINISH_REASON_UNSPECIFIED')
         text = ''.join(p['text'] for p in parts if 'text' in p and not p.get('thought'))
-        return calls, text, candidate.get('finishReason', 'FINISH_REASON_UNSPECIFIED')
+        # MAX_TOKENS の直後に INVALID_ARGUMENT が出たため、不完全な出力は再送しない。
+        if finish != 'STOP' or not parts:
+            return [], text, finish
+        history.append(content)
+        calls = [(t.get('id'), t['name'], dumps(t.get('args', {}))) for p in parts if (t := p.get('functionCall'))]
+        return calls, text, finish
     if provider == 'deepseek':
         choice = data['choices'][0]
         m = choice['message']
@@ -232,7 +236,7 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
             if remaining <= 0:
                 raise Halt('deadline')
             final = force or len(record['calls']) >= tool_limit or remaining < 120
-            max_tokens = (6500 if provider == 'deepseek' else 4200) if not final else (8000 if provider == 'deepseek' else 5400)
+            max_tokens = OUTPUT_LIMITS[provider][1 if final else 0]
             request_body = body(provider, history, final, max_tokens)
             if final and not forced_attempt:
                 instruction = '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'
@@ -270,7 +274,8 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
                 record['text'] = text
                 raise Halt('final_incomplete')
             if not calls:
-                force = forced_attempt = True
+                force = True
+                forced_attempt = provider != 'neon'
                 continue
             responses = []
             for ident, name, raw in calls:
@@ -327,6 +332,7 @@ def main():
     parser.add_argument('--cases', type=Path, default=SERVER / '.local/coach-reasoning/cases.json')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--runs', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--start-run', type=int, choices=(1, 2), default=1, help='反復番号の開始値（2回目のみの別実行用）')
     parser.add_argument('--case', action='append')
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
@@ -334,6 +340,8 @@ def main():
         import unittest
         suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_compare_coach_tools.py')
         raise SystemExit(not unittest.TextTestRunner().run(suite).wasSuccessful())
+    if args.start_run + args.runs > 3:
+        parser.error('--start-run 2 には --runs 1 が必要です')
     if not args.provider or not args.output or not (key := os.environ.get(PROVIDERS[args.provider][2])):
         parser.error('provider、--outputとAPIキー環境変数が必要です')
     if args.output.resolve().parent != LOCAL.resolve() or args.output.name == 'budget.jsonl':
@@ -351,12 +359,13 @@ def main():
     if args.provider == 'neon':
         # https://aistudio.google.com/docs/structured-output?generate-content=true#structured-outputs-with-tools
         result['jsonMode'] = {'responseMimeType': NEON_JSON_MODE, 'withFunctionCalling': 'supported (preview)'}
+        result['outputLimitReason'] = '初回比較のNeonで調査4200中4197、最終5400中5397を思考に使いMAX_TOKENSとなったため。'
     with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as f:
         json.dump(result, f)
     signal.signal(signal.SIGALRM, timed_out)
     with tempfile.TemporaryDirectory() as temp:
         bridge = bridge_program(temp)
-        for run in range(1, args.runs + 1):
+        for run in range(args.start_run, args.start_run + args.runs):
             for case in cases:
                 rec = answer(case, run, args.provider, bridge, lambda b, t: http(args.provider, key, b, t), LOCAL / 'budget.jsonl')
                 result['records'].append(rec)

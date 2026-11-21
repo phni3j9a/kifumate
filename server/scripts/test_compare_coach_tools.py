@@ -133,6 +133,27 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(requests[2]['toolConfig'], {'functionCallingConfig': {'mode': 'NONE'}})
         self.assertIn('最終のJSON回答', contents[5]['parts'][0]['text'])
 
+    def test_neon_truncated_turn_is_billed_but_not_replayed_or_executed(self):
+        requests = []
+        responses = [synthetic('neon', turn) for turn in range(1, 4)]
+        responses[1]['candidates'][0]['finishReason'] = 'MAX_TOKENS'
+        def send(req, timeout):
+            requests.append(req)
+            return responses[len(requests) - 1]
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / 'budget.jsonl'
+            out = answer(CASE, 1, 'neon', bridge_program(tmp), send, ledger)
+            with locked_ledger(ledger) as (_, events):
+                self.assertEqual([e['state'] for e in events], ['reserved', 'settled'] * 3)
+                self.assertAlmostEqual(ledger_total(events), out['estimatedUSD'])
+        self.assertTrue(out['validation']['accepted'], out)
+        self.assertEqual(len(out['calls']), 1)
+        self.assertEqual(out['turns'][1]['finish'], 'MAX_TOKENS')
+        self.assertEqual([r['generationConfig']['maxOutputTokens'] for r in requests], [12000, 12000, 16000])
+        self.assertEqual(requests[2]['toolConfig'], {'functionCallingConfig': {'mode': 'NONE'}})
+        self.assertEqual(requests[2]['contents'][:-1], requests[1]['contents'])
+        self.assertIn('最終のJSON回答', requests[2]['contents'][-1]['parts'][0]['text'])
+
     def test_neon_usage_and_finish_reasons(self):
         data = synthetic('neon', 1)
         usage, cost = usage_and_cost(data, 'neon')
