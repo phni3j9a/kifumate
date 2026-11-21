@@ -174,7 +174,7 @@ test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と
   // 再起動で権利を固定しない。通信が戻るまで新規生成は使わず、履歴は読める。
   expect(coach.requests).toHaveLength(2);
 });
-test("無料の鍵・精密への案内・失敗/再試行・中止・月上限と更新日時", async ({
+test("無料の鍵・精密への案内・失敗/再試行・中止・週上限と回復の案内", async ({
   page,
 }) => {
   const { analysis, coach } = await imported(page, false);
@@ -197,7 +197,7 @@ test("無料の鍵・精密への案内・失敗/再試行・中止・月上限�
   coach.status = "failed";
   await button(page, "解説をつくる").click();
   await expect(
-    page.getByText(/解説を終えられませんでした。回数は減っていません/),
+    page.getByText(/解説を終えられませんでした。今週の残りは減っていません/),
   ).toBeVisible();
   coach.status = "pending";
   await button(page, "もう一度試す").click();
@@ -206,20 +206,21 @@ test("無料の鍵・精密への案内・失敗/再試行・中止・月上限�
   await button(page, "中止する").click();
   await expect.poll(() => coach.deletes).toBe(1);
   await expect(button(page, "解説をつくる")).toBeVisible();
-  coach.remaining = 9;
-  coach.low = true;
+  coach.remainingRatio = 0.09;
   await button(page, "AIコーチを閉じる").click();
   await button(page, "AIに聞く").click();
   await expect(
-    page.getByText("AIコーチは、今月あと9回使えます", { exact: true }),
+    page.getByText("今週のAIコーチは残りわずかです", { exact: true }),
   ).toBeVisible();
-  coach.remaining = 0;
+  coach.remainingRatio = 0;
   await button(page, "AIコーチを閉じる").click();
   await button(page, "AIに聞く").click();
   await expect(
-    page.getByText("今月のAIコーチは上限に達しました", { exact: true }),
+    page.getByText("今週のAIコーチは上限に達しました", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/次の更新：2026\/12\/1 0:00:00/)).toBeVisible();
+  await expect(
+    page.getByText(/月曜0時（日本時間）に、また使えます/),
+  ).toBeVisible();
   expect(coach.requests).toHaveLength(2);
 });
 test("POST応答喪失と再起動でも同一IDをGETし、二重POSTしない", async ({
@@ -278,4 +279,37 @@ test("通信復帰の再確認は新しい依頼を作らず、保存済みの�
   await expect(
     page.getByText("保存しておく質問", { exact: true }),
   ).toBeVisible();
+});
+
+test("設定のAIコーチゲージは有料のみ、再表示で更新し、通信なしでは最後の値を示す", async ({
+  page,
+}, info) => {
+  const analysis = await fakeAnalysis(page);
+  const coach = await fakeCoach(page, () => analysis.paid);
+  coach.remainingRatio = 0.37;
+  await page.goto("/settings");
+  const gauge = page.getByRole("progressbar", { name: "AIコーチの今週の残り" });
+  await expect(gauge).toHaveAttribute("aria-valuenow", "37");
+  await expect(page.getByText("残り 37%", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("月曜0時（日本時間）に全回復します"),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `.local/screenshots/58-coach-weekly-budget-${info.project.name}.png`,
+  });
+  await page.goto("/");
+  coach.remainingRatio = 0;
+  await page.getByText("設定", { exact: true }).click();
+  await expect(gauge).toHaveAttribute("aria-valuenow", "0");
+  coach.online = false;
+  await page.reload();
+  await expect(gauge).toHaveAttribute("aria-valuenow", "0");
+  await expect(
+    page.getByText("AIコーチの残りは最後に確認した値です。"),
+  ).toBeVisible();
+  coach.online = true;
+  analysis.paid = false;
+  await page.reload();
+  await expect(page.getByText("無料プラン", { exact: true })).toBeVisible();
+  await expect(gauge).toHaveCount(0);
 });

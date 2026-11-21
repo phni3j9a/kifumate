@@ -26,8 +26,7 @@ export async function fakeCoach(page: Page, paid: () => boolean = () => true) {
   const state = {
     online: true,
     status: "pending" as CoachReply["status"],
-    remaining: 99,
-    low: false,
+    remainingRatio: 0.99,
     requests: [] as CoachInput[],
     gets: 0,
     deletes: 0,
@@ -37,13 +36,10 @@ export async function fakeCoach(page: Page, paid: () => boolean = () => true) {
   };
   const records = new Map<string, CoachReply>();
   const quota = () => ({
-    monthStart: 1793458800000,
-    resetsAt: 1796050800000,
-    limit: 100,
-    used: 100 - state.remaining,
-    reserved: state.status === "pending" ? 1 : 0,
-    remaining: state.remaining,
-    low: state.low,
+    remainingRatio: state.remainingRatio,
+    resetsAt: 1795964400000,
+    low: state.remainingRatio < 0.1,
+    exhausted: state.remainingRatio === 0,
   });
   await page.route("**/v1/coach**", async (route) => {
     if (!state.online) {
@@ -89,8 +85,8 @@ export async function fakeCoach(page: Page, paid: () => boolean = () => true) {
         await send({ error: "request_exists", quota: quota() }, 409);
         return;
       }
-      if (state.remaining === 0) {
-        await send({ error: "monthly_limit", quota: quota() }, 429);
+      if (state.remainingRatio === 0) {
+        await send({ error: "weekly_limit", quota: quota() }, 429);
         return;
       }
       state.requests.push(input);

@@ -11,16 +11,17 @@ export default function Settings() {
   const db = useSQLiteContext();
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   useScrollToTop(scroll);
-  const { profile } = useCoach();
+  const { profile, controller: coach } = useCoach();
   const { controller } = useAnalysis();
   const [names, setNames] = useState("");
   useFocusEffect(
     useCallback(() => {
       void controller.sync();
+      void coach.sync();
       listAliases(db)
         .then((a) => setNames(a.map((n) => n.name).join("、")))
         .catch(() => setNames(""));
-    }, [db, controller]),
+    }, [db, controller, coach]),
   );
   return (
     <Screen>

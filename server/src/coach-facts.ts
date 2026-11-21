@@ -7,6 +7,9 @@ export interface CoachFacts {
   実戦手: [手数: number, 表記: string, 印: string, 形勢: string, 移動: Direction, 境界値?: string][];
   終局: Record<string, any>;
   参照: Record<string, any>[];
+  要所?: (Record<string, any> & {実戦手: {表記: string}})[];
+  仮の手順?: Record<string, any>[];
+  詰みの別応手?: Record<string, Record<string, any>[][]>;
 }
 
 const ACTORS = 'あなた|相手|先手|後手';
@@ -36,13 +39,38 @@ function matchesMove(m: RegExpMatchArray, source?: string) {
   return notation(m).every((part, i) => i === 0 && !part || i === 3 && !part && expected[i] === '打' || part === expected[i]);
 }
 
-export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts'): string | undefined {
+export function lineOrigin(id: string, facts: CoachFacts): string | undefined {
+  if (!/^\d+:line:[a-f0-9]+$/.test(id)) return undefined;
+  const line = facts.仮の手順?.find(r => r.id === id && `${r.手数}:line:` === id.slice(0, id.lastIndexOf(':') + 1));
+  return line ? `${line.手数}:position` : undefined;
+}
+
+function linesFor(facts: CoachFacts | undefined, ids: string[]) {
+  return facts?.仮の手順?.filter(line => ids.includes(`${line.手数}:position`) || ids.some(id => {
+    if (!id.startsWith(`${line.手数}:candidate:`)) return false;
+    const candidate = facts.参照.find(r => r.id === id)?.[PV];
+    // 同じ局面の別候補では足りない。少なくとも指し始めの分岐が同じことを確認する。
+    return candidate?.length && line[PV]?.length && candidate[0].表記 === line[PV][0].表記;
+  })) ?? [];
+}
+
+function variations(facts: CoachFacts | undefined, ids: string[]) {
+  if (!facts) return [];
+  const shown = facts.参照.filter(r => /^(\d+):(?:mate|candidate:\d+)$/.test(r.id) &&
+    (ids.includes(r.id) || ids.includes(`${r.id.split(':')[0]}:position`)));
+  return [
+    ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
+    ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),
+  ];
+}
+
+export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts', ids: string[] = []): string | undefined {
   text = text.normalize('NFKC');
   if (USI.test(text)) return 'usi';
   if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
   if (kind === 'facts') {
-    const proven = [...played.map(r => r[1]), ...(facts?.参照.flatMap(r => (r[PV] ?? []).map((m: any) => m['表記'])) ?? [])];
+    const proven = [...played.map(r => r[1]), ...variations(facts, ids).map(m => m.表記)];
     const move = new RegExp(KIF, 'g');
     for (const mention of text.matchAll(move)) {
       if (!proven.some(source => matchesMove(mention, source))) return 'unknown_move';
@@ -105,8 +133,8 @@ function contradictsDirection(clause: string, refs: Record<string, any>[], facts
   const withVerb = new RegExp(`${KIF}\\s*と\\s*(引[いきく]|上が|上げ|前進|後退|横移動)`, 'g');
   if (!withVerb.test(clause)) return false;
   withVerb.lastIndex = 0;
-  const moves: [string, Direction | undefined][] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
-    ...refs.flatMap(r => (r[PV] ?? []).map((m: any) => [m['表記'], m['移動']]))];
+  const moves: (readonly [string, Direction | undefined])[] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
+    ...variations(facts, refs.map(r => r.id)).map((m): [string, Direction | undefined] => [m.表記, m.移動])];
   for (const m of clause.matchAll(withVerb)) {
     if (!m[1]) continue;
     const expected = /^(引|後退)/.test(m[6]) ? '後退' : m[6] === '横移動' ? '横移動' : '前進';
@@ -144,4 +172,28 @@ export function contradicts(text: string, selected: string[], facts: CoachFacts)
     }
   }
   return false;
+}
+
+export function rememberToolEvidence(facts: CoachFacts, name: string, args: Record<string, any>, result: Record<string, any>) {
+  if ('エラー' in result) return;
+  const save = (ref: Record<string, any>) => {
+    const known = facts.参照.find(r => r.id === ref.id);
+    if (known) facts.参照[facts.参照.indexOf(known)] = {...known, ...ref};
+    else facts.参照.push(ref);
+  };
+  if (name === 'saved_analysis' && Array.isArray(result['候補と詰み証明'])) {
+    const {候補と詰み証明, ...position} = result;
+    save(position);
+    for (const ref of 候補と詰み証明) save(ref);
+  }
+  if (name === 'position' && !args.position?.moves?.length && result.盤面) {
+    const id = result['本譜の参照'];
+    const ref = facts.参照.find(r => r.id === id) ?? compactPosition(id, facts);
+    if (ref) save({...ref, 局面: result.盤面});
+  }
+  if (name === 'play_line' && result.参照) (facts.仮の手順 ??= []).push(result.参照);
+  if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {
+    const moves: string[] = [...(result.分岐 ?? []), ...result.手順];
+    (facts.仮の手順 ??= []).push({手数: args.position.ply, [PV]: moves.map(表記 => ({表記}))});
+  }
 }

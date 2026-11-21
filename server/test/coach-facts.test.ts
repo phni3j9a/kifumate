@@ -1,3 +1,4 @@
+import { prices, chatUsage } from './coach-provider-fixtures';
 import { env } from 'cloudflare:workers';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
@@ -12,7 +13,7 @@ const facts: CoachFacts = {視点: 'あなたが先手、相手が後手', 実�
   {id: '1:position', 優勢な側: '相手', 詰まされる側: 'あなた', 宣言できる側: '相手', 直前の実戦手: {指した側: 'あなた', 動いた駒: '金', 取った駒: '歩'}},
 ]};
 const section = (text: string) => ({sections: [{kind: 'facts', title: '振り返り', text, refs: ['1:position']}]});
-const config = {ENVIRONMENT: 'staging', COACH_PROVIDER: 'fake', COACH_SIGNING_KEY: 'key'};
+const config = {ENVIRONMENT: 'staging', COACH_PRICES_USD_PER_MILLION: prices, COACH_PROVIDER: 'fake', COACH_SIGNING_KEY: 'key'};
 async function payload() {
   return {requestId: crypto.randomUUID(), analysis, proof: await signAnalysis('key', 'device', 'job', {initial: analysis.initial, moves: analysis.moves, mode: analysis.mode}, analysis.results), perspective: 'sente',
     profile: {practice: [], goal: ''}, style: {focus: '総合', detail: 'ふつう'}, history: []};
@@ -121,6 +122,26 @@ describe('出力の手数・KIF照合', () => {
       expect(() => validateOutput(advice(wrong), all, sample)).toThrow('invalid_output');
     }
   });
+  it('保存済み候補は、その参照か起点を根拠にする節だけで引用できる', () => {
+    const alternative = section('ここで▲2六歩と指せます。');
+    expect(() => validateOutput(alternative, all, sample)).toThrow('invalid_output');
+    for (const id of ['0:position', '0:candidate:1']) {
+      const atStart = {...sample, 参照: [...sample.参照, {id: '0:position'}]};
+      expect(() => validateOutput({sections: [{...alternative.sections[0], refs: [id]}]}, all, atStart)).not.toThrow();
+    }
+  });
+  it('代表以外の証明済み応手を引用しても、公開するのは既存の詰み参照だけ', () => {
+    const mateId = '0:mate';
+    const proofRefs = references([{...results[0], mate: {pv: ['S*8d', '8c8d', 'G*8c']}}, results[1]]);
+    const internal = {...sample, 参照: [...sample.参照, {id: mateId, '仮の読み筋（実戦とは別）': [{表記: '▲8四銀打'}, {表記: '△同歩(83)'}, {表記: '▲8三金打'}]}],
+      詰みの別応手: {[mateId]: [[{表記: '△9二玉(93)'}, {表記: '▲8二金打'}]]}};
+    const answer = section('▲8四銀打に△9二玉なら、▲8二金打で詰みです。');
+    expect(() => validateOutput(answer, proofRefs, internal)).toThrow('invalid_output');
+    answer.sections[0].refs = [mateId];
+    expect(validateOutput(answer, proofRefs, internal).sections[0].references).toEqual(proofRefs.filter(r => r.id === mateId));
+    expect(JSON.parse(messages(parseCoach({requestId: crypto.randomUUID(), analysis, perspective: 'sente',
+      profile: {practice: [], goal: ''}, style: {focus: '総合', detail: 'ふつう'}, history: []}), proofRefs, internal)[1].content).facts).not.toHaveProperty('詰みの別応手');
+  });
   it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
     const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
     expect(() => validateOutput(output('2:position', '2手目 △3四歩。相手は歩を進めました。相手が有利です。'), all, sample)).not.toThrow();
@@ -155,18 +176,18 @@ describe('局面の駒の持ち主・位置', () => {
 });
 
 describe('依頼と取得の分離', () => {
-  it('切断・DO再生成後もalarmで完了し、再取得では一度しか数えない', async () => fixture(async state => {
+  it('切断・DO再生成後もalarmで完了し、fakeは枠から差し引かない', async () => fixture(async state => {
     const c = new Coach(state.storage, config, 'device', () => true), p = await payload();
     const connection = new AbortController();
     expect((await c.fetch(post(p, true, connection.signal))).status).toBe(202);
     connection.abort();
-    expect(c.quota().reserved).toBe(1);
+    expect(c.quota().remainingRatio).toBe(1);
     const restored = new Coach(state.storage, config, 'device', () => true);
     await restored.alarm(); await restored.alarm();
     for (let i = 0; i < 2; i++) {
       const output = await (await restored.fetch(new Request('https://device/v1/coach/' + p.requestId))).json() as any;
       expect(output.status).toBe('completed'); expect(output.sections).toHaveLength(2);
-      expect(output.quota.used).toBe(1); expect(output.quota.reserved).toBe(0);
+      expect(output.quota.remainingRatio).toBe(1);
     }
     expect((await restored.fetch(post(p))).status).toBe(409);
     const latest = await (await restored.fetch(new Request('https://device/v1/coach'))).json() as any;
@@ -186,7 +207,7 @@ describe('依頼と取得の分離', () => {
     await c.alarm();
     const result = await (await c.fetch(new Request('https://device/v1/coach/' + p.requestId))).json() as any;
     expect(result.status).toBe('failed'); expect(result.error).toBe('paid_required');
-    expect(result.sections).toBeUndefined(); expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+    expect(result.sections).toBeUndefined(); expect(c.quota().remainingRatio).toBe(1);
     expect(checks).toBeGreaterThanOrEqual(4);
   }));
   it('実行前の中止・権利失効・提供元失敗は数えず、状態を取得できる', async () => fixture(async state => {
@@ -195,11 +216,11 @@ describe('依頼と取得の分離', () => {
     await c.fetch(post(p));
     await c.fetch(new Request('https://device/v1/coach/' + p.requestId, {method: 'DELETE'}));
     await c.alarm();
-    expect(c.quota().used).toBe(0);
+    expect(c.quota().remainingRatio).toBe(1);
     const p2 = await payload(); await c.fetch(post(p2)); paid = false; await c.alarm();
     const failed = await (await c.fetch(new Request('https://device/v1/coach/' + p2.requestId))).json() as any;
     expect(failed.status).toBe('failed'); expect(failed.error).toBe('paid_required');
-    expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+    expect(c.quota().remainingRatio).toBe(1);
   }));
   it('生成中の中止は遅延応答を保存せず、同時依頼も拒否する', async () => fixture(async state => {
     const c = new Coach(state.storage, {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'test'}, 'device', () => true);
@@ -208,7 +229,7 @@ describe('依頼と取得の分離', () => {
     const called = new Promise<void>(r => {entered = r;});
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       entered(); await gate;
-      return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(section('解析を振り返りましょう。'))}}]});
+      return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(section('解析を振り返りましょう。'))}}]});
     });
     try {
       const p = await payload(); await c.fetch(post(p));
@@ -218,7 +239,7 @@ describe('依頼と取得の分離', () => {
       release(); await running;
       const output = await (await c.fetch(new Request('https://device/v1/coach/' + p.requestId))).json() as any;
       expect(output.status).toBe('cancelled'); expect(output.sections).toBeUndefined();
-      expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+      expect(c.quota().remainingRatio).toBe(1);
     } finally {release(); spy.mockRestore();}
   }));
   it('同期要求も実行前にwatchdogを永続化し、再生成後のalarmだけで入力を削除する', async () => fixture(async state => {
@@ -237,11 +258,11 @@ describe('依頼と取得の分離', () => {
       await new Coach(state.storage, config, 'device', () => true).alarm();
       expect(state.storage.sql.exec('SELECT payload FROM coach_tasks WHERE id=?', p.requestId).one().payload).toBeNull();
       expect(state.storage.sql.exec('SELECT status FROM coach_requests WHERE id=?', p.requestId).one().status).toBe('failed');
-      expect(c.quota().reserved).toBe(0);
+      expect(c.quota().remainingRatio).toBe(1);
       release(); expect((await running).status).toBe(504);
     } finally {release(); await running; clock?.mockRestore();}
   }));
-  it('実行途中のプロセス消失は再送せず期限で予約を返す。保存結果は七日で削除', async () => fixture(async state => {
+  it('実行途中のプロセス消失は再送せず期限で失敗にする。保存結果は七日で削除', async () => fixture(async state => {
     const c = new Coach(state.storage, config, 'device', () => true), p = await payload();
     await c.fetch(post(p));
     state.storage.sql.exec('UPDATE coach_tasks SET started=1 WHERE id=?', p.requestId);
@@ -249,7 +270,7 @@ describe('依頼と取得の分離', () => {
     try {
       const restored = new Coach(state.storage, config, 'device', () => true); await restored.alarm();
       const failed = await (await restored.fetch(new Request('https://device/v1/coach/' + p.requestId))).json() as any;
-      expect(failed.status).toBe('failed'); expect(failed.error).toBe('coach_timeout'); expect(restored.quota().reserved).toBe(0);
+      expect(failed.status).toBe('failed'); expect(failed.error).toBe('coach_timeout');
       expect(state.storage.sql.exec('SELECT payload FROM coach_tasks WHERE id=?', p.requestId).one().payload).toBeNull();
       clock.mockReturnValue(Date.now() + 7 * 86400_000 + 1);
       expect((await restored.fetch(new Request('https://device/v1/coach/' + p.requestId))).status).toBe(410);
@@ -265,6 +286,7 @@ describe('実APIの接続', () => {
       instance.env.COACH_SIGNING_KEY = 'key';
       instance.env.COACH_PROVIDER = 'openai-compatible';
       instance.env.COACH_API_KEY = 'test-secret';
+      instance.env.COACH_PRICES_USD_PER_MILLION = prices;
       let received = false;
       instance.env.PRECISE = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
         expect(url).toBe('http://container/coach-facts');
@@ -281,14 +303,14 @@ describe('実APIの接続', () => {
         const body = JSON.parse(init!.body as string);
         expect(body.model).toBe('deepseek-flash'); expect(body.reasoning_effort).toBe('max'); expect(body.max_tokens).toBe(32768);
         expect(body.messages[1].content).not.toMatch(/7g7f|startpos|"score"|-600/);
-        return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(section('相手が有利です。'))}}]});
+        return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(section('相手が有利です。'))}}]});
       });
       try {
         expect((await instance.fetch(request)).status).toBe(202);
         await instance.alarm(); expect(received).toBe(true);
         const get = new Request('https://device/v1/coach/' + p.requestId); get.headers.set('X-Dev-Paid', '1');
         const output = await (await instance.fetch(get)).json();
-        expect(output.status).toBe('completed'); expect(output.sections[0].text).toBe('相手が有利です。'); expect(output.quota.used).toBe(1);
+        expect(output.status).toBe('completed'); expect(output.sections[0].text).toBe('相手が有利です。'); expect(output.quota.remainingRatio).toBe(0.99676);
       } finally {spy.mockRestore();}
     });
   });

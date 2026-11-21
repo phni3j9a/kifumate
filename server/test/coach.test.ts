@@ -1,14 +1,15 @@
+import { prices, chatUsage } from './coach-provider-fixtures';
 import { env } from 'cloudflare:workers';
 import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { Device } from '../src/index';
 import { Coach, PROOF_LIFETIME, checkNames, complete, messages, parseCoach, references, signAnalysis, validateOutput, verifyAnalysis, type CoachEnv } from '../src/coach';
-import { monthStart, nextMonth, sha256 } from '../src/model';
+import { weekStart, sha256 } from '../src/model';
 
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const input = {initial: 'startpos', moves: ['7g7f'], mode: 'precise' as const};
 const results = [0, 1].map(ply => ({ply, score: {kind: 'cp', value: 20}, candidates: [{rank: 1, score: {kind: 'cp', value: 20}, pv: [ply ? '3c3d' : '7g7f']}], mate: null}));
-const config: CoachEnv = {ENVIRONMENT: 'staging', COACH_PROVIDER: 'fake', COACH_SIGNING_KEY: 'test-key'};
+const config: CoachEnv = {ENVIRONMENT: 'staging', COACH_PRICES_USD_PER_MILLION: prices, COACH_PROVIDER: 'fake', COACH_SIGNING_KEY: 'test-key'};
 async function payload(device: string, now = Date.now()) {
   return {requestId: crypto.randomUUID(), analysis: {...input, results}, proof: await signAnalysis('test-key', device, 'job', input, results, now),
     perspective: 'sente', profile: {practice: ['四間飛車'], goal: '終盤に強くなる'}, style: {focus: '総合', detail: 'ふつう'}, history: []};
@@ -151,7 +152,7 @@ describe('提供元', () => {
         called = true; expect(url).toBe(base + '/chat/completions');
         expect(init.headers.Authorization).toBe('Bearer secret');
         const body = JSON.parse(init.body); expect(body.model).toBe(model); expect(body[parameter]).toBe(32768); expect(body.stream).toBe(false); expect(body.reasoning_effort).toBe('max');
-        return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
+        return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});
       };
       expect(await complete({...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: base, COACH_MODEL: model, COACH_TOKEN_PARAMETER: parameter, COACH_API_KEY: 'secret'}, p, refs, new AbortController().signal, transport)).toEqual(safe);
       expect(called).toBe(true);
@@ -167,7 +168,7 @@ describe('提供元', () => {
       const request = new Request(url, init);
       expect(request.redirect).toBe('manual');
       calls++;
-      return calls === 1 ? Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe), reasoning_content: '非公開の推論'}}]})
+      return calls === 1 ? Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe), reasoning_content: '非公開の推論'}}]})
         : new Response(null, {status: 302, headers: {Location: 'https://other-provider.test'}});
     };
     await expect(complete(e, p, refs, new AbortController().signal, transport)).resolves.toEqual(safe);
@@ -191,13 +192,13 @@ describe('提供元', () => {
   it('提供元エラー・不正JSON・途中打切り・過大応答は失敗する', async () => {
     const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model', COACH_API_KEY: 'secret'};
     const p = parseCoach(await payload('device'));
-    for (const response of [new Response('private detail', {status: 500}), Response.json({choices: [{finish_reason: 'length', message: {content: '{}'}}]}), Response.json({choices: [{finish_reason: 'stop', message: {content: 'invalid'}}]}), new Response('x'.repeat(1048577))]) {
+    for (const response of [new Response('private detail', {status: 500}), Response.json({usage: chatUsage, choices: [{finish_reason: 'length', message: {content: '{}'}}]}), Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: 'invalid'}}]}), new Response('x'.repeat(1048577))]) {
       await expect(complete(e, p, refs, new AbortController().signal, async () => response)).rejects.toThrow();
     }
   });
 });
 
-describe('権利・回数・中止', () => {
+describe('権利・週の枠・中止', () => {
   it('認証と内部ヘッダー偽装を拒否する', async () => {
     expect((await SELF.fetch('https://api/v1/coach')).status).toBe(401);
     const reg = await SELF.fetch('https://api/v1/devices', {method: 'POST'}); const {token} = await reg.json() as any;
@@ -218,32 +219,50 @@ describe('権利・回数・中止', () => {
       const next = req({...p, requestId: crypto.randomUUID()}); next.headers.set('X-Dev-Paid', '1');
       next.headers.set('X-Coach-Config', JSON.stringify({COACH_PROVIDER: 'fake', COACH_API_KEY: 'injected'}));
       expect((await instance.fetch(next)).status).toBe(503);
-      expect(instance.env.COACH_API_KEY).toBeUndefined(); expect(instance.coach.quota().used).toBe(1);
+      expect(instance.env.COACH_API_KEY).toBeUndefined(); expect(instance.coach.quota().remainingRatio).toBe(1);
     });
   });
-  it('成功した解説と質問だけ各一回、重複と失敗と中止は数えない', async () => {
-    const stub = await fixture();
-    await runInDurableObject(stub, async (_instance, state) => {
-      const coach = new Coach(state.storage, {...config, COACH_MONTHLY_LIMIT: '3'}, 'device', () => true);
+  it('成功した解説と質問だけ差し引き、最後の超過は許容して残り0で止める', async () => {
+    await runInDurableObject(await fixture(), async (_instance, state) => {
+      const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'test', COACH_WEEKLY_BUDGET_USD: '0.0018'};
+      const coach = new Coach(state.storage, e, 'device', () => true);
       const p = await payload('device');
-      expect((await coach.fetch(req(p))).status).toBe(200); expect(coach.quota().used).toBe(1);
-      expect((await coach.fetch(req(p))).status).toBe(409); expect(coach.quota().used).toBe(1);
-      expect((await coach.fetch(req({...p, requestId: crypto.randomUUID(), question: '終盤はどうする？', history: [{role: 'assistant', content: '終盤を練習しましょう'}]}))).status).toBe(200);
-      const id = crypto.randomUUID();
-      expect((await coach.fetch(new Request('https://device/v1/coach/' + id, {method: 'DELETE'}))).status).toBe(200);
-      expect((await coach.fetch(req({...p, requestId: id}))).status).toBe(409);
-      const unavailable = new Coach(state.storage, {...config, COACH_PROVIDER: 'openai-compatible'}, 'device', () => true);
-      expect((await unavailable.fetch(req({...p, requestId: crypto.randomUUID()}))).status).toBe(503);
-      expect(coach.quota().used).toBe(2); expect(coach.quota().remaining).toBe(1); expect(coach.quota().reserved).toBe(0);
-      const r = req({...p, requestId: crypto.randomUUID()}); const aborted = new AbortController(); aborted.abort();
-      expect((await coach.fetch(new Request(r, {signal: aborted.signal}))).status).toBe(409);
-      expect((await coach.fetch(req({...p, requestId: crypto.randomUUID()}))).status).toBe(200);
-      expect(coach.quota().low).toBe(true);
-      expect((await coach.fetch(req({...p, requestId: crypto.randomUUID()}))).status).toBe(429);
-      expect(new Coach(state.storage, {...config, COACH_MONTHLY_LIMIT: '3'}, 'device', () => true).quota().used).toBe(3);
+      const send = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({usage: chatUsage,
+        choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]}));
+      try {
+        expect((await coach.fetch(req(p))).status).toBe(200);
+        expect(coach.quota()).toMatchObject({remainingRatio: 0.1, low: false, exhausted: false});
+        expect((await coach.fetch(req(p))).status).toBe(409);
+        expect(coach.quota().remainingRatio).toBe(0.1);
+        const id = crypto.randomUUID();
+        await coach.fetch(new Request('https://device/v1/coach/' + id, {method: 'DELETE'}));
+        expect((await coach.fetch(req({...p, requestId: id}))).status).toBe(409);
+        expect((await coach.fetch(req({...p, requestId: crypto.randomUUID(), question: '終盤はどうする？', history: [{role: 'assistant', content: '終盤を練習しましょう'}]}))).status).toBe(200);
+        const denied = await coach.fetch(req({...p, requestId: crypto.randomUUID()}));
+        expect(denied.status).toBe(429);
+        expect(await denied.json()).toEqual({error: 'weekly_limit', quota: {remainingRatio: 0, low: true, exhausted: true, resetsAt: expect.any(Number)}});
+        expect(new Coach(state.storage, e, 'device', () => true).quota().remainingRatio).toBe(0);
+        expect(state.storage.sql.exec('SELECT used_nano_usd FROM coach_weekly_usage').one().used_nano_usd).toBe(3_240_000);
+        expect(send).toHaveBeenCalledTimes(2);
+      } finally {send.mockRestore();}
     });
   });
-  it('実行期限で提供元を中断し、タイマーを後始末して回数を返す', async () => {
+  it('単価未設定や異なるモデルの単価では、提供元に送信せず503', async () => {
+    await runInDurableObject(await fixture(), async (_instance, state) => {
+      const e = {...config, ENVIRONMENT: 'production', COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'test'};
+      const send = vi.spyOn(globalThis, 'fetch');
+      try {
+        for (const settings of [{...e, COACH_PRICES_USD_PER_MILLION: undefined}, {...e, COACH_MODEL: 'unpriced'}]) {
+          const c = new Coach(state.storage, settings, 'device', () => true);
+          const unsupported = await c.fetch(req(await payload('device')));
+          expect(unsupported.status).toBe(503);
+          expect(await unsupported.json()).toMatchObject({error: 'provider_unavailable', quota: {remainingRatio: 1}});
+        }
+        expect(send).not.toHaveBeenCalled();
+      } finally {send.mockRestore();}
+    });
+  });
+  it('実行期限で提供元を中断し、タイマーを後始末して枠を消費しない', async () => {
     await runInDurableObject(await fixture(), async (_instance, state) => {
       const clear = vi.spyOn(globalThis, 'clearTimeout');
       const transport = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => new Promise<Response>((_resolve, reject) => {
@@ -255,11 +274,11 @@ describe('権利・回数・中止', () => {
       try {
         expect((await c.fetch(req(await payload('device')))).status).toBe(504);
         expect(clear).toHaveBeenCalled();
-        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+        expect(c.quota().remainingRatio).toBe(1);
       } finally { transport.mockRestore(); clear.mockRestore(); }
     });
   });
-  it('事実生成の想定外例外も箇所と型だけを記録し、回数を消費しない', async () => {
+  it('事実生成の想定外例外も箇所と型だけを記録し、枠を消費しない', async () => {
     await runInDurableObject(await fixture(), async (_instance, state) => {
       const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
       const c = new Coach(state.storage, config, 'device', () => true, async () => {throw new TypeError('private-facts');});
@@ -267,7 +286,7 @@ describe('権利・回数・中止', () => {
         expect((await c.fetch(req(await payload('device')))).status).toBe(502);
         expect(JSON.parse(logs.mock.calls[0][0])).toEqual({event: 'coach_failed', error: 'provider_failed', stage: 'load_facts', errorType: 'TypeError', elapsedMs: expect.any(Number)});
         expect(JSON.stringify(logs.mock.calls)).not.toContain('private-facts');
-        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+        expect(c.quota().remainingRatio).toBe(1);
       } finally { logs.mockRestore(); }
     });
   });
@@ -277,36 +296,36 @@ describe('権利・回数・中止', () => {
       const c = new Coach(state.storage, {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'secret', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model'}, 'device', () => true);
       let release!: () => void; let called!: () => void;
       const gate = new Promise<void>(r => {release = r;}); const entered = new Promise<void>(r => {called = r;});
-      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {called(); await gate; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {called(); await gate; return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
       try {
         const p = await payload('device'); const running = c.fetch(req(p)); await entered;
-        expect(c.quota().reserved).toBe(1);
+        expect(c.quota().remainingRatio).toBe(1);
         expect((await c.fetch(req({...p, requestId: crypto.randomUUID()}))).status).toBe(409);
         await c.fetch(new Request('https://device/v1/coach/' + p.requestId, {method: 'DELETE'}));
         release(); expect((await running).status).toBe(409);
-        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+        expect(c.quota().remainingRatio).toBe(1);
       } finally {release(); spy.mockRestore();}
     });
   });
-  it('タイムアウトは課金せず、月またぎの成功は受理月だけに数える', async () => {
+  it('タイムアウトは課金せず、週またぎの成功は受理週だけに数える', async () => {
     const stub = await fixture();
     await runInDurableObject(stub, async (_instance, state) => {
       const e = {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'secret', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model'};
-      let now = Date.parse('2026-11-30T14:59:59.999Z');
+      let now = Date.parse('2026-11-29T14:59:59.999Z');
       const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
-      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {now += 2; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {now += 2; return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
       try {
         const c = new Coach(state.storage, e, 'device', () => true);
         const p = await payload('device', now);
         expect((await c.fetch(req(p))).status).toBe(200);
-        expect(c.quota(now).used).toBe(0); expect(c.quota(now - 2).used).toBe(1);
-        spy.mockImplementation(async () => {now += 250000; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
+        expect(c.quota(now).remainingRatio).toBe(1); expect(c.quota(now - 2).remainingRatio).toBe(0.99676);
+        spy.mockImplementation(async () => {now += 250000; return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
         expect((await c.fetch(req(await payload('device', now)))).status).toBe(504);
-        expect(c.quota().used).toBe(0); expect(c.quota().reserved).toBe(0);
+        expect(c.quota().remainingRatio).toBe(1);
         // 不正出力も成功とみなさない。
-        spy.mockImplementation(async () => Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify({sections: [{...safe.sections[0], text: '7g7g'}]})}}]}));
+        spy.mockImplementation(async () => Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify({sections: [{...safe.sections[0], text: '7g7g'}]})}}]}));
         expect((await c.fetch(req(await payload('device', now)))).status).toBe(502);
-        expect(c.quota().used).toBe(0);
+        expect(c.quota().remainingRatio).toBe(1);
       } finally {spy.mockRestore(); clock.mockRestore();}
     });
   });
@@ -318,12 +337,12 @@ describe('権利・回数・中止', () => {
       const p = await payload('device'); let release!: () => void;
       const stream = new ReadableStream({start(controller) {release = () => {paid = false; controller.enqueue(new TextEncoder().encode(JSON.stringify(p))); controller.close();};}});
       const r = c.fetch(new Request('https://device/v1/coach', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: stream}));
-      release(); expect((await r).status).toBe(403); expect(c.quota().used).toBe(0);
+      release(); expect((await r).status).toBe(403); expect(c.quota().remainingRatio).toBe(1);
       paid = true;
-      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {paid = false; return Response.json({choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {paid = false; return Response.json({usage: chatUsage, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(safe)}}]});});
       try {
         const live = new Coach(state.storage, {...config, COACH_PROVIDER: 'openai-compatible', COACH_API_KEY: 'secret', COACH_BASE_URL: 'https://provider.test', COACH_MODEL: 'model'}, 'device', () => paid);
-        expect((await live.fetch(req(p))).status).toBe(403); expect(c.quota().used).toBe(0);
+        expect((await live.fetch(req(p))).status).toBe(403); expect(c.quota().remainingRatio).toBe(1);
       } finally {spy.mockRestore();}
     });
   });
@@ -334,26 +353,45 @@ describe('権利・回数・中止', () => {
       expect((await c.fetch(new Request('https://device/v1/coach', {method: 'POST', body: '{}'}))).status).toBe(415);
       expect((await c.fetch(req('x'.repeat(1_048_576)))).status).toBe(413);
       expect((await c.fetch(req(await payload('device', Date.now() - PROOF_LIFETIME)))).status).toBe(400);
-      expect(c.quota().used).toBe(0);
+      expect(c.quota().remainingRatio).toBe(1);
     });
   });
-  it('JST月境界でリセットし、期限切れ予約は再生成後も失敗扱いで返却', async () => {
-    const before = Date.parse('2026-11-30T14:59:59.999Z'), after = before + 1;
-    expect(monthStart(before)).not.toBe(monthStart(after)); expect(nextMonth(before)).toBe(after);
-    const stub = await fixture();
-    await runInDurableObject(stub, async (_instance, state) => {
+  it('日曜23:59と月曜0:00（JST）で切り替え、前週からの処理中要求も同時実行しない', async () => {
+    const before = Date.parse('2026-11-29T14:59:00Z'), after = before + 60_000;
+    expect(weekStart(before)).toBe(after - 7 * 86400_000); expect(weekStart(after)).toBe(after);
+    await runInDurableObject(await fixture(), async (_instance, state) => {
       const c = new Coach(state.storage, config, 'device', () => true);
-      state.storage.sql.exec('INSERT INTO coach_usage VALUES (?,100)', monthStart(before));
-      state.storage.sql.exec("INSERT INTO coach_requests VALUES ('pending',?,'pending',?)", monthStart(before), before + 45000);
-      expect(c.quota(before).remaining).toBe(0); expect(c.quota(after).remaining).toBe(100);
+      state.storage.sql.exec('INSERT INTO coach_weekly_usage VALUES (?,500000000)', weekStart(before));
+      state.storage.sql.exec("INSERT INTO coach_requests VALUES ('pending',?,'pending',?)", weekStart(before), after + 45000);
+      expect(c.quota(before)).toEqual({remainingRatio: 0, resetsAt: after, low: true, exhausted: true});
+      expect(c.quota(after)).toEqual({remainingRatio: 1, resetsAt: after + 7 * 86400_000, low: false, exhausted: false});
       const clock = vi.spyOn(Date, 'now').mockReturnValue(after);
       try {
-        expect((await c.fetch(req(await payload('device', after)))).status).toBe(409);
-        expect(c.quota(after).used).toBe(0);
+        const reply = await c.fetch(req(await payload('device', after)));
+        expect(reply.status).toBe(409);
+        expect(await reply.json()).toMatchObject({error: 'coach_busy'});
       } finally {clock.mockRestore();}
-      state.storage.sql.exec("INSERT INTO coach_requests VALUES ('expired',?,'pending',?)", monthStart(Date.now()), Date.now() - 1);
-      await c.fetch(new Request('https://device/v1/coach'));
-      expect(state.storage.sql.exec("SELECT status FROM coach_requests WHERE id='expired'").one().status).toBe('failed');
+    });
+  });
+  it('旧SQLiteから移行しても結果と処理中のIDを保持し、旧回数と古い週だけ削除する', async () => {
+    await runInDurableObject(await fixture(), async (_instance, state) => {
+      const now = Date.now(), week = weekStart(now), id = crypto.randomUUID();
+      state.storage.sql.exec(`DROP TABLE IF EXISTS coach_requests; DROP TABLE IF EXISTS coach_tasks;
+        CREATE TABLE coach_usage (month INTEGER PRIMARY KEY, used INTEGER NOT NULL);
+        CREATE TABLE coach_requests (id TEXT PRIMARY KEY, month INTEGER NOT NULL, status TEXT NOT NULL, deadline INTEGER NOT NULL);
+        CREATE TABLE coach_tasks (id TEXT PRIMARY KEY, payload TEXT, output TEXT, error TEXT, started INTEGER NOT NULL DEFAULT 0);`);
+      state.storage.sql.exec('INSERT INTO coach_usage VALUES (?,100)', now);
+      state.storage.sql.exec("INSERT INTO coach_requests VALUES (?,?,'completed',?), ('pending',?,'pending',?)", id, now, now + 1000, now, now + 1000);
+      state.storage.sql.exec('INSERT INTO coach_tasks (id,output) VALUES (?,?)', id, JSON.stringify(validateOutput(safe, refs)));
+      const c = new Coach(state.storage, config, 'device', () => true);
+      expect(state.storage.sql.exec("SELECT * FROM sqlite_master WHERE name='coach_usage'").toArray()).toHaveLength(0);
+      expect(state.storage.sql.exec("SELECT week FROM coach_requests WHERE id='pending'").one().week).toBe(week);
+      expect(await (await c.fetch(new Request('https://device/v1/coach/' + id))).json()).toMatchObject({status: 'completed', sections: validateOutput(safe, refs).sections, quota: {remainingRatio: 1}});
+      state.storage.sql.exec('INSERT INTO coach_weekly_usage VALUES (?,500000000), (?,200000000)', week - 14 * 86400_000, week);
+      const restored = new Coach(state.storage, config, 'device', () => true);
+      await restored.fetch(new Request('https://device/v1/coach'));
+      expect(restored.quota().remainingRatio).toBe(0.6);
+      expect(state.storage.sql.exec('SELECT week FROM coach_weekly_usage').toArray()).toEqual([{week}]);
     });
   });
 });

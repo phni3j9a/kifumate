@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """USI 中継。外部へは Worker 経由だけで到達させる。棋譜の個人情報は受け取らない。"""
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -14,8 +15,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cshogi
 from coach_facts import build_facts
+from coach_tools import ToolError, call as coach_tool
 
 MAX_MOVES = 512
+MAX_TOOL_CALLS = 30
+MAX_TOOL_ARGS = 16_000
+MAX_TOOL_RESULT = 24_000
+MAX_TOOL_BATCH_SECONDS = 3
+TOOL_READ_SECONDS = 5
+MAX_MATE_SECONDS = 0.75
+TOOL_SCHEMAS = {tool['name']: tool['parameters'] for tool in json.loads(Path(__file__).with_name('coach_tools_schema.json').read_text())}
+tool_slots = threading.BoundedSemaphore(2)
 MODES = {"std": (250, 1, 1), "precise": (1000, 2, 3)}
 MAX_REALTIME_SEARCH_MS = 60_000
 MOVE = re.compile(r"(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])\Z")
@@ -56,6 +66,8 @@ def validate_sfen(sfen):
         if squares != 9:
             raise InvalidInput()
     if kings != {"K": 1, "k": 1}:
+        raise InvalidInput()
+    if not parts[2]:
         raise InvalidInput()
     if parts[2] != "-":
         tokens = re.findall(r"([1-9][0-9]?)?([PLNSGBRplnsgbr])", parts[2])
@@ -98,6 +110,110 @@ def prepare(data, *, realtime=False):
     # 解析対象と同じ局面が過去に3回ある場合だけ千日手。打開後は探索を続ける。
     repetition = realtime and positions.count(target.rsplit(' ', 1)[0]) == 3
     return cshogi.Board(target), initial, moves, mode, ply, repetition
+
+
+def coach_facts(game, *, include_mate_replies=False):
+    if not isinstance(game, dict) or set(game) - {'initial', 'moves', 'results', 'perspective', 'question', 'tags'}:
+        raise InvalidInput()
+    if 'question' in game and (not isinstance(game['question'], str) or len(game['question']) > 1000):
+        raise InvalidInput()
+    prepare({'initial': game['initial'], 'moves': game['moves'], 'mode': 'precise', 'ply': 0})
+    results = game['results']
+    if not isinstance(results, list) or len(results) != len(game['moves']) + 1:
+        raise InvalidInput()
+    # 読み筋も、生の文字列をcshogiに渡す前に形式を確かめる。提示する部分の合法性はbuild_facts/道具側で検査する。
+    for ply, row in enumerate(results):
+        if not isinstance(row, dict) or type(row.get('ply')) is not int or row['ply'] != ply:
+            raise InvalidInput()
+        candidates, mate = row['candidates'], row.get('mate')
+        if not isinstance(candidates, list) or len(candidates) > 3:
+            raise InvalidInput()
+        for source in candidates + ([mate] if mate is not None else []):
+            if not isinstance(source, dict) or not isinstance(pv := source['pv'], list) or len(pv) > 128 or any(
+                not isinstance(m, str) or not MOVE.fullmatch(m) for m in pv
+            ) or source is mate and not pv:
+                raise InvalidInput()
+        if include_mate_replies and mate is not None:
+            branches = mate.get('branches', [])
+            if not isinstance(branches, list) or len(branches) > 600 or any(
+                not isinstance(b, dict) or not all(isinstance(b.get(k), str) and MOVE.fullmatch(b[k]) for k in ('reply', 'mate'))
+                for b in branches
+            ):
+                raise InvalidInput()
+    return build_facts(game, include_mate_replies=include_mate_replies)
+
+
+def tool_arguments(value, schema):
+    """共有宣言で使う型・必須項目・配列上限だけを検査する。"""
+    if 'enum' in schema:
+        return value in schema['enum']
+    match schema.get('type'):
+        case 'object':
+            props = schema['properties']
+            return isinstance(value, dict) and set(schema['required']) <= value.keys() <= props.keys() and all(
+                tool_arguments(v, props[k]) for k, v in value.items())
+        case 'array':
+            return isinstance(value, list) and len(value) <= schema['maxItems'] and all(tool_arguments(v, schema['items']) for v in value)
+        case 'string':
+            return isinstance(value, str)
+        case 'integer':
+            return type(value) is int
+        case 'boolean':
+            return type(value) is bool
+        case None:
+            return True  # 主張の期待値は型ごとに異なる。
+
+
+def bounded_mate(board, prev, view, *, deadline):
+    # cshogiの探索はGILを解放しないので、時間切れは別プロセスごと止める。
+    seconds = min(MAX_MATE_SECONDS, deadline - time.monotonic())
+    try:
+        if seconds > 0:
+            moves = list(map(cshogi.move_to_usi, board.history))
+            start = board.copy()
+            for _ in moves:
+                start.pop()
+            child = subprocess.run([sys.executable, str(Path(__file__).with_name('coach_tools.py'))],
+                                   input=json.dumps([start.sfen(), moves, prev, view]), text=True, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, timeout=seconds, check=True,
+                                   env={**os.environ, 'OPENBLAS_NUM_THREADS': '1'})
+            return json.loads(child.stdout)
+    except subprocess.TimeoutExpired:
+        pass
+    return {'状態': '未確認', '注意': '時間上限。詰まないことを証明したわけではない'}
+
+
+def run_coach_tools(data):
+    if not isinstance(data, dict) or set(data) != {'game', 'calls'}:
+        raise InvalidInput()
+    game, calls = data['game'], data['calls']
+    if not isinstance(calls, list) or not 1 <= len(calls) <= MAX_TOOL_CALLS:
+        raise InvalidInput()
+    deadline = time.monotonic() + MAX_TOOL_BATCH_SECONDS
+    facts = coach_facts(game)
+    results = []
+    for item in calls:
+        try:
+            if time.monotonic() >= deadline:
+                raise ToolError('調査の時間上限に達しました')
+            if not isinstance(item, dict) or set(item) != {'name', 'arguments'} or not isinstance(item['name'], str):
+                raise ToolError('道具の引数が不正です')
+            name, raw = item['name'], item['arguments']
+            if name not in TOOL_SCHEMAS or name == 'check_draft':
+                raise ToolError('不明な道具です')
+            if not isinstance(raw, str) or len(raw.encode()) > MAX_TOOL_ARGS or not tool_arguments(args := json.loads(raw), TOOL_SCHEMAS[name]):
+                raise ToolError('道具の引数が不正です')
+            result = coach_tool(game, name, args, facts=facts, search=partial(bounded_mate, deadline=deadline))
+            if len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()) > MAX_TOOL_RESULT:
+                raise ToolError('結果が大きすぎます。対象を絞って確認してください')
+        except ToolError as e:
+            result = e.result
+        except (ValueError, TypeError, RecursionError):
+            result = {'エラー': '道具の引数が不正です'}
+        except Exception:
+            result = {'エラー': '道具を実行できませんでした'}
+        results.append(result)
+    return {'results': results}
 
 
 def score_for_sente(kind, raw, turn, bound=None):
@@ -347,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200 if self.path in ("/health", "/ping") else 404, {"ok": self.path in ("/health", "/ping")})
 
     def respond(self, status, data):
-        body = json.dumps(data, separators=(",", ":")).encode()
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -357,21 +473,52 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # 局面変更でクライアントが古いHTTP要求を破棄した。
 
+    def read_tool_body(self, length):
+        deadline = time.monotonic() + TOOL_READ_SECONDS
+        previous = self.connection.gettimeout()
+        body = bytearray()
+        try:
+            while len(body) < length:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError()
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(65_536, length - len(body)))
+                if not chunk:
+                    raise InvalidInput()
+                body.extend(chunk)
+        finally:
+            self.connection.settimeout(previous)
+        return json.loads(body)
+
     def do_POST(self):
         global engine
         deepening = self.path == '/realtime/deepen'
         realtime = deepening or self.path == '/realtime'
-        if not realtime and self.path not in ("/analyze", "/coach-facts"):
+        if not realtime and self.path not in ("/analyze", "/coach-facts", "/coach-tools"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= (1_048_576 if self.path == "/coach-facts" else 16384):
+            limit = {"/coach-facts": 1_048_576, "/coach-tools": 2_097_152}.get(self.path, 16384)
+            if not 0 < length <= limit:
                 return self.respond(413, {"error": "input_too_large"})
+            if self.path == "/coach-tools":
+                if not tool_slots.acquire(blocking=False):
+                    self.close_connection = True
+                    return self.respond(503, {"error": "tools_busy"})
+                try:
+                    data = self.read_tool_body(length)
+                except TimeoutError:
+                    self.close_connection = True
+                    status, result = 408, {"error": "input_timeout"}
+                else:
+                    status, result = 200, run_coach_tools(data)
+                finally:
+                    tool_slots.release()
+                return self.respond(status, result)
             data = json.loads(self.rfile.read(length))
             if self.path == "/coach-facts":
-                if data["initial"] != "startpos":
-                    validate_sfen(data["initial"])
-                return self.respond(200, build_facts(data))
+                return self.respond(200, coach_facts(data, include_mate_replies=True))
             cancel = movetime_ms = None
             if realtime:
                 keys = {'initial', 'moves', 'mode', 'ply', 'sessionId', 'sequence'}
@@ -407,7 +554,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, result)
         except Superseded:
             self.respond(409, {'error': 'superseded'})
-        except (InvalidInput, ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, RecursionError, IndexError, AttributeError):
             self.respond(422, {"error": "invalid_position_or_move"})
         except Exception:
             self.respond(503, {"error": "analysis_unavailable"})

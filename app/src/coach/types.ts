@@ -36,13 +36,24 @@ export const defaultProfile: Profile = {
   style: { focus: "総合", detail: "ふつう" },
 };
 export interface CoachQuota {
-  monthStart: number;
+  remainingRatio: number;
   resetsAt: number;
-  limit: number;
-  used: number;
-  reserved: number;
-  remaining: number;
   low: boolean;
+  exhausted: boolean;
+}
+export const coachLimitTitle = "今週のAIコーチは上限に達しました";
+export const coachReset = "月曜0時（日本時間）に、また使えます";
+export function isCoachQuota(value: unknown): value is CoachQuota {
+  if (!value || typeof value !== "object") return false;
+  const q = value as Partial<CoachQuota>;
+  return (
+    typeof q.remainingRatio === "number" &&
+    q.remainingRatio >= 0 &&
+    q.remainingRatio <= 1 &&
+    Number.isFinite(q.resetsAt) &&
+    typeof q.low === "boolean" &&
+    typeof q.exhausted === "boolean"
+  );
 }
 export interface Reference {
   id: string;
@@ -98,8 +109,6 @@ export interface CoachRecord {
   error: string | null;
 }
 export function quotaNotice(q: CoachQuota | null) {
-  if (!q || (q.remaining > 0 && !q.low)) return "";
-  return q.remaining > 0
-    ? `AIコーチは、今月あと${q.remaining}回使えます`
-    : `今月のAIコーチは上限に達しました。月が変わると、また使えます。次の更新：${new Date(q.resetsAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}（日本時間）`;
+  if (q?.exhausted) return `${coachLimitTitle}。${coachReset}。`;
+  return q?.low ? "今週のAIコーチは残りわずかです" : "";
 }
