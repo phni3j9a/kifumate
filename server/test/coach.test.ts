@@ -47,9 +47,20 @@ describe('精密結果の署名', () => {
       await instance.alarm(); await instance.alarm();
       const response = await instance.fetch(new Request('https://device/v1/jobs/' + job.id + '?from=1', {headers: {'X-Dev-Paid': '1'}}));
       const done = await response.json();
-      expect(done.status).toBe('completed'); expect(done.results).toHaveLength(1);
+      expect(done.status).toBe('completed'); expect(done.results).toEqual(results);
       await expect(verifyAnalysis('test-key', instance.ctx.id.toString(), input, results, done.coachProof)).resolves.toBeUndefined();
     });
+  });
+  it('同じ局面・順位の深読み候補を1段目と混同しない', () => {
+    const withDeep = [{...results[0], deep: {...results[0], candidates: [{rank: 1, score: null, pv: ['2g2f']}]}}, results[1]];
+    const choices = references(withDeep);
+    const original = choices.find(r => r.id === '0:candidate:1');
+    const deep = choices.find(r => r.id === '0:deep:candidate:1');
+    expect(deep?.pv).toEqual(['2g2f']);
+    expect(original?.pv).not.toEqual(deep?.pv);
+    const facts = {視点: '観戦', 実戦手: [], 終局: {}, 参照: [{id: deep!.id, '仮の読み筋（実戦とは別）': [{表記: '▲2六歩(27)'}]}]};
+    const reply = validateOutput({sections: [{kind: 'facts', title: '候補', text: '候補は▲2六歩(27)です。', refs: [deep!.id]}]}, choices, facts);
+    expect(reply.sections[0].references).toEqual([deep]);
   });
 });
 

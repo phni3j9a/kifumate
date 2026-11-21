@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import threading
+from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -54,14 +55,31 @@ def test_all_moves_validated_before_analysis():
     assert board.turn == cshogi.WHITE
 
 
-def test_fake_engine_usi_protocol():
+def test_fake_engine_usi_protocol(monkeypatch):
     engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    commands = []
+    send = engine.send
+    def record(command):
+        commands.append(command)
+        send(command)
+    monkeypatch.setattr(engine, 'send', record)
     try:
         result = engine.analyze(payload())
         assert result['score'] == {'kind': 'cp', 'value': 123}
         assert result['candidates'][0]['pv'] == ['7g7f', '3c3d']
         assert result['mate'] is None
         assert 'INTERNAL_NAME' not in json.dumps(result)
+        assert commands == ['setoption name Threads value 1', 'setoption name MultiPV value 1',
+                            'isready', 'usinewgame', 'position startpos', 'go movetime 250']
+        assert 'terminal' not in result
+        commands.clear()
+        for ms in (500, 60_000):
+            assert engine.analyze(payload(), movetime_ms=ms)['terminal'] is False
+        assert commands == ['position startpos', 'go movetime 500', 'position startpos', 'go movetime 60000']
+        commands.clear()
+        assert 'terminal' not in engine.analyze(payload(mode='precise'))
+        assert commands == ['setoption name Threads value 2', 'setoption name MultiPV value 3',
+                            'isready', 'usinewgame', 'position startpos', 'go movetime 1000']
     finally:
         engine.close()
 
@@ -153,8 +171,50 @@ def test_declaration_win_is_not_a_move_or_proven_mate(sfen, winner):
         assert 'move' not in result['candidates'][0]
         assert result['candidates'][0]['pv'] == []
         assert result['mate'] is None
+        assert engine.analyze(payload(initial=sfen), movetime_ms=250) == {**result, 'terminal': True}
     finally:
         engine.close()
+
+
+def test_realtime_checkmate_is_terminal():
+    sample = json.loads((ROOT.parents[1] / 'mock/data/sample-game.json').read_text())
+    board = cshogi.Board(next(p['sfen'] for p in sample['positions'] if (p.get('tsume') or {}).get('len') == 1))
+    board.push(board.mate_move_in_1ply())
+    assert board.is_check() and board.is_game_over()
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py'), '--resign'])
+    try:
+        result = engine.analyze(payload(initial=board.sfen()), movetime_ms=250)
+        assert result['terminal'] is True and result['candidates'] == []
+        assert result['score'] == {'kind': 'mate', 'value': 0, 'winner': 'gote' if board.turn == cshogi.BLACK else 'sente'}
+    finally:
+        engine.close()
+
+
+def test_realtime_fourfold_repetition_is_terminal(monkeypatch):
+    cycle = ['5i5h', '5a5b', '5h5i', '5b5a']
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    try:
+        assert engine.analyze(payload(moves=cycle * 2, ply=8), movetime_ms=250)['terminal'] is False
+        def unexpected_search(command):
+            raise AssertionError(f'千日手成立後のUSIコマンド: {command}')
+        monkeypatch.setattr(engine, 'send', unexpected_search)
+        result = engine.analyze(payload(moves=cycle * 3 + ['7g7f'], ply=12), movetime_ms=250)
+        assert result == {'ply': 12, 'score': None, 'candidates': [], 'mate': None, 'terminal': True}
+    finally:
+        engine.close()
+
+
+def test_realtime_searches_after_breaking_repetition():
+    moves = ['5i5h', '5a5b', '5h5i', '5b5a'] * 3 + ['7g7f', '3c3d']
+    engine = Mock(spec=bridge.Engine, mode='std')
+    engine.until.return_value = ['info depth 4 score cp 123 pv 2g2f', 'bestmove 2g2f']
+
+    result = bridge.Engine.analyze(engine, payload(moves=moves, ply=len(moves)), movetime_ms=250)
+
+    engine.send.assert_any_call('go movetime 250')
+    assert result['terminal'] is False
+    assert result['score'] == {'kind': 'cp', 'value': 123}
+    assert result['candidates'][0]['pv'] == ['2g2f']
 
 
 def test_realtime_stop_drains_bestmove_and_reuses_process():
@@ -193,13 +253,15 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     # 新しい要求はエンジンの直列ロックを待つ前に旧要求を止める。
     entered, cancelled = threading.Event(), threading.Event()
     class FakeEngine:
-        def analyze(self, data, cancel):
+        def analyze(self, data, cancel, movetime_ms):
             if data['ply'] == 0:
                 entered.set()
                 assert cancel.wait(2)
                 cancelled.set()
                 raise bridge.Superseded()
-            return {'ply': data['ply'], 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None}
+            if movetime_ms is None:
+                return {'ply': data['ply'], 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None}
+            return {'ply': data['ply'], 'terminal': False, 'movetime': movetime_ms}
         def close(self):
             pass
     monkeypatch.setattr(bridge, 'engine', FakeEngine())
@@ -210,10 +272,14 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     serving.start()
     url = f'http://127.0.0.1:{server.server_port}/realtime'
     session = 'a' * 36
-    def send(sequence, moves):
-        data = payload(moves=moves, ply=len(moves), sessionId=session, sequence=sequence)
+    def send(sequence, moves, round_number=0, movetime_ms=250, session_id=session):
+        data = payload(moves=moves, ply=len(moves), sessionId=session_id, sequence=sequence)
+        path = url
+        if round_number is not None:
+            path += '/deepen'
+            data.update(round=round_number, movetimeMs=movetime_ms)
         try:
-            with urlopen(Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
+            with urlopen(Request(path, json.dumps(data).encode(), {'Content-Type': 'application/json'}), timeout=3) as response:
                 return response.status, json.load(response)
         except HTTPError as error:
             return error.code, json.load(error)
@@ -222,12 +288,26 @@ def test_realtime_http_replaces_search_before_lock(monkeypatch):
     try:
         first.start(); assert entered.wait(1)
         before = time.monotonic()
-        assert send(2, ['7g7f'])[0] == 200
+        assert send(2, ['7g7f']) == (200, {'ply': 1, 'terminal': False, 'movetime': 250})
         assert time.monotonic() - before < 0.5 and cancelled.is_set()
         first.join(timeout=1)
         assert old == [(409, {'error': 'superseded'})]
-        assert send(1, ['7g7f'])[0] == 409
-        assert send(2, ['7g7f'])[0] == 409
+        assert send(2, ['7g7f'], round_number=2, movetime_ms=60_000)[1]['movetime'] == 60_000
+        latest = bridge.realtime_cancel
+        assert send(1, ['7g7f'], round_number=100)[0] == 409
+        assert send(2, ['7g7f'], round_number=1)[0] == 409
+        assert send(2, ['7g7f'], round_number=2)[0] == 409
+        assert send(99, ['7g7f'], session_id='b' * 36)[0] == 409
+        for ms in (0, 249, 60_001, True, '500', 250.5):
+            assert send(3, ['7g7f'], movetime_ms=ms)[0] == 422
+        for number in (-1, True, '3', 3.5):
+            assert send(3, ['7g7f'], round_number=number)[0] == 422
+        assert bridge.realtime_cancel is latest and not latest.is_set()
+        assert send(3, ['7g7f'])[0] == 200
+        assert latest.is_set()
+        assert send(4, ['7g7f'], round_number=None) == (200, {
+            'ply': 1, 'score': {'kind': 'cp', 'value': 10}, 'candidates': [], 'mate': None})
+        assert send(4, ['7g7f'], round_number=None)[0] == 409
     finally:
         server.shutdown(); server.server_close(); serving.join(); first.join(timeout=1)
 
@@ -250,3 +330,36 @@ def test_coach_facts_http_does_not_start_engine(monkeypatch):
         assert bridge.engine is None
     finally:
         server.shutdown(); server.server_close(); serving.join()
+
+
+def test_deep_http_uses_fixed_precise_settings(monkeypatch):
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    monkeypatch.setattr(bridge, 'engine', engine)
+    monkeypatch.setattr(engine, 'send', Mock(wraps=engine.send))
+    server = bridge.ThreadingHTTPServer(('127.0.0.1', 0), bridge.Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+
+    def send(data, path='/analyze/deep'):
+        req = Request(f'http://127.0.0.1:{server.server_port}{path}', json.dumps(data).encode())
+        with urlopen(req, timeout=3) as response:
+            return json.load(response)
+
+    try:
+        for bad in (payload(), payload(mode='precise', movetimeMs=5000), payload(mode='precise', ply=True),
+                    payload(mode='precise', moves=['7g7e'])):
+            with pytest.raises(HTTPError) as error:
+                send(bad)
+            assert error.value.code == 422
+        engine.send.assert_not_called()
+        data = payload(mode='precise', moves=['7g7f'])  # 途中局面でも棋譜全体を検査する。
+        assert send(data) == send(data, '/analyze')
+        assert [c.args[0] for c in engine.send.call_args_list] == [
+            'setoption name Threads value 2', 'setoption name MultiPV value 3', 'isready', 'usinewgame',
+            'position startpos', 'go movetime 5000', 'position startpos', 'go movetime 1000',
+        ]
+    finally:
+        server.shutdown()
+        worker.join(timeout=1)
+        server.server_close()
+        engine.close()

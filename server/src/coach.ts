@@ -97,11 +97,14 @@ export function parseCoach(value: unknown) {
 type CoachInput = ReturnType<typeof parseCoach>;
 export interface Reference { id: string; ply: number; score: unknown; pv: string[]; provenMate: boolean }
 export function references(results: any[]): Reference[] {
-  return results.flatMap(r => [
-    {id: `${r.ply}:position`, ply: r.ply, score: r.score, pv: [], provenMate: false},
-    ...r.candidates.filter((c: any) => c.pv?.length).map((c: any) => ({id: `${r.ply}:candidate:${c.rank}`, ply: r.ply, score: c.score, pv: c.pv, provenMate: false})),
-    ...(r.mate ? [{id: `${r.ply}:mate`, ply: r.ply, score: null, pv: r.mate.pv, provenMate: true}] : []),
-  ]);
+  return results.flatMap(base => (base.deep ? [base, base.deep] : [base]).flatMap(r => {
+    const prefix = r === base ? `${r.ply}` : `${r.ply}:deep`;
+    return [
+      {id: `${prefix}:position`, ply: r.ply, score: r.score, pv: [], provenMate: false},
+      ...r.candidates.filter((c: any) => c.pv?.length).map((c: any) => ({id: `${prefix}:candidate:${c.rank}`, ply: r.ply, score: c.score, pv: c.pv, provenMate: false})),
+      ...(r.mate ? [{id: `${prefix}:mate`, ply: r.ply, score: null, pv: r.mate.pv, provenMate: true}] : []),
+    ];
+  }));
 }
 export const SYSTEM_PROMPT = prompt;
 function prose(value: string) {

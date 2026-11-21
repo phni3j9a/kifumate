@@ -4,7 +4,8 @@ export { Invitations } from './invitations';
 import { Coach, parseCoach, signAnalysis, type CoachEnv } from './coach';
 import { coachTags, readCoachResponse } from './coach-tools';
 import { DurableObject } from 'cloudflare:workers';
-import { RealtimeSessions } from './realtime';
+import { RealtimeSessions, fetchRealtimeAnalysis } from './realtime';
+import { deepPositions, type PositionResult } from './deep';
 import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
@@ -20,6 +21,7 @@ export interface Env extends CoachEnv {
   WRITE_LIMITER?: RateLimit;
   INVITE_LIMITER?: RateLimit;
   REALTIME_IDLE_MS?: string;
+  REALTIME_HOLD_IDLE_MS?: string;
   ENVIRONMENT: string;
   ALLOW_DEV_PAID: string;
   DEV_PAID_HASHES?: string;
@@ -38,21 +40,19 @@ export class RealtimeContainer extends StandardContainer {
   private lifetime = new AbortController();
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
-    const configured = Number(env.REALTIME_IDLE_MS ?? 30_000);
-    const idleMs = Number.isSafeInteger(configured) && configured >= 1000 && configured <= 300_000 ? configured : 30_000;
+    const idleTime = (value: string | undefined, fallback: number) => {
+      const ms = Number(value);
+      return Number.isSafeInteger(ms) && ms >= 1000 && ms <= 300_000 ? ms : fallback;
+    };
     this.sessions = new RealtimeSessions(ctx.storage, {
-      analyze: async (input, sessionId, sequence, signal) => {
+      analyze: async (input, sessionId, sequence, round, movetimeMs, signal) => {
         if (this.boot || !ctx.container?.running) {
           // 局面変更では共通の初回起動まで中断しない。明示停止・休止だけが起動を打ち切る。
           const boot = this.boot ??= this.startAndWaitForPorts(8080, {abort: this.lifetime.signal});
           try { await boot; } finally { if (this.boot === boot) this.boot = undefined; }
         }
         if (signal.aborted) return new Response(null, {status: 409});
-        return this.containerFetch('http://container/realtime', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({...input, ply: input.moves.length, sessionId, sequence}),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]),
-        });
+        return fetchRealtimeAnalysis(this.containerFetch.bind(this), input, sessionId, sequence, round, movetimeMs, signal);
       },
       stop: async () => {
         this.lifetime.abort();
@@ -65,7 +65,7 @@ export class RealtimeContainer extends StandardContainer {
         this.deleteSchedules('expireRealtime');
         await this.schedule(new Date(when), 'expireRealtime');
       },
-    }, idleMs);
+    }, idleTime(env.REALTIME_IDLE_MS, 30_000), idleTime(env.REALTIME_HOLD_IDLE_MS, 300_000));
   }
   async expireRealtime() { await this.sessions.expire(); }
   async onActivityExpired() { await this.sessions.expire(); }
@@ -85,6 +85,7 @@ interface Job {
   status: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   cursor: number; week: number; created: number; terminal: number | null;
   attempts: number; error: string | null;
+  deep_targets: string | null; deep_done: number;
 }
 export class Device extends DurableObject<Env> {
   private busy = false;
@@ -130,6 +131,11 @@ export class Device extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS results (job TEXT NOT NULL, ply INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(job,ply));
       CREATE TABLE IF NOT EXISTS usage (week INTEGER PRIMARY KEY, total INTEGER NOT NULL, precise INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS coach_proofs (job TEXT PRIMARY KEY, data TEXT NOT NULL);`);
+    ctx.storage.transactionSync(() => {
+      if (!this.rows<{name: string}>("PRAGMA table_info(jobs)").some(c => c.name === 'deep_targets')) {
+        ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN deep_targets TEXT; ALTER TABLE jobs ADD COLUMN deep_done INTEGER NOT NULL DEFAULT 0');
+      }
+    });
   }
   private rows<T extends Record<string, SqlStorageValue>>(sql: string, ...params: SqlStorageValue[]): T[] {
     return this.ctx.storage.sql.exec<T>(sql, ...params).toArray();
@@ -160,13 +166,23 @@ export class Device extends DurableObject<Env> {
     if (!job) throw new ApiError(404, 'job_not_found');
     return job;
   }
-  private view(job: Job, from = 0) {
+  private results(id: string, from = 0, includeDeep = false): PositionResult[] {
+    return this.rows<{data: string}>('SELECT data FROM results WHERE job=? AND ply>=? ORDER BY ply', id, from)
+      .map(row => {
+        const result = JSON.parse(row.data);
+        if (!includeDeep) delete result.deep;
+        return result;
+      });
+  }
+  private view(job: Job, from?: number) {
     const input = JSON.parse(job.payload) as Input;
+    const completePrecise = job.status === 'completed' && job.mode === 'precise';
     return {id: job.id, mode: job.mode, status: job.status, next: job.cursor,
       total: input.moves.length + 1, createdAt: job.created, finishedAt: job.terminal,
       expiresAt: job.terminal === null ? null : job.terminal + RETENTION_MS, error: job.error,
       coachProof: job.status === 'completed' && job.mode === 'precise' ? JSON.parse(this.rows<{data: string}>('SELECT data FROM coach_proofs WHERE job=?', job.id)[0]?.data ?? 'null') : null,
-      results: this.rows<{data: string}>('SELECT data FROM results WHERE job=? AND ply>=? ORDER BY ply', job.id, from).map(x => JSON.parse(x.data))};
+      ...(job.mode === 'precise' ? {deep: {total: JSON.parse(job.deep_targets ?? '[]').length, done: Math.max(0, job.deep_done)}} : {}),
+      results: from === undefined ? undefined : this.results(job.id, completePrecise ? 0 : from, completePrecise && job.deep_done > 0)};
   }
   private prune(now: number) {
     this.ctx.storage.transactionSync(() => {
@@ -219,7 +235,7 @@ export class Device extends DurableObject<Env> {
       }
       if (url.pathname === '/v1/quota' && request.method === 'GET') return json(this.quota());
       if (url.pathname === '/v1/jobs' && request.method === 'GET') {
-        return json({jobs: this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs ORDER BY created,id').map(j => ({...this.view(j, j.cursor), results: undefined})), quota: this.quota()});
+        return json({jobs: this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs ORDER BY created,id').map(j => this.view(j)), quota: this.quota()});
       }
       if (url.pathname === '/v1/jobs' && request.method === 'POST') {
         const input = parseInput(await readJson(request));
@@ -229,7 +245,7 @@ export class Device extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now() + 100);
         return this.ctx.storage.transactionSync(() => {
           const existing = this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs WHERE fingerprint=?', fingerprint)[0];
-          if (existing && !['failed', 'cancelled'].includes(existing.status)) return json({...this.view(existing), duplicate: true, quota: this.quota()});
+          if (existing && !['failed', 'cancelled'].includes(existing.status)) return json({...this.view(existing, 0), duplicate: true, quota: this.quota()});
           const quota = this.quota();
           if (input.mode === 'precise' && !quota.paid) throw new ApiError(403, 'paid_required');
           if (quota.totalRemaining <= 0 || (input.mode === 'precise' && quota.preciseRemaining <= 0)) throw new ApiError(429, 'weekly_limit');
@@ -239,7 +255,7 @@ export class Device extends DurableObject<Env> {
           }
           const id = crypto.randomUUID();
           this.ctx.storage.sql.exec("INSERT INTO jobs (id,fingerprint,payload,mode,status,week,created) VALUES (?,?,?,?,'queued',?,?)", id, fingerprint, JSON.stringify(input), input.mode, quota.weekStart, Date.now());
-          return json({...this.view(this.getJob(id)), duplicate: false, quota: this.quota()}, 202);
+          return json({...this.view(this.getJob(id), 0), duplicate: false, quota: this.quota()}, 202);
         });
       }
       const match = /^\/v1\/jobs\/([0-9a-f-]{36})$/.exec(url.pathname);
@@ -252,13 +268,81 @@ export class Device extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now() + 100);
         const job = this.getJob(match[1]);
         if (['queued', 'running'].includes(job.status)) this.ctx.storage.sql.exec("UPDATE jobs SET status='cancelled',terminal=? WHERE id=?", Date.now(), job.id);
-        return json({...this.view(this.getJob(job.id)), quota: this.quota()});
+        return json({...this.view(this.getJob(job.id), 0), quota: this.quota()});
       }
       throw new ApiError(404, 'not_found');
     } catch (error) {
       if (error instanceof ApiError) return json({error: error.code, ...(error.status === 429 ? {quota: this.quota()} : {})}, error.status);
       return json({error: 'internal_error'}, 500);
     }
+  }
+  private stillRunning(job: Job) {
+    return this.rows("SELECT id FROM jobs WHERE id=? AND status='running' AND cursor=? AND deep_done=?", job.id, job.cursor, job.deep_done).length > 0;
+  }
+  private async analyze(input: Input, ply: number, deep = false): Promise<PositionResult> {
+    const namespace = input.mode === 'std' ? this.env.STD : this.env.PRECISE;
+    // shortcut: 中継はモード別2枠。公開時に負荷計測して枠数と max_instances を同時調整する。
+    const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
+    const response = await namespace.getByName('slot-' + slot).fetch(deep ? 'http://container/analyze/deep' : 'http://container/analyze', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...input, ply}), signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      throw new ApiError(response.status, 'container_http_' + response.status);
+    }
+    const result = await response.json() as PositionResult;
+    if (result?.ply !== ply || deep && (!('score' in result) || !('mate' in result) || !Array.isArray((result as any).candidates))) throw new Error('invalid_result');
+    return result;
+  }
+  private proof(job: Job, input: Input, results: PositionResult[], now: number) {
+    return job.mode === 'precise' && this.env.COACH_SIGNING_KEY
+      ? signAnalysis(this.env.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input, results, now)
+      : null;
+  }
+  private complete(job: Job, proof: Awaited<ReturnType<Device['proof']>>, now: number) {
+    this.ctx.storage.sql.exec("UPDATE jobs SET status='completed',terminal=? WHERE id=?", now, job.id);
+    if (proof) this.ctx.storage.sql.exec('INSERT INTO coach_proofs VALUES (?,?)', job.id, JSON.stringify(proof));
+    this.ctx.storage.sql.exec('INSERT INTO usage VALUES (?,1,?) ON CONFLICT(week) DO UPDATE SET total=total+1,precise=precise+excluded.precise', job.week, job.mode === 'precise' ? 1 : 0);
+    console.log(JSON.stringify({event: 'analysis_completed', mode: job.mode}));
+  }
+  private logRetry(job: Job, ply: number, error: unknown) {
+    console.warn('解析の再試行', {jobId: job.id, ply, reason: error instanceof Error ? error.message : 'unknown'});
+  }
+  private async runDeep(job: Job, input: Input, targets: number[]) {
+    if (job.deep_done === -1 || job.deep_done === targets.length) {
+      const now = Date.now();
+      const proof = await this.proof(job, input, this.results(job.id, 0, job.deep_done >= 0), now);
+      this.ctx.storage.transactionSync(() => {
+        if (this.stillRunning(job)) this.complete(job, proof, now);
+      });
+      return;
+    }
+    const ply = targets[job.deep_done];
+    let result: PositionResult;
+    try {
+      result = await this.analyze(input, ply, true);
+    } catch (error) {
+      const unsupported = error instanceof ApiError && error.status === 404;
+      if (!unsupported) this.logRetry(job, ply, error);
+      if (!this.stillRunning(job)) return;
+      const attempts = job.attempts + 1;
+      this.ctx.storage.transactionSync(() => {
+        if (unsupported || attempts >= 5) {
+          // 途中まで読めていても、完了結果は1段目だけに戻す。
+          this.ctx.storage.sql.exec("UPDATE results SET data=json_remove(data,'$.deep') WHERE job=? AND json_type(data,'$.deep') IS NOT NULL", job.id);
+          this.ctx.storage.sql.exec('UPDATE jobs SET deep_done=-1,attempts=0 WHERE id=?', job.id);
+        } else {
+          this.ctx.storage.sql.exec('UPDATE jobs SET attempts=? WHERE id=?', attempts, job.id);
+        }
+      });
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      if (!this.stillRunning(job)) return;
+      this.ctx.storage.sql.exec("UPDATE results SET data=json_set(data,'$.deep',json(?)) WHERE job=? AND ply=?", JSON.stringify(result), job.id, ply);
+      this.ctx.storage.sql.exec('UPDATE jobs SET deep_done=deep_done+1,attempts=0 WHERE id=?', job.id);
+    });
   }
   async alarm(): Promise<void> {
     if (this.busy) { await this.ctx.storage.setAlarm(Date.now() + 2000); return; }
@@ -273,40 +357,30 @@ export class Device extends DurableObject<Env> {
       // fetch が途中で落ちても、この watchdog が保存済み cursor から再開する。
       await this.ctx.storage.setAlarm(Date.now() + 60_000);
       const input = JSON.parse(job.payload) as Input;
+      if (job.deep_targets !== null) {
+        await this.runDeep(job, input, JSON.parse(job.deep_targets));
+        return;
+      }
       try {
-        const namespace = job.mode === 'std' ? this.env.STD : this.env.PRECISE;
-        // shortcut: 中継はモード別2枠。公開時に負荷計測して枠数と max_instances を同時調整する。
-        const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
-        const response = await namespace.getByName('slot-' + slot).fetch('http://container/analyze', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({...input, ply: job.cursor}), signal: AbortSignal.timeout(45_000),
-        });
-        if (response.status === 422) {
-          this.ctx.storage.sql.exec("UPDATE jobs SET status='failed',terminal=?,error='invalid_position_or_move' WHERE id=? AND status='running'", Date.now(), job.id);
-          return;
-        }
-        if (!response.ok) throw new Error('container_http_' + response.status);
-        const result = await response.json() as {ply?: number};
-        if (result.ply !== job.cursor) throw new Error('invalid_result');
+        const result = await this.analyze(input, job.cursor);
+        const last = job.cursor === input.moves.length;
+        const results = last && job.mode === 'precise' ? [...this.results(job.id), result] : [];
+        const targets = results.length ? deepPositions(input.initial, results) : [];
+        const completed = last && !targets.length;
         const completedAt = Date.now();
-        const proof = job.mode === 'precise' && job.cursor === input.moves.length && this.env.COACH_SIGNING_KEY
-          ? await signAnalysis(this.env.COACH_SIGNING_KEY, this.ctx.id.toString(), job.id, input,
-            [...this.rows<{data: string}>('SELECT data FROM results WHERE job=? ORDER BY ply', job.id).map(x => JSON.parse(x.data)), result], completedAt)
-          : null;
+        const proof = completed ? await this.proof(job, input, results, completedAt) : null;
         this.ctx.storage.transactionSync(() => {
-          const current = this.getJob(job.id);
-          if (current.status !== 'running' || current.cursor !== job.cursor) return;
-          this.ctx.storage.sql.exec('INSERT OR IGNORE INTO results VALUES (?,?,?)', job.id, job.cursor, JSON.stringify(result));
-          const completed = job.cursor === input.moves.length;
-          this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,status=?,terminal=? WHERE id=?', completed ? 'completed' : 'running', completed ? completedAt : null, job.id);
-          if (completed) console.log(JSON.stringify({event: 'analysis_completed', mode: job.mode}));
-          if (completed && proof) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO coach_proofs VALUES (?,?)', job.id, JSON.stringify(proof));
-          if (completed) this.ctx.storage.sql.exec('INSERT INTO usage VALUES (?,1,?) ON CONFLICT(week) DO UPDATE SET total=total+1,precise=precise+excluded.precise', job.week, job.mode === 'precise' ? 1 : 0);
+          if (!this.stillRunning(job)) return;
+          this.ctx.storage.sql.exec('INSERT INTO results (job,ply,data) VALUES (?,?,?)', job.id, job.cursor, JSON.stringify(result));
+          this.ctx.storage.sql.exec('UPDATE jobs SET cursor=cursor+1,attempts=0,deep_targets=? WHERE id=?', targets.length ? JSON.stringify(targets) : null, job.id);
+          if (completed) this.complete(job, proof, completedAt);
         });
       } catch (error) {
-        console.warn('解析の再試行', {jobId: job.id, ply: job.cursor, reason: error instanceof Error ? error.message : 'unknown'});
+        const invalid = error instanceof ApiError && error.status === 422;
+        if (!invalid) this.logRetry(job, job.cursor, error);
         const attempts = job.attempts + 1;
-        this.ctx.storage.sql.exec("UPDATE jobs SET attempts=?,status=?,terminal=?,error=? WHERE id=? AND status='running' AND cursor=?", attempts, attempts >= 5 ? 'failed' : 'running', attempts >= 5 ? Date.now() : null, attempts >= 5 ? 'analysis_unavailable' : null, job.id, job.cursor);
+        const failure = invalid ? 'invalid_position_or_move' : attempts >= 5 ? 'analysis_unavailable' : null;
+        this.ctx.storage.sql.exec("UPDATE jobs SET attempts=?,status=?,terminal=?,error=? WHERE id=? AND status='running' AND cursor=?", attempts, failure ? 'failed' : 'running', failure ? Date.now() : null, failure, job.id, job.cursor);
       }
     } finally {
       this.busy = false;
