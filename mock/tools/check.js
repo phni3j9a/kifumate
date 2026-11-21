@@ -42,7 +42,7 @@ const fs = require('fs');
   await act('turns'); await has('勝負所（11手）'); await has('あなたの勝率');
   ok((await tp('.tp').evaluateAll((els) => els.map((e) => e.dataset.v).join())) === '31,40,42,49,52,62,63,65,66,68,81', 'marked moves and deeply read moves, in move order');
   ok(await tp('.tp .td').count() === 6, 'the moves read deeply on both sides carry the deep result');
-  ok((await tp('.tp').first().getAttribute('aria-label')) === '31手目 ▲3三角成、あなたの手、あなたの勝率 51%から51%、深読み 最善の手 評価値 +29、読み筋 △同桂 ▲2四歩 △同歩 ▲同銀', 'a deeply read move is listed without a mark');
+  ok((await tp('.tp').first().getAttribute('aria-label')) === '31手目 ▲3三角成、あなたの手、あなたの勝率 51%から51%、深読み 最善の手、評価値 +29、読み筋 △同桂 ▲2四歩 △同歩 ▲同銀', 'a deeply read move is listed without a mark');
   ok(await tp('.tpn').count() === 0, 'no note when the analysis has deep reading');
   await click('#scr .tp[data-v="62"]'); ok(await page.locator('#scr [data-b="sheet"]').isHidden(), 'a row closes the sheet'); await has('62手目'); await has('深く読んだ局面');
   await act('turns'); ok((await tp('.tp.cur').evaluateAll((els) => els.map((e) => e.dataset.v).join())) === '62', 'the move on the board is highlighted'); await act('closesheet');

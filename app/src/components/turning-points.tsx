@@ -147,7 +147,8 @@ export function TurningPointsSheet({
                   `${t.self ? you : opponent}の手`,
                   t.mark,
                   `${you}の勝率 ${t.before}%から${t.after}%`,
-                  t.deep ? `深読み ${hint} 評価値 ${t.deep.score}` : hint,
+                  t.deep ? `深読み ${hint}` : hint,
+                  t.deep && `評価値 ${t.deep.score}`,
                   reading && `読み筋 ${reading}`,
                 ]
                   .filter(Boolean)

@@ -432,7 +432,7 @@ function readoutHTML() {
   if (!seen(p)) return `${EVQ}<b>—</b><span>${mode !== 'run' ? (waiting() ? '順番が来たら解析します' : 'まだ解析していません') : RUN.paused ? '通信が戻ると、続きから再開します' : 'アプリを閉じても解析は続きます'}</span>`;
   const pos = P[p], deep = mode === 'done' && !!CUR.deep?.includes(p);
   const mixedDepth = deep !== (mode === 'done' && !!CUR.deep?.includes(p - 1));
-  const deepLabel = deep ? '<span>深く読んだ局面</span>' : '';
+  const deepLabel = deep ? '<span class="dp">深く読んだ局面</span>' : '';
   if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
   if (p === N) return `<span>終局</span><b>${N}手で${resultText()}</b><span>${endNote()}</span>`;
   const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
@@ -563,7 +563,7 @@ function turnsHTML() {
     const hint = deep ? rec || '最善の手' : t ? `${t.len}手詰めあり` : rec;
     const name = p.missedTsume ? '詰み逃し' : p.mark || '', rate = `${pct(wrSelf(prev))}% → ${pct(wrSelf(p))}%`;
     const score = t ? `${t.len}手詰め` : best ? fmtVal(best) : '', pv = (t ? t.line.map((m) => m.ja) : (best && best.pv) || []).slice(1).map(mv).join(' ');
-    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint} 評価値 ${score}` : hint, deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
+    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint}` : hint, deep ? `評価値 ${score}` : '', deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
     h += `<button type="button" class="tp${i === S.ply ? ' cur' : ''}" data-a="jump" data-v="${i}" aria-label="${label}"><span class="t1"><span class="no"><i${self ? ' class="you"' : ''}></i>${i}</span><span class="mm">${mv(p.move.ja)}</span>${name ? `<span class="tm">${onbMark(p.missedTsume ? 'dub' : MKC[p.mark])}${name}</span>` : ''}<b class="pr2">${rate}</b></span>`;
     h += deep ? `<span class="td"><span class="t1"><em>深読み</em><b class="hm">${hint}</b><b class="pr2">${score}</b></span>${pv ? `<span class="p">${pv}</span>` : ''}</span>` : hint ? `<span class="th">${hint}</span>` : '';
     h += '</button>';

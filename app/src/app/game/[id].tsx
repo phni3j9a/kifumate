@@ -1037,7 +1037,14 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 )}
                 <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
                 {current?.deep && (
-                  <Text style={font(700, 10.5, 1, colors.ink2)}>
+                  // 幅が足りないときはこの補足から縮め、おすすめの手へのリンクを切らない
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      font(700, 10.5, 1.5, colors.ink2),
+                      { flexShrink: 1 },
+                    ]}
+                  >
                     深く読んだ局面
                   </Text>
                 )}

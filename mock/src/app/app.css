@@ -266,6 +266,8 @@ body[data-plan="free"] .vc .aib{background:#fff}
 .vc .ro .rq{position:relative;font:700 10.5px/1 var(--f-maru);color:var(--ink2);text-decoration:underline dotted;text-underline-offset:3px}
 .vc .ro .rq::after{content:"";position:absolute;inset:-10px -6px}
 .vc .ro .rn{margin-left:auto;font:900 10.5px/1 var(--f-maru);color:var(--ink)}
+/* when the line is too long for a narrow screen, this label gives way first, so the link to the recommended move stays whole */
+.vc .ro .dp{min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
 .vc .gr{flex:1;min-height:0;position:relative;touch-action:pan-y;cursor:pointer}
 .vc .gr svg{display:block;overflow:visible}
 .vc .g-ph1{fill:#FFF7DF}

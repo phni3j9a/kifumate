@@ -278,6 +278,8 @@ body[data-plan="free"] .vc .aib{background:#fff}
 .vc .ro .rq{position:relative;font:700 10.5px/1 var(--f-maru);color:var(--ink2);text-decoration:underline dotted;text-underline-offset:3px}
 .vc .ro .rq::after{content:"";position:absolute;inset:-10px -6px}
 .vc .ro .rn{margin-left:auto;font:900 10.5px/1 var(--f-maru);color:var(--ink)}
+/* when the line is too long for a narrow screen, this label gives way first, so the link to the recommended move stays whole */
+.vc .ro .dp{min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
 .vc .gr{flex:1;min-height:0;position:relative;touch-action:pan-y;cursor:pointer}
 .vc .gr svg{display:block;overflow:visible}
 .vc .g-ph1{fill:#FFF7DF}
@@ -961,6 +963,7 @@ body[data-plan="free"] .vc .aib{background:#fff}
       <ul>
         <li>棋譜一覧の「取り込む」→「クリップボードから貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は、ふつうの解析で数十秒、精密解析で2分前後の見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
         <li>解析画面で駒をタップして動かすと、分岐になります。候補手の「試す」「次の手」で、読み筋を1手ずつ盤で進められます。左端のボタンか、盤の下の「本譜に戻る」で戻ります。</li>
+        <li>盤の左下の「勝負所」で、印の付いた手と、深く読んだ手の一覧が開きます。行をタップすると、その局面に移ります。無料プランでふつうの解析をした対局では、先頭に有料プランの深読みの案内が1つ出ます。</li>
         <li>「AIに聞く」でスタイルを選んで解説を作ります。文中の手をタップすると、盤がその局面になります。続けて質問できます。</li>
         <li>戦績で戦法や囲いの行をタップすると、その対局の一覧が開きます。</li>
         <li>上の「プラン」で無料と有料の見え方を、「通信」で通信が切れたときの見え方を切り替えられます。</li>
@@ -998,6 +1001,7 @@ body[data-plan="free"] .vc .aib{background:#fff}
         <li>詰みは、印（詰）と、候補の「詰み」タブ・「3手詰め」の札で示します。評価値の欄には「詰み」と書かず、3000を超える差はどれも「3000以上」と書きます。</li>
         <li>リアルタイム解析は、分岐では盤の上でオン・オフを切り替え、本譜では「深く読む」で始めます。局面を止めていても結果が深まり、分岐は30秒、本譜は5分で休止します。残り時間は、1割を切るまで出しません。</li>
         <li>有料プランの画面には、AIコーチとリアルタイム解析の上限を小さく書いています（買う前に分からない上限を避けるためです）。</li>
+        <li>勝負所の一覧の鍵は、行ごとではなく一覧の先頭に1つだけにしました。深読みのある手だけ、白い枠でおすすめ・評価値・読み筋を出します。</li>
         <li>AIコーチは、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
         <li>取り込みは1局ずつです。同じ棋譜をもう一度取り込もうとすると、保存せずに知らせます（取り込みを2回試すと見られます）。</li>
       </ul>
@@ -1890,7 +1894,7 @@ function readoutHTML() {
   if (!seen(p)) return `${EVQ}<b>—</b><span>${mode !== 'run' ? (waiting() ? '順番が来たら解析します' : 'まだ解析していません') : RUN.paused ? '通信が戻ると、続きから再開します' : 'アプリを閉じても解析は続きます'}</span>`;
   const pos = P[p], deep = mode === 'done' && !!CUR.deep?.includes(p);
   const mixedDepth = deep !== (mode === 'done' && !!CUR.deep?.includes(p - 1));
-  const deepLabel = deep ? '<span>深く読んだ局面</span>' : '';
+  const deepLabel = deep ? '<span class="dp">深く読んだ局面</span>' : '';
   if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
   if (p === N) return `<span>終局</span><b>${N}手で${resultText()}</b><span>${endNote()}</span>`;
   const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
@@ -2021,7 +2025,7 @@ function turnsHTML() {
     const hint = deep ? rec || '最善の手' : t ? `${t.len}手詰めあり` : rec;
     const name = p.missedTsume ? '詰み逃し' : p.mark || '', rate = `${pct(wrSelf(prev))}% → ${pct(wrSelf(p))}%`;
     const score = t ? `${t.len}手詰め` : best ? fmtVal(best) : '', pv = (t ? t.line.map((m) => m.ja) : (best && best.pv) || []).slice(1).map(mv).join(' ');
-    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint} 評価値 ${score}` : hint, deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
+    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint}` : hint, deep ? `評価値 ${score}` : '', deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
     h += `<button type="button" class="tp${i === S.ply ? ' cur' : ''}" data-a="jump" data-v="${i}" aria-label="${label}"><span class="t1"><span class="no"><i${self ? ' class="you"' : ''}></i>${i}</span><span class="mm">${mv(p.move.ja)}</span>${name ? `<span class="tm">${onbMark(p.missedTsume ? 'dub' : MKC[p.mark])}${name}</span>` : ''}<b class="pr2">${rate}</b></span>`;
     h += deep ? `<span class="td"><span class="t1"><em>深読み</em><b class="hm">${hint}</b><b class="pr2">${score}</b></span>${pv ? `<span class="p">${pv}</span>` : ''}</span>` : hint ? `<span class="th">${hint}</span>` : '';
     h += '</button>';
