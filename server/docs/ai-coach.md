@@ -501,11 +501,7 @@ maxは7/16が45秒超。全局三条件・二反復の中央値は62.6065秒（n
 ```sh
 cd server
 container/.venv/bin/python scripts/compare_coach_tools.py --self-test
-# 料金を再確認してから（2反復・実費）。同じ台帳を残し、出力には新規ファイル名を指定。
-set -a; . ~/.config/kifumate/llm.env; set +a
-container/.venv/bin/python scripts/compare_coach_tools.py deepseek --output .local/coach-tools/deepseek-new.json
-container/.venv/bin/python scripts/compare_coach_tools.py terra --output .local/coach-tools/terra-new.json
-unset OPENAI_API_KEY DEEPSEEK_API_KEY
+# 実測の手順は「Gemini 4 Neonとの比較（#67）」を参照。#67以降、出力先と台帳は .local/coach-neon/（$5枠）。
 ```
 
 ### 同じ8条件での比較
@@ -560,3 +556,53 @@ stagingの85手で出た `invalid_output` は、ローカルの本番 `complete`
 | 85手・2 | 通過 | 14／4 | 65.82 | 0.03243 |
 
 修正後も、6手では角交換後の危険と初手の代案、85手では3つの要所の理由・代案・練習を記載。独立した品質採点はしておらず、速度向上も確認できていません。8試行のusage推計合計は **$0.26552**（保守計算 $0.41304、未精算0）。実測では修正再回答は不要で、動作は模擬通信の回帰テストで確認しました。
+
+## Gemini 4 Neonとの比較（Issue [#67](https://github.com/phni3j9a/kifumate/issues/67)、2026-11-21）
+
+- 2026-11-18公開の **Gemini 4 Neon（`gemini-4-neon`、推論high）** を道具方式の比較に加えました。Terraも現行の指示文（PR #55で更新済み）で測り直し、同じ8条件で比べます。WorkerやコンテナはNeonに対応しておらず、staging・本番も変更していません。
+- Neonの呼び出しにはgenerateContentを使います。履歴は手元で管理し、モデルが返した `content` は思考の署名（thought signature）を含めてそのまま再送します。道具はfunctionDeclarationsの `parametersJsonSchema` で渡し、最終回答のターンだけ `functionCallingConfig.mode: NONE` にします。[JSONモードと道具の併用](https://aistudio.google.com/docs/structured-output?generate-content=true#structured-outputs-with-tools)はプレビュー機能ですが、実測でも使えました。
+- 費用は[usageMetadata](https://ai.google.dev/api/generate-content)から出します。入力は本文と道具用プロンプト、出力は候補と思考の合計です。単価は2026-11-21に公式ページで確認しました（100万トークンあたり）。
+  - [Neon](https://ai.google.dev/gemini-api/docs/pricing#gemini-4-neon)：入力$3、キャッシュ読込$0.15、出力$15。キャッシュは暗黙のみで、書込の課金はない
+  - [Terra](https://developers.openai.com/api/docs/pricing)：入力$1、読込$0.05、出力$5、書込$1.25
+- 最初の設定（Terraと同じ調査4200／最終5400トークン）では、Neonが出力枠をほぼ思考だけで使い切りました（4197/4200、5397/5400）。途中で切れた応答を履歴に入れて送った次のターンは、HTTP 400で拒否されています。Neonだけ枠を調査12000／最終16000に広げ、途中で切れた調査ターンは精算したうえで履歴に入れず、直前の完全な履歴から再開するよう直しました。本番Workerの扱いと同じです。旧設定の4件とスモーク1件は参考として残し、比較には使っていません。
+
+### 結果（8条件、Neonは1反復・Terraは2反復）
+
+採点は回答IDだけを見て行い、モデル名との対応は採点後に付けました（伏せ字採点）。基準は#54と同じです。
+
+| 方式 | 誤りのある回答（うち検査通過） | 拒否／未完了 | 手・理由・代案・練習がそろう（該当のみ） | 秒 中央値／最大 | 45秒超 | 道具 平均／最大 | USD/試行 | 100試行USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Neon v2 | 2/8（2） | 0／0 | 5/5 | 103.3／140.9 | 8/8 | 18.4／30 | 0.2236 | 22.36 |
+| Terra（現行の指示文） | 0/16（0） | 0／0 | 10/10 | 29.8／62.9 | 6/16 | 15.6／30 | 0.0255 | 2.55 |
+| 参考：Terra（#54・旧指示文） | 0/16（0） | 0／0 | 10/16 | 42.9／62.1 | — | 19.9／30 | 0.0311 | 3.11 |
+
+- Neonの誤りは2件で、どちらも既存の検査を通過しました。
+  - `game1-sente`：57手目の変化で、4八に移った金が3七の桂を支えているのに「桂の支えも外れる」と説明した。
+  - `game2-gote`：40手目の飛車の逃げ先と78手目の大駒交換を、ほかに手がないかのように断定した。実際には△4一飛や△6二銀といった別の手があり、▲7二金打には△同角の応手を見落としている。
+- 「そろう」の分母は実戦の代案がある回答だけです。詰み・宣言の条件では代案が非該当です。
+- 同じ1反復目どうしで比べても、Terraは0/8件、中央値32.0秒、$0.0256/試行でした。Neonは費用が約8.7倍、時間が約3.2倍かかり、精度でも上回りませんでした。
+- トークンの合計（入力／キャッシュ読込／出力、出力のうち思考）：Neon 8件が586,953／358,046／69,916（49,569）、Terra 16件が913,312／765,372／37,036（13,521）。
+- 1ドル150円とすると、月100試行のAPI費用はNeonで約3,350円、Terraで約380円です。月780円の想定では、Neonは採算が合いません。
+- **結論：Neonは採用せず、本番はTerraのままにします。** Neonの2反復目（見込み$2.33）は予算の都合で実行しておらず、Neonの件数は8件だけです。推論medium・lowは測っていません。Neonを本番の出力枠（`COACH_MAX_TOKENS=5400`、累積24,000）に収めるには、推論レベルを下げるか枠を作り直す必要があります。
+- 現行の指示文での再測定で、Terraは#54のときより速く安くなりました（中央値42.9→29.8秒、$0.0311→$0.0255）。
+
+### 費用・保存先・検証
+
+- 新しい台帳 `.local/coach-neon/budget.jsonl`（上限$5）を全実行で共有しました。精算済みは **$3.446558** です（Terra $0.408290、Neon v2 $1.789168、スモーク $0.175624、旧設定 $1.073476）。旧設定でHTTP 400になった1ターンは、課金されたか分からないため予約 $0.398706 を残しています。これを含めると **$3.845264** で、上限の範囲内です。旧台帳（`.local/coach-tools/`）には書き込んでいません。
+- `.local/coach-neon/` に次のファイルを0600で保存しています。
+  - 生データと集計：`neon-v2.json`／`terra.json`／`neon.json`（旧設定）／`neon-smoke.json`／`summary.json`
+  - 最終本文：`outputs.md`
+  - 採点：伏せ字のまま採点した `blind/manual-review.json` と、モデル名を対応付けた `manual-review.json`
+  - 指示文のSHA-256は`437f66f3…`、ケースのSHA-256は`9a9388ca…`（#54と同じ）
+- 採点は本作業のエージェントによるもので、将棋の有段者による独立採点ではありません。
+- `compare_coach_tools.py --self-test`（Neonの本文・思考署名の保持・functionResponse・強制最終・usage費用・途中で切れたターンの扱い）と `test_compare_coach.py` が通りました。APIキーの値は、追跡対象・出力・ログのどこにも含まれていないことを確認しています。
+
+```sh
+cd server
+container/.venv/bin/python scripts/compare_coach_tools.py --self-test
+# PRICE_DATES の日付と単価を公式で確認・更新してから実行（実費）。出力には新規ファイル名を指定。
+set -a; . ~/.config/kifumate/llm.env; set +a
+container/.venv/bin/python scripts/compare_coach_tools.py neon --output .local/coach-neon/neon-new.json
+container/.venv/bin/python scripts/compare_coach_tools.py terra --output .local/coach-neon/terra-new.json
+unset OPENAI_API_KEY DEEPSEEK_API_KEY GEMINI_API_KEY
+```

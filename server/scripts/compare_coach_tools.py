@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Issue #54 のローカル比較。運用中のWorker・エンジンには接続しない。"""
+"""Issue #54 / #67 のローカル比較。運用中のWorker・エンジンには接続しない。"""
 import argparse
 from contextlib import contextmanager
 from datetime import date
 import fcntl
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -21,16 +22,25 @@ from coach_facts import build_facts
 from coach_tools import call, light_keys
 
 SERVER = Path(__file__).resolve().parents[1]
-LOCAL = SERVER / '.local/coach-tools'
+LOCAL = SERVER / '.local/coach-neon'
 PROMPT = SERVER / 'src/coach-tools-prompt.txt'
-PRICE_DATE = '2026-11-20'
-BUDGET = 3
+PRICE_DATES = {'deepseek': '2026-11-20', 'terra': '2026-11-21', 'neon': '2026-11-21'}
+BUDGET = 5
 LIMIT = 30
 SECONDS = 600
 PROVIDERS = {
     'deepseek': ('https://api.deepseek.com/chat/completions', 'deepseek-flash', 'DEEPSEEK_API_KEY', (.30, .006, 1.20, .30)),
     'terra': ('https://api.openai.com/v1/responses', 'gpt-6.1-terra', 'OPENAI_API_KEY', (1, .05, 5, 1.25)),
+    'neon': ('https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent',
+             'gemini-4-neon', 'GEMINI_API_KEY', (3, .15, 15, 0)),
 }
+FORCE_USD = {'deepseek': .09, 'terra': .15, 'neon': .45}
+EARLY_STOP_USD = {'deepseek': .12, 'terra': .20, 'neon': .60}
+GEMINI_ERROR_TYPES = {'INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'PERMISSION_DENIED', 'NOT_FOUND',
+                      'RESOURCE_EXHAUSTED', 'UNAUTHENTICATED', 'INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED',
+                      'CANCELLED', 'ABORTED', 'UNKNOWN', 'ALREADY_EXISTS', 'OUT_OF_RANGE', 'UNIMPLEMENTED', 'DATA_LOSS'}
+NEON_JSON_MODE = 'application/json'
+OUTPUT_LIMITS = {'deepseek': (6500, 8000), 'terra': (4200, 5400), 'neon': (12000, 16000)}
 
 
 def dumps(x):
@@ -65,12 +75,24 @@ def upper(body, prices):
     incoming = len(dumps(body).encode()) + 4096
     if incoming > 256000:
         raise Halt('context_limit')
-    return (incoming * max(prices[0], prices[3]) + body.get('max_tokens', body.get('max_output_tokens')) * prices[2]) / 1e6
+    outgoing = (body['generationConfig']['maxOutputTokens'] if 'generationConfig' in body
+                else body.get('max_tokens', body.get('max_output_tokens')))
+    return (incoming * max(prices[0], prices[3]) + outgoing * prices[2]) / 1e6
 
 
 def usage_and_cost(data, provider):
-    u = data['usage']
-    if provider == 'terra':
+    if provider == 'neon':
+        u = data['usageMetadata']
+        prompt, tool_prompt = u['promptTokenCount'], u.get('toolUsePromptTokenCount', 0)
+        candidates, reasoning = u.get('candidatesTokenCount', 0), u.get('thoughtsTokenCount', 0)
+        if any(type(n) is not int or n < 0 for n in (prompt, tool_prompt, candidates, reasoning)):
+            raise ValueError('invalid_usage')
+        incoming, outgoing = prompt + tool_prompt, candidates + reasoning
+        if u['totalTokenCount'] != incoming + outgoing:
+            raise ValueError('invalid_usage_total')
+        cached, cached_write = u.get('cachedContentTokenCount', 0), 0
+    elif provider == 'terra':
+        u = data['usage']
         details = u.get('input_tokens_details') or {}
         incoming, outgoing = u['input_tokens'], u['output_tokens']
         cached = details.get('cached_tokens', 0)
@@ -79,6 +101,7 @@ def usage_and_cost(data, provider):
             cached_write = details.get('cache_write_30m_tokens', 0) + details.get('cache_write_12h_tokens', 0)
         reasoning = (u.get('output_tokens_details') or {}).get('reasoning_tokens')
     else:
+        u = data['usage']
         incoming, outgoing = u['prompt_tokens'], u['completion_tokens']
         cached, cached_write = u.get('prompt_cache_hit_tokens', 0), 0
         reasoning = (u.get('completion_tokens_details') or {}).get('reasoning_tokens')
@@ -91,7 +114,19 @@ def usage_and_cost(data, provider):
     return {'input': incoming, 'cacheRead': cached, 'cacheWrite': cached_write, 'output': outgoing, 'reasoning': reasoning}, usd
 
 
+def gemini_user(text):
+    return {'role': 'user', 'parts': [{'text': text}]}
+
+
 def body(provider, history, final, max_tokens):
+    if provider == 'neon':
+        return {'systemInstruction': {'parts': [{'text': history[0]['content']}]},
+                'contents': [gemini_user(history[1]['content']), *history[2:]],
+                'generationConfig': {'thinkingConfig': {'thinkingLevel': 'HIGH'}, 'maxOutputTokens': max_tokens,
+                                     'responseMimeType': NEON_JSON_MODE},
+                'tools': [{'functionDeclarations': [{'name': t['name'], 'description': t['description'],
+                                                      'parametersJsonSchema': t['parameters']} for t in TOOLS]}],
+                'toolConfig': {'functionCallingConfig': {'mode': 'NONE' if final else 'AUTO'}}}
     model = PROVIDERS[provider][1]
     tools = [{'type': 'function', **tool, 'strict': False} for tool in TOOLS]
     choice = 'none' if final else 'auto'
@@ -105,6 +140,21 @@ def body(provider, history, final, max_tokens):
 
 
 def unpack(provider, data, history):
+    if provider == 'neon':
+        candidates = data.get('candidates') or []
+        if not candidates:
+            return [], None, (data.get('promptFeedback') or {}).get('blockReason', 'NO_CANDIDATE')
+        candidate = candidates[0]
+        content = candidate.get('content') or {}
+        parts = content.get('parts') or []
+        finish = candidate.get('finishReason', 'FINISH_REASON_UNSPECIFIED')
+        text = ''.join(p['text'] for p in parts if 'text' in p and not p.get('thought'))
+        # MAX_TOKENS の直後に INVALID_ARGUMENT が出たため、不完全な出力は再送しない。
+        if finish != 'STOP' or not parts:
+            return [], text, finish
+        history.append(content)
+        calls = [(t.get('id'), t['name'], dumps(t.get('args', {}))) for p in parts if (t := p.get('functionCall'))]
+        return calls, text, finish
     if provider == 'deepseek':
         choice = data['choices'][0]
         m = choice['message']
@@ -116,15 +166,21 @@ def unpack(provider, data, history):
     return [(t['call_id'], t['name'], t['arguments']) for t in items if t['type'] == 'function_call'], text, data['status']
 
 
-def tool_message(provider, ident, result):
+def tool_message(provider, ident, name, result):
+    if provider == 'neon':
+        response = {'name': name, 'response': json.loads(result)}
+        if ident is not None:
+            response['id'] = ident
+        return {'functionResponse': response}
     if provider == 'deepseek':
         return {'role': 'tool', 'tool_call_id': ident, 'content': result}
     return {'type': 'function_call_output', 'call_id': ident, 'output': result}
 
 
 def http(provider, key, request_body, timeout):
+    auth = {'x-goog-api-key': key} if provider == 'neon' else {'Authorization': 'Bearer ' + key}
     request = Request(PROVIDERS[provider][0], method='POST', data=dumps(request_body).encode(),
-                      headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+                      headers={**auth, 'Content-Type': 'application/json'})
     with build_opener(NoRedirect).open(request, timeout=timeout) as response:
         raw = response.read(8 * 1024 * 1024 + 1)
         if len(raw) > 8 * 1024 * 1024:
@@ -180,14 +236,18 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
             if remaining <= 0:
                 raise Halt('deadline')
             final = force or len(record['calls']) >= tool_limit or remaining < 120
-            max_tokens = (6500 if provider == 'deepseek' else 4200) if not final else (8000 if provider == 'deepseek' else 5400)
+            max_tokens = OUTPUT_LIMITS[provider][1 if final else 0]
             request_body = body(provider, history, final, max_tokens)
             if final and not forced_attempt:
-                request_body['messages' if provider == 'deepseek' else 'input'].append({'role': 'user', 'content': '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'})
+                instruction = '道具調査はここまでです。確認できた事実だけで最終のJSON回答を書いてください。'
+                if provider == 'neon':
+                    request_body['contents'].append(gemini_user(instruction))
+                else:
+                    request_body['messages' if provider == 'deepseek' else 'input'].append({'role': 'user', 'content': instruction})
             reserved = upper(request_body, PROVIDERS[provider][3])
             ident = str(uuid.uuid4())
             budget_event(ledger, ident, 'reserved', reserved)
-            turn = {'turn': len(record['turns']) + 1, 'reservedUSD': reserved, 'finalOnly': final}
+            turn = {'turn': len(record['turns']) + 1, 'reservedUSD': reserved, 'finalOnly': final, 'maxOutputTokens': max_tokens}
             record['turns'].append(turn)
             signal.setitimer(signal.ITIMER_REAL, remaining)
             try:
@@ -197,12 +257,12 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
             u, usd = usage_and_cost(data, provider)
             budget_event(ledger, ident, 'settled', usd)
             record['estimatedUSD'] += usd
-            turn.update(usage=u, estimatedUSD=usd, model=data.get('model'))
-            if usd > reserved:
-                raise Halt('reservation_exceeded')
+            turn.update(usage=u, estimatedUSD=usd, model=data.get('modelVersion' if provider == 'neon' else 'model'))
             calls, text, finish = unpack(provider, data, history)
             turn['finish'] = finish
-            if not calls and finish in ('stop', 'completed'):
+            if usd > reserved:
+                raise Halt('reservation_exceeded')
+            if not calls and finish in ('stop', 'completed', 'STOP'):
                 record['text'] = text
                 record['validation'] = draft(text)
                 if record['validation']['accepted']:
@@ -214,11 +274,13 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
                 record['text'] = text
                 raise Halt('final_incomplete')
             if not calls:
-                force = forced_attempt = True
+                force = True
+                forced_attempt = provider != 'neon'
                 continue
+            responses = []
             for ident, name, raw in calls:
                 if len(record['calls']) >= tool_limit or time.monotonic() - start >= deadline - 90:
-                    history.append(tool_message(provider, ident, dumps({'エラー': '調査上限。既に確認した資料のみで回答してください'})))
+                    responses.append(tool_message(provider, ident, name, dumps({'エラー': '調査上限。既に確認した資料のみで回答してください'})))
                     turn['skippedCalls'] = turn.get('skippedCalls', 0) + 1
                     force = True
                     continue
@@ -236,16 +298,21 @@ def answer(case, run, provider, bridge, send, ledger, *, tool_limit=LIMIT, deadl
                 if args is not None and 'エラー' not in json.loads(encoded):
                     evidence.append({'name': name, 'args': args, 'result': result})
                 record['calls'].append({'name': name, 'args': args, 'resultBytes': len(encoded.encode()), 'error': json.loads(encoded).get('エラー')})
-                history.append(tool_message(provider, ident, encoded))
-            if record['estimatedUSD'] > (.15 if provider == 'terra' else .09):
+                responses.append(tool_message(provider, ident, name, encoded))
+            if provider == 'neon':
+                history.append({'role': 'user', 'parts': responses})
+            else:
+                history.extend(responses)
+            if record['estimatedUSD'] > FORCE_USD[provider]:
                 force = True
     except HTTPError as e:
         record['error'] = 'HTTPError'
         record['httpStatus'] = e.code
         try:
             message = json.loads(e.read(65536)).get('error', {})
-            code = message.get('code') or message.get('type')
-            if code in ('model_not_found', 'insufficient_quota', 'invalid_request_error', 'invalid_api_key', 'rate_limit_exceeded'):
+            code = message.get('status') if provider == 'neon' else message.get('code') or message.get('type')
+            if isinstance(code, str) and code in (GEMINI_ERROR_TYPES if provider == 'neon' else
+                                                  {'model_not_found', 'insufficient_quota', 'invalid_request_error', 'invalid_api_key', 'rate_limit_exceeded'}):
                 record['httpErrorType'] = code
         except (ValueError, TypeError, OSError, AttributeError):
             pass
@@ -265,6 +332,7 @@ def main():
     parser.add_argument('--cases', type=Path, default=SERVER / '.local/coach-reasoning/cases.json')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--runs', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--start-run', type=int, choices=(1, 2), default=1, help='反復番号の開始値（2回目のみの別実行用）')
     parser.add_argument('--case', action='append')
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
@@ -272,33 +340,40 @@ def main():
         import unittest
         suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_compare_coach_tools.py')
         raise SystemExit(not unittest.TextTestRunner().run(suite).wasSuccessful())
+    if args.start_run + args.runs > 3:
+        parser.error('--start-run 2 には --runs 1 が必要です')
     if not args.provider or not args.output or not (key := os.environ.get(PROVIDERS[args.provider][2])):
         parser.error('provider、--outputとAPIキー環境変数が必要です')
     if args.output.resolve().parent != LOCAL.resolve() or args.output.name == 'budget.jsonl':
-        parser.error('出力は server/.local/coach-tools/ 内の新規ファイルに限定します')
-    if date.today().isoformat() != PRICE_DATE:
+        parser.error('出力は server/.local/coach-neon/ 内の新規ファイルに限定します')
+    price_date = PRICE_DATES[args.provider]
+    if date.today().isoformat() != price_date:
         parser.error('料金確認日と単価を再確認してください')
     cases = [c for c in json.loads(args.cases.read_text()) if not args.case or c['name'] in args.case]
     if not cases:
         parser.error('対象の比較ケースがありません')
     os.umask(0o077)
     LOCAL.mkdir(parents=True, exist_ok=True)
-    result = {'provider': args.provider, 'model': PROVIDERS[args.provider][1], 'priceDate': PRICE_DATE,
-              'pricesPerMillion': PROVIDERS[args.provider][3], 'records': []}
+    result = {'provider': args.provider, 'model': PROVIDERS[args.provider][1], 'priceDate': price_date,
+              'pricesPerMillion': PROVIDERS[args.provider][3], 'promptSHA256': sha256(PROMPT.read_bytes()).hexdigest(), 'records': []}
+    if args.provider == 'neon':
+        # https://aistudio.google.com/docs/structured-output?generate-content=true#structured-outputs-with-tools
+        result['jsonMode'] = {'responseMimeType': NEON_JSON_MODE, 'withFunctionCalling': 'supported (preview)'}
+        result['outputLimitReason'] = '初回比較のNeonで調査4200中4197、最終5400中5397を思考に使いMAX_TOKENSとなったため。'
     with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as f:
         json.dump(result, f)
     signal.signal(signal.SIGALRM, timed_out)
     with tempfile.TemporaryDirectory() as temp:
         bridge = bridge_program(temp)
-        for run in range(1, args.runs + 1):
+        for run in range(args.start_run, args.start_run + args.runs):
             for case in cases:
                 rec = answer(case, run, args.provider, bridge, lambda b, t: http(args.provider, key, b, t), LOCAL / 'budget.jsonl')
                 result['records'].append(rec)
                 save(args.output, result)
-                print(dumps({k: rec[k] for k in ('case', 'run', 'seconds', 'estimatedUSD', 'error', 'httpStatus') if k in rec}), flush=True)
+                print(dumps({k: rec[k] for k in ('case', 'run', 'seconds', 'estimatedUSD', 'error', 'httpStatus', 'httpErrorType') if k in rec}), flush=True)
                 if rec.get('error') in ('budget', 'reservation_exceeded', 'HTTPError') or rec.get('error') and 'usage' not in (rec['turns'][-1] if rec['turns'] else {}):
                     raise SystemExit('計測を停止しました。台帳の未精算予約を維持します。')
-                if len(result['records']) <= 2 and rec['estimatedUSD'] > (.20 if args.provider == 'terra' else .12):
+                if len(result['records']) <= 2 and rec['estimatedUSD'] > EARLY_STOP_USD[args.provider]:
                     raise SystemExit('初期の回答単価が想定を超えたため計測を停止しました。')
 
 
