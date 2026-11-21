@@ -2,6 +2,23 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
+## #56：本番反映と配布APK 0.1.3（2026-11-21）
+
+- `main` の `659fbe9`（PR #57・#60・#61・#63・#64・#65）を本番に反映。Mainが08:30台 UTCにCloudflare APIで確認したDNSレコードは、WorkerのCustom Domainが管理する読み取り専用のAAAA `100::`（proxied）1件のみ。同ホスト `kifumate-api.quarterlambda.com` はWorkers Domainsで `kifumate-analysis-production`（production）に紐付いており、競合なし。事前のWrangler相当のchangesetでも競合・追加・削除なし。`--secrets-file` なしで通常更新し、既存secretは変更せず、反映後も名前3件を確認。
+- Worker Version `3bb071b9-0a78-4a36-b843-b95c967725c9` が100%。08:41:04 UTCにstd・precise・realtimeの3コンテナがv4にロールアウト完了と確認。5分待ち、端末発行201、OPTIONS 403 `browser_forbidden`・CORS許可ヘッダーなしを確認。
+
+| 本番確認 | 成否・所要時間 | 道具／APIターン | 提供元費用（推計） | 週の枠・金額表示 |
+| --- | --- | ---: | ---: | --- |
+| サンプル棋譜85手・署名付き精密解析 | 成功（147.211秒、2段目41.863秒、深読み8/8、完了時に全86局面と署名） | — | — | — |
+| リアルタイム解析1セッション | 成功（初回3.913秒、同一局面の深さ16→20→21、通常30秒で休止、`hold`で再開後40.113秒も探索継続、停止まで月の枠80.327秒使用） | — | — | — |
+| AIコーチ1件（再試行なし） | 成功（18.911秒、GET待ち込み、深読み参照4件） | 未計測 | $0.0187626（$0.20以内） | 残り100% → 96.24748%、枠の応答に金額なし |
+
+- 費用は週枠の差分からの推計（提供元の確定請求額やCloudflare利用料との突合は未実施）。$0.20は今回の確認目安で、自動遮断ではなく、設定上の理論最大は1件でも超え得ます。
+- 1端末・1時間の確認招待を取り消し、同じ端末が無料に戻ることを確認。招待原文・取消用メタデータ・確認端末トークン・リアルタイム計測用の一時コピーは削除。08:51:59 UTCに3コンテナの全6枠が `inactive`（各 `active=0 / assigned=0`）と確認。
+- 本番dry-run（Dockerビルド込み）、Vitest 225件、型検査、pytest 81件が通過。アプリは `npm run check`（単体234件、禁止名称・型・lint）とWeb E2E 150件が通過。
+- [配布APK 0.1.3](../../app/README.md#androidの配布apkビルド)：`~/kifumate-releases/kifumate-0.1.3-1003-arm64-latest.apk`（42,433,887バイト、`com.quarterlambda.kifumate`、`versionCode=1003`、arm64-v8a専用）。SHA-256 `7f2e59c2aa6c6d9fbb9dca606f9ecc3de10fd182261492cdf374084538fda0a1`。署名検証済み、証明書は0.1.2と同じ（`3960c238…69a9`）。0.1.2は `.sha256` とともに `old-before-deep-reading` に改名して照合済み。
+- Pixel 3では更新前に0.1.1（1001）と既存棋譜1件を確認。`adb install -r` はPlay プロテクトのアプリ送信確認で応答待ちとなり、更新後の版・棋譜保持・「勝負所」の表示は未確認。送信の可否は利用者が判断し、Mainが実機確認を引き継ぎます。アンインストール・データ消去はしていません。
+
 ## #55・#59：本番反映と配布APK 0.1.2（2026-11-20）
 
 - `main` の `9e13b34` を本番に反映し、GPT-6.1 Terraの道具方式と週の費用枠を有効化。DNSは既存Custom Domainのまま（changesetの追加・削除・競合なし）。更新したsecretは `COACH_API_KEY` のみ。`COACH_SIGNING_KEY`・`INVITE_ADMIN_KEY` は維持。
