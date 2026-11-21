@@ -800,14 +800,25 @@ async function run(width: number, height: number) {
   fake.loseCreateResponse = false;
   await tap("依頼を確認");
   await tap("もう一度解析する");
+  fake.next = fake.results.length;
+  fake.deep = { total: 2, done: 1 };
+  await rtMock(
+    "RUN={id:CUR.id,kind:'pre',timer:0,done:N,total:N,deep:{total:2,done:1}}; renderGame()",
+  );
+  await a
+    .getByText("勝負所を深く読んでいます（1/2）", { exact: true })
+    .waitFor();
+  await shot("analysis-deep-running");
+  fake.results = fake.results.map((r) =>
+    r.ply === 30 || r.ply === 31 ? { ...r, deep: { ...r } } : r,
+  );
+  fake.deep = { total: 2, done: 2 };
   fake.complete = true;
   await a
     .getByRole("button", { name: "中止", exact: true })
     .waitFor({ state: "hidden" });
   await a.getByRole("button", { name: "3位", exact: true }).waitFor();
-  await rtMock(
-    "DB.celebrated=false; RUN={id:CUR.id,kind:'pre',timer:0}; finishRun()",
-  );
+  await rtMock("DB.celebrated=false; finishRun()");
   await button("見てみる").waitFor();
   await shot("dialog-first-review");
   await act("dlgok");
@@ -818,6 +829,14 @@ async function run(width: number, height: number) {
   await m.keyboard.press("Home");
   await tap("最初へ");
   await shot("analysis-completed");
+  await rtMock("setPly(30)");
+  await tap("棋譜を開く");
+  await a.getByRole("button", { name: /^30 / }).click();
+  await tap("閉じる");
+  await a.getByText("深く読んだ局面", { exact: true }).waitFor();
+  await shot("analysis-deep-completed");
+  await m.keyboard.press("Home");
+  await tap("最初へ");
   // AIコーチ。非同期の偽APIだけを使い、実モデルへの費用は発生させない。
   const aiMock = (code: string) =>
     m.evaluate((code) => (window as any).__compare(code), code);

@@ -88,7 +88,7 @@ function gameCard(g) {
   } else {
     tags = ['s', 'g'].map((s) => `<i class="t op"><small>${s === 's' ? '☗' : '☖'}</small>${stNames(g.tags[s])[0] || '未分類'}</i>`).join('');
   }
-  const right = run ? `<span class="runpill" data-runpill>${RUN.paused ? '中断中' : '解析中'} ${RUN.done}/${RUN.total}</span>` : wait ? '<span class="runpill wt">解析待ち</span>' : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
+  const right = run ? `<span class="runpill" data-runpill>${runPill(RUN)}</span>` : wait ? '<span class="runpill wt">解析待ち</span>' : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
   return `<div class="gcd" role="button" tabindex="0" data-a="open" data-v="${g.id}">${stamp}<div class="gin"><div class="g1"><b>${own ? esc(oppName(g)) : `${esc(g.sente)} 対 ${esc(g.gote)}`}</b><span class="sd">${g.sample ? 'サンプル' : own ? `あなたは${g.self === 's' ? '☗先手' : '☖後手'}` : '自分以外の対局'}</span></div><div class="tg">${tags}</div><div class="g3"><span>${dshort(g.date)}・${g.plies}手</span>${g.an === 'pre' && !run ? '<span class="pre">精密解析</span>' : ''}</div></div><div class="gx">${right}<button type="button" class="fv" data-a="fav" data-v="${g.id}" aria-pressed="${g.fav}" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button></div></div>`;
 }
 function listHTML(gs, canClear) {
