@@ -47,7 +47,7 @@ export function lineOrigin(id: string, facts: CoachFacts): string | undefined {
 
 function linesFor(facts: CoachFacts | undefined, ids: string[]) {
   return facts?.仮の手順?.filter(line => ids.includes(`${line.手数}:position`) || ids.some(id => {
-    if (!id.startsWith(`${line.手数}:candidate:`)) return false;
+    if (!id.startsWith(`${line.手数}:candidate:`) && !id.startsWith(`${line.手数}:deep:candidate:`)) return false;
     const candidate = facts.参照.find(r => r.id === id)?.[PV];
     // 同じ局面の別候補では足りない。少なくとも指し始めの分岐が同じことを確認する。
     return candidate?.length && line[PV]?.length && candidate[0].表記 === line[PV][0].表記;
@@ -56,8 +56,8 @@ function linesFor(facts: CoachFacts | undefined, ids: string[]) {
 
 function variations(facts: CoachFacts | undefined, ids: string[]) {
   if (!facts) return [];
-  const shown = facts.参照.filter(r => /^(\d+):(?:mate|candidate:\d+)$/.test(r.id) &&
-    (ids.includes(r.id) || ids.includes(`${r.id.split(':')[0]}:position`)));
+  const shown = facts.参照.filter(r => /^(\d+)(?::deep)?:(?:mate|candidate:\d+)$/.test(r.id) &&
+    (ids.includes(r.id) || ids.includes(r.id.replace(/:(?:mate|candidate:\d+)$/, ':position'))));
   return [
     ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
     ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),

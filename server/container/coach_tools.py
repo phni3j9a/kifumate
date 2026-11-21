@@ -9,7 +9,7 @@ import unicodedata
 
 import cshogi as sh
 
-from coach_facts import RANKS, build_facts, evaluation, label, move_fact, piece_name, position_fact
+from coach_facts import RANKS, build_facts, evaluation, label, move_fact, piece_name, position_fact, preferred_result, result_id
 from coach_knowledge import lookup
 
 PIECES = tuple(map(piece_name, sh.PIECE_JAPANESE_SYMBOLS))
@@ -234,17 +234,18 @@ def ref_line(ply, line):
 
 
 def saved(game, b, prev, ply, facts, limit):
-    r = game['results'][ply]
+    r = preferred_result(game['results'][ply])
+    prefix = result_id(r)
     view = game['perspective']
-    sources = [*[(f'{ply}:candidate:{c["rank"]}', c, False) for c in r['candidates'][:limit] if c.get('pv')],
-               *([(f'{ply}:mate', r['mate'], True)] if r.get('mate') else [])]
+    sources = [*[(f'{prefix}:candidate:{c["rank"]}', c, False) for c in r['candidates'][:limit] if c.get('pv')],
+               *([(f'{prefix}:mate', r['mate'], True)] if r.get('mate') else [])]
     refs = []
     for id_, source, proven in sources:
         line, _ = sequence(b.copy(), prev, view, source['pv'][:5])
         refs.append({'id': id_, '手数': ply, '仮の読み筋（実戦とは別）': [{k: v for k, v in f.items() if k != '直後'} for f in line],
                      '取る駒': capture_totals(line), '確認済みの詰み': proven,
                      **({'詰まされる側': label(1 - b.turn, view)} if proven else evaluation(source['score'], view))})
-    position = {'id': f'{ply}:position', **evaluation(r['score'], view), '確認済みの詰み': bool(r.get('mate'))}
+    position = {'id': f'{prefix}:position', **evaluation(r['score'], view), '確認済みの詰み': bool(r.get('mate'))}
     position.update(next((p for p in facts['参照'] if p['id'] == position['id']), {}))
     position.pop('局面', None)
     return {**position, '指した直前の手の印': facts['実戦手'][ply - 1][2] if ply else 'なし', '候補と詰み証明': refs}
@@ -268,7 +269,7 @@ def actual_claim(game, claim, facts, search):
     if kind == 'mate':
         return search(b, prev, view)['状態']
     if kind == 'evaluation':
-        return evaluation(game['results'][ply]['score'], view)['優勢な側'] if not branch else '不明'
+        return evaluation(preferred_result(game['results'][ply])['score'], view)['優勢な側'] if not branch else '不明'
     raise ToolError('不明な主張の型です')
 
 
