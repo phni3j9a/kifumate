@@ -6,7 +6,12 @@ import { AnalysisController } from "../src/analysis/controller";
 import { analysisStorage } from "../src/analysis/storage";
 import { database } from "./helpers/database";
 import { migrate, migrations } from "../src/storage/schema";
-import type { Input, Reply, Quota } from "../src/analysis/types";
+import {
+  deepProgress,
+  type Input,
+  type Reply,
+  type Quota,
+} from "../src/analysis/types";
 const quota: Quota = {
   paid: true,
   weekStart: 0,
@@ -160,6 +165,55 @@ test("送信応答喪失→再起動→重複再送→差分を重複排除し�
   );
   assert.deepEqual(reopened.snapshot.records.a?.saved?.moves, input.moves);
   assert.equal(reopened.snapshot.records.a?.attempt, null);
+  sql.close();
+});
+test("勝負所の進捗を保存し、完了時の全件で受信済みの局面も上書きする", async () => {
+  const total = 34;
+  const precise = { ...input, moves: Array(total - 1).fill("7g7f") };
+  const shallow = Array.from({ length: total }, (_, i) => result(i));
+  const progress = { total: 2, done: 1 };
+  const running = {
+    ...reply("running", total),
+    total,
+    deep: progress,
+    results: shallow,
+  };
+  const results = shallow.map((r) =>
+    r.ply === 30 || r.ply === 31
+      ? { ...r, deep: { ...r, score: { kind: "cp" as const, value: 300 } } }
+      : r,
+  );
+  const coachProof = { signature: "deep込み" };
+  const { controller, storage, sql } = await setup({
+    create: async () => running,
+    get: async (_, from) => {
+      assert.equal(from, total);
+      return {
+        ...running,
+        status: "completed",
+        deep: { total: 2, done: 2 },
+        results,
+        coachProof,
+      };
+    },
+  });
+  await controller.start("a", precise);
+  assert.equal(deepProgress(reply()), undefined);
+  assert.equal(
+    deepProgress({ ...running, deep: { total: 0, done: 0 } }),
+    undefined,
+  );
+  assert.equal(deepProgress({ ...running, status: "completed" }), undefined);
+  assert.deepEqual(
+    deepProgress((await storage.load())[0]?.attempt?.job),
+    progress,
+  );
+  assert.deepEqual((await storage.load())[0]?.attempt?.results, shallow);
+  await controller.sync();
+  const saved = (await storage.load())[0];
+  assert.equal(saved?.attempt, null);
+  assert.deepEqual(saved?.saved?.results, results);
+  assert.deepEqual(saved?.saved?.coachProof, coachProof);
   sql.close();
 });
 test("待ち・取り消し・通信断中の中止意思を永続化し再開・失敗は前回の精密結果を残す", async () => {

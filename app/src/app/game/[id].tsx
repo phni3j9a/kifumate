@@ -52,6 +52,8 @@ import {
 } from "../../components/realtime-controls";
 import {
   candidateRows,
+  comparisonPair,
+  preferredResult,
   readingText,
   type CandidateRow,
   analysisInput,
@@ -405,10 +407,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     }
   }
   const point = evaluated[ply];
-  const shown = !branch ? results.find((r) => r.ply === ply) : undefined;
+  const current = !branch ? results.find((r) => r.ply === ply) : undefined;
+  const shown = preferredResult(current);
   const rows = candidateRows(
     position,
-    over ? undefined : shown,
+    over ? undefined : current,
     mainMoves[ply]?.move instanceof Move
       ? (mainMoves[ply]!.move as Move)
       : undefined,
@@ -420,7 +423,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   });
   let branchRow: CandidateRow | undefined;
   if (branch) {
-    const atBase = results.find((r) => r.ply === branch.base);
+    const atBase = preferredResult(results.find((r) => r.ply === branch.base));
     const lines = [
       ...(atBase?.mate ? [{ pv: atBase.mate.pv, score: atBase.score }] : []),
       ...(atBase?.candidates || []),
@@ -461,13 +464,18 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const comparablePly = branch ? branch.base + branch.at : -1;
   const comparable =
     branchRow && analysis?.saved && !analysis.attempt && comparablePly <= total
-      ? results.find((r) => r.ply === comparablePly)
+      ? preferredResult(results.find((r) => r.ply === comparablePly))
       : undefined;
-  const previousResult = results.find((r) => r.ply === ply - 1);
+  const previous = results.find((r) => r.ply === ply - 1);
+  const [previousResult] = comparisonPair(previous, current);
+  const mixedDepth = !!current?.deep !== !!previous?.deep;
   const textBefore = scoreText(previousResult?.score, self),
     textAfter = scoreText(shownScore, self);
   const deltaText =
-    previousResult?.score?.kind === "cp" && shownScore?.kind === "cp"
+    !mixedDepth &&
+    !current?.deep &&
+    previousResult?.score?.kind === "cp" &&
+    shownScore?.kind === "cp"
       ? signed(
           ((cp(shownScore) || 0) - (cp(previousResult.score) || 0)) *
             (self === Color.BLACK ? 1 : -1),
@@ -501,7 +509,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         : "結果は不明";
   const evaluationLabel = over
     ? `${total}手で${resultLabel}`
-    : ply > 0 && shown
+    : ply > 0 && shown && !mixedDepth
       ? textBefore === textAfter && textAfter.endsWith("以上")
         ? textAfter
         : `${textBefore} → ${textAfter}`
@@ -978,6 +986,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                   evalHelp
                 )}
                 <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
+                {current?.deep && (
+                  <Text style={font(700, 10.5, 1, colors.ink2)}>
+                    深く読んだ局面
+                  </Text>
+                )}
                 <Text style={font(700, 10.5, 1, colors.ink2)}>
                   {over
                     ? ""
@@ -1105,7 +1118,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           ) : (
             // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
             [null, ...mainMoves].map((n, i) => {
-              const score = results.find((r) => r.ply === i)?.score;
+              const score = preferredResult(
+                results.find((r) => r.ply === i),
+              )?.score;
               return (
                 <Pressable
                   key={i}

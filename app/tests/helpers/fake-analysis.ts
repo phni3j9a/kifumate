@@ -53,6 +53,7 @@ export async function fakeAnalysis(
     reserved: 0,
     precise: 19,
     status: "running" as Reply["status"],
+    deep: undefined as Reply["deep"],
     next: 1,
     complete: false,
     results: [] as AnalysisResult[],
@@ -261,9 +262,13 @@ export async function fakeAnalysis(
     }
     job.status = state.complete ? "completed" : state.status;
     job.next = state.complete ? job.total : Math.min(job.total, state.next);
+    const precise = job.mode === "precise";
+    job.deep = precise ? state.deep : undefined;
     job.results = state.results.filter(
       (r) =>
-        r.ply >= Number(url.searchParams.get("from") || 0) && r.ply < job!.next,
+        ((state.complete && precise) ||
+          r.ply >= Number(url.searchParams.get("from") || 0)) &&
+        r.ply < job!.next,
     );
     job.quota = quota();
     job.error = state.status === "failed" ? "container_failed" : null;

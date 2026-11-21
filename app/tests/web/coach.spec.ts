@@ -1,7 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { fakeAnalysis } from "../helpers/fake-analysis";
-import { fakeCoach } from "../helpers/fake-coach";
+import { fakeAnalysis, makeResults } from "../helpers/fake-analysis";
+import { coachSections, fakeCoach } from "../helpers/fake-coach";
+import { analysisInput, readingText } from "../../src/analysis/display";
+import { readKif } from "../../src/core/kif";
+
 const button = (p: Page, name: string) =>
   p.getByRole("button", { name, exact: true });
 async function imported(p: Page, precise = true) {
@@ -22,6 +25,63 @@ async function imported(p: Page, precise = true) {
   }
   return { analysis, coach };
 }
+test("AIコーチの深読み参照を評価値、盤面リンク、読み筋の再生に使う", async ({
+  page,
+}) => {
+  const { analysis, coach } = await imported(page, false);
+  const record = readKif(readFileSync("tests/fixtures/standard.kif", "utf8"));
+  const results = makeResults(analysisInput(record, "precise"));
+  const shallow = results[1]!;
+  const candidate = shallow.candidates[1]!;
+  const score = { kind: "cp" as const, value: 420 };
+  const deep = {
+    ...shallow,
+    score,
+    candidates: [{ ...candidate, rank: 1, score }],
+  };
+  results[1] = { ...shallow, deep };
+  analysis.results = results;
+  analysis.complete = true;
+  coach.status = "completed";
+  coach.sections = [
+    {
+      ...coachSections[0]!,
+      references: [
+        {
+          id: "1:deep:candidate:1",
+          ply: 1,
+          score,
+          pv: candidate.pv,
+          provenMate: false,
+        },
+      ],
+    },
+  ];
+  await button(page, "解析する").click();
+  await expect(button(page, "3位")).toBeVisible();
+  await button(page, "AIに聞く").click();
+  await button(page, "解説をつくる").click();
+  const link = button(page, "1手目の局面　評価値 +420");
+  await expect(link).toBeVisible();
+  expect(coach.requests[0]!.analysis.results).toEqual(results);
+  expect(coach.requests[0]!.proof).toMatchObject({
+    signature: "opaque-proof-kept",
+  });
+  record.goto(1);
+  const words = readingText(record.position, candidate.pv);
+  expect(words.length).toBeGreaterThan(0);
+  await expect(
+    page.getByTestId("coach-sheet").getByText(words.join(" "), { exact: true }),
+  ).toBeVisible();
+  await link.click();
+  await expect(
+    page.getByRole("img", { name: "1手目の盤面", exact: true }),
+  ).toBeVisible();
+  await button(page, "この読み筋を試す").click();
+  await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
+  expect(analysis.errors).toEqual([]);
+});
+
 test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と再起動・追加質問・無料/通信なしでも履歴閲覧", async ({
   page,
 }) => {

@@ -132,36 +132,44 @@ function results(saved: any, key: string) {
       object(r) &&
         Number.isInteger(r.ply) &&
         r.ply > last &&
-        r.ply <= saved.moves.length &&
-        Array.isArray(r.candidates) &&
-        r.candidates.length <= 3,
+        r.ply <= saved.moves.length,
     );
     last = r.ply;
-    score(r.score);
-    for (const c of r.candidates) {
+    positionResult(r);
+    if (r.deep !== undefined) {
       check(
-        object(c) &&
-          Number.isInteger(c.rank) &&
-          c.rank >= 1 &&
-          c.rank <= 3 &&
-          Number.isFinite(c.depth) &&
-          strings(c.pv) &&
-          c.pv.length <= 128 &&
-          (c.move === undefined || str(c.move)),
+        object(r.deep) && r.deep.ply === r.ply && r.deep.deep === undefined,
       );
-      score(c.score);
+      positionResult(r.deep);
     }
-    check(
-      r.mate === null ||
-        (object(r.mate) &&
-          [1, 3].includes(r.mate.plies) &&
-          strings(r.mate.pv) &&
-          Array.isArray(r.mate.branches) &&
-          r.mate.branches.every(
-            (b: any) => object(b) && str(b.reply) && str(b.mate),
-          )),
-    );
   }
+}
+function positionResult(r: Record<string, any>) {
+  check(Array.isArray(r.candidates) && r.candidates.length <= 3);
+  score(r.score);
+  for (const c of r.candidates) {
+    check(
+      object(c) &&
+        Number.isInteger(c.rank) &&
+        c.rank >= 1 &&
+        c.rank <= 3 &&
+        Number.isFinite(c.depth) &&
+        strings(c.pv) &&
+        c.pv.length <= 128 &&
+        (c.move === undefined || str(c.move)),
+    );
+    score(c.score);
+  }
+  check(
+    r.mate === null ||
+      (object(r.mate) &&
+        [1, 3].includes(r.mate.plies) &&
+        strings(r.mate.pv) &&
+        Array.isArray(r.mate.branches) &&
+        r.mate.branches.every(
+          (b: any) => object(b) && str(b.reply) && str(b.mate),
+        )),
+  );
 }
 function validateItem(v: unknown): asserts v is Item {
   check(object(v) && object(v.game));

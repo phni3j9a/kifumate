@@ -13,7 +13,7 @@ export interface Candidate {
   declarationWin?: boolean;
   pv: string[];
 }
-export interface AnalysisResult {
+export interface PositionResult {
   ply: number;
   score: Score | null;
   candidates: Candidate[];
@@ -22,6 +22,9 @@ export interface AnalysisResult {
     pv: string[];
     branches: { reply: string; mate: string }[];
   } | null;
+}
+export interface AnalysisResult extends PositionResult {
+  deep?: PositionResult;
 }
 export interface Quota {
   paid: boolean;
@@ -49,7 +52,12 @@ export interface Job {
   error: string | null;
   results: AnalysisResult[];
   coachProof: unknown;
+  deep?: { total: number; done: number };
 }
+export const deepProgress = (job?: Job | null) =>
+  job?.status === "running" && job.deep && job.deep.total > 0
+    ? job.deep
+    : undefined;
 export interface Reply extends Job {
   quota: Quota;
 }

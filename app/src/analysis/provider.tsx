@@ -136,7 +136,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
         }
         ask({
           title: "はじめての解析ができました",
-          text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。",
+          text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、印のついた手を見てみましょう。",
           ok: "見てみる",
           single: true,
           image: "learn-first",

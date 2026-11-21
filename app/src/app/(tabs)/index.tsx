@@ -54,8 +54,12 @@ import {
 } from "../../components/ui";
 import { dateParts, dateShort } from "../../core/format";
 import { useAnalysis } from "../../analysis/provider";
-import { needsRetryConfirmation, partialSaved } from "../../analysis/types";
-import { cp } from "../../analysis/display";
+import {
+  deepProgress,
+  needsRetryConfirmation,
+  partialSaved,
+} from "../../analysis/types";
+import { cp, preferredResult } from "../../analysis/display";
 import Svg, { Path } from "react-native-svg";
 import {
   listGameSummaries,
@@ -442,6 +446,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
           </EmptyState>
         }
         renderItem={({ item: g, index }) => {
+          const deep = deepProgress(records[g.id]?.attempt?.job);
           const month = monthOf(g);
           const stamp = g.self_side ? stamps[g.result] : null;
           return (
@@ -544,7 +549,9 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                               ? "中断中"
                               : records[g.id]!.attempt!.job?.status === "queued"
                                 ? "解析待ち"
-                                : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
+                                : deep
+                                  ? `深読み中 ${deep.done}/${deep.total}`
+                                  : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
                         </Text>
                       </View>
                     ) : records[g.id]?.saved ? (
@@ -561,7 +568,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                           <Path
                             d={records[g.id]!.saved!.results.reduce(
                               (d, r, i) => {
-                                const v = cp(r.score);
+                                const v = cp(preferredResult(r)?.score);
                                 return v === null
                                   ? d
                                   : `${d}${i ? "L" : "M"}${1 + (60 * i) / Math.max(1, g.plies)} ${14 - (12 * Math.max(-3000, Math.min(3000, v)) * (g.self_side === "white" ? -1 : 1)) / 3000}`;

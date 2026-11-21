@@ -10,6 +10,13 @@ import {
 } from "tsshogi";
 import type { RealtimeInput } from "./realtime-types";
 import type { AnalysisResult, Input, Mode, Score } from "./types";
+export const preferredResult = (r?: AnalysisResult) => r?.deep ?? r;
+
+export const comparisonPair = (prev?: AnalysisResult, curr?: AnalysisResult) =>
+  prev?.deep && curr?.deep
+    ? ([prev.deep, curr.deep] as const)
+    : ([prev, curr] as const);
+
 export const cp = (s?: Score | null): number | null =>
   !s ? null : s.kind === "cp" ? s.value : s.winner === "gote" ? -3000 : 3000;
 export const winRate = (value: number) => 100 / (1 + Math.exp(-value / 600));
@@ -77,15 +84,16 @@ export function pointsFor(
   let previousChecked = false;
   const good: { i: number; gap: number; color: Color }[] = [];
   for (let i = 0; i <= moves.length; i++) {
-    const r = by.get(i),
-      prev = by.get(i - 1),
-      before = cp(prev?.score),
+    const current = by.get(i);
+    const shown = preferredResult(current);
+    const [prev, r] = comparisonPair(by.get(i - 1), current);
+    const before = cp(prev?.score),
       after = cp(r?.score);
     const mover = i ? moves[i - 1]!.color : pos.color;
     const point: Point = {
-      value: after,
-      mate: !!r?.mate,
-      self: (r?.mate ? pos.color : mover) === self,
+      value: cp(shown?.score),
+      mate: !!shown?.mate,
+      self: (shown?.mate ? pos.color : mover) === self,
     };
     if (i > 30 && prev && r && before !== null && after !== null) {
       const sign = mover === Color.BLACK ? 1 : -1;
@@ -179,11 +187,12 @@ export interface CandidateRow {
 }
 export function candidateRows(
   position: ImmutablePosition,
-  result: AnalysisResult | undefined,
+  analysis: AnalysisResult | undefined,
   next: Move | undefined,
   self: Color,
   own: boolean,
 ): CandidateRow[] {
+  const result = preferredResult(analysis);
   if (!result) return [];
   const candidates = result.candidates.map((c) => ({
     ...c,
