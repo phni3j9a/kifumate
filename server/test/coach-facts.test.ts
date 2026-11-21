@@ -142,6 +142,15 @@ describe('出力の手数・KIF照合', () => {
     expect(JSON.parse(messages(parseCoach({requestId: crypto.randomUUID(), analysis, perspective: 'sente',
       profile: {practice: [], goal: ''}, style: {focus: '総合', detail: 'ふつう'}, history: []}), proofRefs, internal)[1].content).facts).not.toHaveProperty('詰みの別応手');
   });
+  it('一覧の深読み形勢を1段目の局面参照の根拠にしない', () => {
+    const internal: CoachFacts = {...sample, 実戦手: [rows[0], [2, '△3四歩(33)', '悪手', '有利', '前進', '境界値', '深読み']]};
+    const deep = '2:deep:position';
+    const signed = references([...results.slice(0, 2), {...results[2], deep: results[2]}]);
+    const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
+    expect(() => validateOutput(output(deep, 'あなたが有利です。'), signed, internal)).not.toThrow();
+    expect(() => validateOutput(output('2:position', 'あなたが有利です。'), signed, internal)).toThrow('invalid_output');
+    expect(() => validateOutput(output('2:position', '相手は歩を進めました。'), signed, internal)).not.toThrow();
+  });
   it('一覧のみの局面は参照・意味照合できるが、未提示の候補は参照できない', () => {
     const output = (id: string, text: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
     expect(() => validateOutput(output('2:position', '2手目 △3四歩。相手は歩を進めました。相手が有利です。'), all, sample)).not.toThrow();

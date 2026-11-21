@@ -55,10 +55,10 @@ def test_handicap_white_turn_and_branch_same_square():
     ('observer', '後手が有利', '後手'),
 ])
 def test_perspective_mark_and_no_raw_notation(perspective, state, side):
-    facts = build_facts(data(['7g7f'], perspective))
+    facts = build_facts({**data(['7g7f'], perspective), 'question': '1手目'})
     assert facts['参照'][-1]['形勢'] == state
     assert facts['参照'][-1]['優勢な側'] == side
-    assert facts['実戦手'][0] == [1, '▲7六歩(77)', '悪手', state.removeprefix('あなたから見て'), '前進']
+    assert facts['実戦手'][0] == [1, '▲7六歩(77)', '判定なし', state.removeprefix('あなたから見て'), '前進']
     key = facts['要所'][0]
     assert key['手数'] == 1 and key['指した後'] == state
     start = facts['参照'][0]['局面']
@@ -115,18 +115,61 @@ KINGS = '4k4/9/9/9/9/9/9/9/4K4 b - 1'
 
 
 def test_picks_both_sides_by_loss_and_includes_asked_ply():
-    d = data(CYCLE * 4, initial=KINGS)
-    v = 2000
+    d = data(CYCLE * 12, initial=KINGS)
     for n, r in enumerate(d['results']):
-        if n:
-            v += (1 if n % 2 == 0 else -1) * (230 + n * 10)
-        r['score']['value'] = v
+        r['score']['value'] = 0 if n % 2 == 0 else -(400 + n * 10)
     d['question'] = '１ 手目と2手目、それから99手目について'
-    assert [k['手数'] for k in build_facts(d)['要所']] == [1, 2, 15, 13, 11, 9, 7, 16, 14]
+    assert [k['手数'] for k in build_facts(d)['要所']] == [1, 2, 47, 45, 43, 41, 39, 48, 46]
     d.update(perspective='gote', question='')
-    assert [k['手数'] for k in build_facts(d)['要所']] == [16, 14, 12, 10, 8, 15, 13]
+    assert [k['手数'] for k in build_facts(d)['要所']] == [48, 46, 44, 42, 40, 47, 45]
     d['perspective'] = 'observer'
-    assert [k['手数'] for k in build_facts(d)['要所']] == [16, 15, 14, 13, 12, 11]
+    assert [k['手数'] for k in build_facts(d)['要所']] == [47, 48, 45, 46, 44, 43]
+
+
+def test_marks_use_win_rate_non_best_and_only_matching_depths():
+    from coach_tools import call
+
+    d = data(CYCLE * 9, initial=KINGS, perspective='observer')
+    d['question'] = '30手目と31手目と32手目と33手目と34手目と35手目と36手目'
+    rows = d['results']
+    for ply, cp in enumerate((0, 0, -100, 0, 300, -600, -600, -2000, -2600), 28):
+        rows[ply]['score']['value'] = cp
+    def candidate(move):
+        return {'move': move, 'pv': [move], 'rank': 1, 'score': None}
+    rows[30]['candidates'] = [candidate('4i4h')]
+    rows[32]['candidates'] = [candidate('5i4i')]
+    # 31手目だけ両側が深読み。両隣の印は第1段から計算する。
+    for ply, cp, move in [(30, 0, '4i3i'), (31, -600, '4a4b')]:
+        rows[ply]['deep'] = {**rows[ply], 'score': {'kind': 'cp', 'value': cp}, 'candidates': [candidate(move)]}
+    facts = build_facts(d)
+    assert [r[2] for r in facts['実戦手'][29:36]] == ['判定なし', '悪手', '疑問手', '判定なし', '判定なし', '悪手', '判定なし']
+    keys = {k['手数']: k for k in facts['要所']}
+    assert keys[31]['推奨手の参照'] == '30:deep:candidate:1'
+    assert keys[31]['指した後の参照'] == '31:deep:position'
+    assert keys[32]['指す前の参照'] == '31:position'
+    saved = call(d, 'saved_analysis', {'position': {'ply': 30}})
+    assert saved['id'] == '30:deep:position'
+    assert saved['候補と詰み証明'][0]['id'] == keys[31]['推奨手の参照']
+    assert saved['候補と詰み証明'][0]['仮の読み筋（実戦とは別）'][0]['表記'] == '▲3九玉(49)'
+    for ply in (30, 31):
+        del rows[ply]['deep']
+    assert build_facts(d)['実戦手'][30][2] == '判定なし'
+
+
+def test_played_shows_evaluation_and_bound_from_the_stage_used_for_its_mark():
+    d = data(CYCLE * 8, initial=KINGS, perspective='observer')
+    rows = d['results']
+    for ply in (30, 31, 32):
+        rows[ply]['score']['value'] = 0
+    rows[31]['score']['bound'] = 'lowerbound'
+    rows[30]['deep'] = {**rows[30]}
+    rows[31]['deep'] = {**rows[31], 'score': {'kind': 'cp', 'value': -600}}
+    rows[32]['score']['bound'] = 'upperbound'
+    played = build_facts(d)['実戦手']
+    assert played[30] == [31, '▲5九玉(49)', '悪手', '後手が有利', '横移動', '深読み']
+    assert played[31] == [32, '△5一玉(41)', '判定なし', '互角', '横移動', '境界値']
+    rows[31]['deep']['score']['bound'] = 'upperbound'
+    assert build_facts(d)['実戦手'][30][5:] == ['境界値', '深読み']
 
 
 def test_turning_point_and_question_do_not_duplicate_keypoint():

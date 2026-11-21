@@ -27,6 +27,7 @@ MAX_MATE_SECONDS = 0.75
 TOOL_SCHEMAS = {tool['name']: tool['parameters'] for tool in json.loads(Path(__file__).with_name('coach_tools_schema.json').read_text())}
 tool_slots = threading.BoundedSemaphore(2)
 MODES = {"std": (250, 1, 1), "precise": (1000, 2, 3)}
+DEEP_SEARCH_MS = 5000
 MAX_REALTIME_SEARCH_MS = 60_000
 MOVE = re.compile(r"(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])\Z")
 
@@ -122,7 +123,7 @@ def coach_facts(game, *, include_mate_replies=False):
     if not isinstance(results, list) or len(results) != len(game['moves']) + 1:
         raise InvalidInput()
     # 読み筋も、生の文字列をcshogiに渡す前に形式を確かめる。提示する部分の合法性はbuild_facts/道具側で検査する。
-    for ply, row in enumerate(results):
+    def validate_row(row, ply):
         if not isinstance(row, dict) or type(row.get('ply')) is not int or row['ply'] != ply:
             raise InvalidInput()
         candidates, mate = row['candidates'], row.get('mate')
@@ -140,6 +141,10 @@ def coach_facts(game, *, include_mate_replies=False):
                 for b in branches
             ):
                 raise InvalidInput()
+    for ply, row in enumerate(results):
+        validate_row(row, ply)
+        if 'deep' in row:
+            validate_row(row['deep'], ply)
     return build_facts(game, include_mate_replies=include_mate_replies)
 
 
@@ -371,7 +376,7 @@ class Engine:
             if len(lines) > 10000 or time.monotonic() >= deadline:
                 raise RuntimeError("analysis_timeout")
 
-    def analyze(self, data, cancel=None, movetime_ms=None):
+    def analyze(self, data, cancel=None, movetime_ms=None, *, deep=False):
         board, initial, moves, mode, ply, repetition = prepare(data, realtime=cancel is not None or movetime_ms is not None)
         if repetition:
             if cancel is not None and cancel.is_set():
@@ -381,7 +386,9 @@ class Engine:
                 result['terminal'] = True
             return result
         ms, threads, multipv = MODES[mode]
-        if movetime_ms is not None:
+        if deep:
+            ms = DEEP_SEARCH_MS
+        elif movetime_ms is not None:
             ms = movetime_ms
         if self.mode != mode:
             self.send(f"setoption name Threads value {threads}")
@@ -493,9 +500,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global engine
+        deep = self.path == '/analyze/deep'
         deepening = self.path == '/realtime/deepen'
         realtime = deepening or self.path == '/realtime'
-        if not realtime and self.path not in ("/analyze", "/coach-facts", "/coach-tools"):
+        if not (realtime or deep) and self.path not in ("/analyze", "/coach-facts", "/coach-tools"):
             return self.respond(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -535,6 +543,8 @@ class Handler(BaseHTTPRequestHandler):
                 if data['mode'] != 'std' or data['ply'] != len(data['moves']):
                     raise InvalidInput()
             prepare(data)
+            if deep and data['mode'] != 'precise':
+                raise InvalidInput()
             if realtime:
                 cancel = replace_search(session, sequence, round_number)
             with lock:
@@ -543,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise Superseded()
                     if engine is None:
                         engine = Engine()
-                    result = engine.analyze(data, cancel, movetime_ms)
+                    result = engine.analyze(data, deep=True) if deep else engine.analyze(data, cancel, movetime_ms)
                 except Superseded:
                     raise
                 except Exception:

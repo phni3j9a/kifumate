@@ -3,6 +3,8 @@ import { SELF, runInDurableObject } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import { parseInput, sha256, weekStart, RETENTION_MS } from '../src/model';
 import { Device } from '../src/index';
+import { deepPositions } from '../src/deep';
+import { verifyAnalysis } from '../src/coach';
 
 const devices = (env as unknown as {DEVICES: DurableObjectNamespace<Device>}).DEVICES;
 const base = {initial: 'startpos', moves: ['7g7f'], mode: 'std'};
@@ -241,4 +243,141 @@ it('分岐APIでも認証を通し、所有者・権利の内部ヘッダーを�
   expect(result.hash).toBe(hash); expect(result.devEntitlement).toBe('0'); expect(result.config).toBe(null);
   expect(result.body).toBe(body);
   for (const value of [...Object.values(secrets), token]) expect(JSON.stringify([result.headers, result.body])).not.toContain(value);
+});
+
+describe('精密の2段目', () => {
+  const input = {...base, moves: Array(39).fill('7g7f'), mode: 'precise' as const};
+  const score = (value: number) => ({kind: 'cp' as const, value});
+  const result = (ply: number, deep = false) => ({ply, score: score(deep ? 100 : ply % 2 ? -900 : 0), candidates: [], mate: null});
+  async function engine(stub: any, deep: (ply: number) => Response | Promise<Response>) {
+    return runInDurableObject(stub, (instance: any) => {
+      instance.env.COACH_SIGNING_KEY = 'deep-device-test-key';
+      instance.env.PRECISE = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
+        const payload = JSON.parse(init.body as string);
+        expect(payload).toEqual({...input, ply: payload.ply});
+        if (url.endsWith('/analyze/deep')) return deep(payload.ply);
+        expect(url).toBe('http://container/analyze');
+        return Response.json(result(payload.ply));
+      }})};
+    });
+  }
+  async function start(deep: (ply: number) => Response | Promise<Response>) {
+    const stub = await setup(true);
+    await engine(stub, deep);
+    const {data} = await request(stub, '/v1/jobs', 'POST', input);
+    // 先頭38局面を保存済みにして、1段目の最後の2局面から再開する。
+    await runInDurableObject(stub, (instance: any, state) => {
+      state.storage.sql.exec("UPDATE jobs SET status='running',cursor=38 WHERE id=?", data.id);
+      for (let i = 0; i < 38; i++) state.storage.sql.exec('INSERT INTO results VALUES (?,?,?)', data.id, i, JSON.stringify(result(i)));
+      return (async () => { await instance.alarm(); await instance.alarm(); })();
+    });
+    const path = `/v1/jobs/${data.id}`;
+    const stage = (await request(stub, path + '?from=39')).data;
+    expect(stage).toMatchObject({status: 'running', next: 40, deep: {total: 4, done: 0}, coachProof: null,
+      results: [result(39)], quota: {reserved: {total: 1, precise: 1}, completed: {total: 0, precise: 0}}});
+    return {stub, path};
+  }
+  it('対象の前後を組で選ぶ。序盤・同点・重複・欠損・詰み確定・後手始まりを処理する', () => {
+    const rows = Array.from({length: 40}, (_, i) => result(i));
+    expect(deepPositions('startpos', rows)).toEqual([30, 31, 32, 33]);
+    rows[30].score.value = 9000; // 大差でのcp低下そのものではなく勝率の低下順。
+    rows[31].score.value = 8000;
+    expect(deepPositions('startpos', rows)).toEqual([32, 33, 34, 35]);
+    const mate = {kind: 'mate' as const, winner: 'gote' as const};
+    const exceptional = Array.from({length: 86}, (_, ply) => ({ply, score: null, mate: null})) as Parameters<typeof deepPositions>[1];
+    const set = (i: number, s: Parameters<typeof deepPositions>[1][number]['score'], m: unknown = null) => { exceptional[i] = {ply: i, score: s, mate: m}; };
+    set(29, score(-1000)); set(30, mate, {}); set(31, score(-2000), {}); // 線の両端が詰み確定、除外
+    set(32, score(-1000)); set(33, score(0)); set(34, score(-1000)); // 33/34は重複
+    set(40, score(-1000)); set(41, score(0)); set(42, score(-1000)); // 同点は先の手から
+    set(50, score(-2000)); set(51, score(0)); // 最大の低下
+    set(60, score(-1000)); set(61, score(0)); // 9局面になるため入らない
+    expect(deepPositions('4k4/9/9/9/9/9/9/9/4K4 w - 1', exceptional)).toEqual([32, 33, 34, 40, 41, 42, 50, 51]);
+  });
+  it('着手側の+600→0と0→−600は同じ低下として早い手を選ぶ', () => {
+    const scores = new Map([[30, 600], [31, 0], [32, 0], [33, -600]]);
+    const rows = Array.from({length: 37}, (_, ply) => ({ply, score: scores.has(ply) ? score(scores.get(ply)!) : null, mate: null}));
+    expect(deepPositions('startpos', rows)).toEqual([30, 31]);
+    const mirrored = new Map([[30, -62], [31, -93], [34, 93], [35, 62]]);
+    const rows2 = Array.from({length: 37}, (_, ply) => ({ply, score: mirrored.has(ply) ? score(mirrored.get(ply)!) : null, mate: null}));
+    expect(deepPositions('startpos', rows2)).toEqual([30, 31]);
+  });
+  it('再起動して続きから探索し、完了時は全件を返して深読みを含む署名と1局を確定する', async () => {
+    const called: number[] = [];
+    const {stub, path} = await start(ply => { called.push(ply); return Response.json(result(ply, true)); });
+    await tick(stub);
+    const progress = (await request(stub, path + '?from=40')).data;
+    expect(progress).toMatchObject({status: 'running', next: 40, deep: {total: 4, done: 1}, results: [], coachProof: null});
+    await runInDurableObject(stub, (instance: any, state) => new Device(state, instance.env).alarm());
+    for (let i = 0; i < 5; i++) await tick(stub);
+    expect(called).toEqual([30, 31, 32, 33]);
+    const done = (await request(stub, path + '?from=40')).data;
+    expect(done).toMatchObject({status: 'completed', deep: {total: 4, done: 4}, next: 40,
+      quota: {reserved: {total: 0, precise: 0}, completed: {total: 1, precise: 1}}});
+    expect(done.results).toEqual(Array.from({length: 40}, (_, i) => ({...result(i), ...(called.includes(i) ? {deep: result(i, true)} : {})})));
+    await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), input, done.results, done.coachProof)).resolves.toBeUndefined();
+    await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), input, done.results.map(({deep: _, ...r}: any) => r), done.coachProof)).rejects.toThrow('invalid_proof');
+    await sql(stub, 'UPDATE jobs SET terminal=?', Date.now() - RETENTION_MS);
+    await tick(stub);
+    for (const table of ['jobs', 'results', 'coach_proofs']) expect(await sql(stub, `SELECT * FROM ${table}`)).toEqual([]);
+  });
+  it.each([404, 503])('HTTP %i では深読みを公開せず精密1局で完了する', async (status) => {
+    const called: number[] = [];
+    const {stub, path} = await start(ply => {
+      called.push(ply);
+      return status === 503 && ply === 30 ? Response.json(result(ply, true)) : new Response(null, {status});
+    });
+    for (let i = 0; i < 8; i++) await tick(stub);
+    expect(called).toEqual(status === 404 ? [30] : [30, ...Array(5).fill(31)]);
+    const done = (await request(stub, path + '?from=40')).data;
+    expect(done).toMatchObject({status: 'completed', next: 40, error: null, deep: {total: 4, done: 0},
+      quota: {reserved: {total: 0, precise: 0}, completed: {total: 1, precise: 1}}});
+    expect(done.results).toEqual(Array.from({length: 40}, (_, i) => result(i)));
+    await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), input, done.results, done.coachProof)).resolves.toBeUndefined();
+  });
+  it('512手・長い候補・詰み応手を含む全件を返し、コーチの1 MiB上限は維持する', async () => {
+    const stub = await setup(true);
+    const long = {...input, moves: Array(512).fill('7g7f')};
+    const created = (await request(stub, '/v1/jobs', 'POST', long)).data;
+    const target = Array.from({length: 51}, (_, i) => i + 30);
+    const positions = Array.from({length: 513}, (_, ply) => {
+      const r = {ply, score: {kind: 'cp', value: 100, bound: 'lowerbound'},
+        candidates: [1, 2, 3].map(rank => ({rank, score: {kind: 'cp', value: 100}, move: '7g7f+', depth: 20, pv: Array(128).fill('7g7f+')})),
+        mate: ply % 20 === 0 ? {plies: 3, pv: ['7g7f', '3c3d', '2g2f'], branches: Array(40).fill({reply: '3c3d', mate: '2g2f'})} : null};
+      return target.includes(ply) ? {...r, deep: r} : r;
+    });
+    // 探索結果のサイズだけを検証する人工データ。棋譜の合法性はbridgeのテストで確認する。
+    await runInDurableObject(stub, (instance: any, state) => {
+      instance.env.COACH_SIGNING_KEY = 'deep-device-test-key';
+      state.storage.transactionSync(() => {
+        state.storage.sql.exec("UPDATE jobs SET status='running',cursor=513,deep_targets=?,deep_done=51 WHERE id=?", JSON.stringify(target), created.id);
+        for (const r of positions) state.storage.sql.exec('INSERT INTO results VALUES (?,?,?)', created.id, r.ply, JSON.stringify(r));
+      });
+      return instance.alarm();
+    });
+    const reply = (await request(stub, `/v1/jobs/${created.id}?from=513`)).data;
+    expect(reply).toMatchObject({status: 'completed', next: 513, deep: {total: 51, done: 51}});
+    expect(reply.results).toEqual(positions);
+    expect(new TextEncoder().encode(JSON.stringify(reply)).length).toBeGreaterThan(1_048_576);
+    await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), long, reply.results, reply.coachProof)).resolves.toBeUndefined();
+    const coach = await request(stub, '/v1/coach', 'POST', {analysis: {...long, results: reply.results}, proof: reply.coachProof});
+    expect(coach).toMatchObject({status: 413, data: {error: 'input_too_large'}});
+  });
+  it('深読み中に中止すると遅れて届いた結果を保存せず予約を返す', async () => {
+    let started!: () => void;
+    let release!: () => void;
+    const called = new Promise<void>(resolve => {started = resolve;});
+    const gate = new Promise<void>(resolve => {release = resolve;});
+    const {stub, path} = await start(async ply => { started(); await gate; return Response.json(result(ply, true)); });
+    await runInDurableObject(stub, async (instance: any) => {
+      const running = instance.alarm();
+      await called;
+      const cancelled = await instance.fetch(new Request(`https://device${path}`, {method: 'DELETE', headers: {'X-Dev-Paid': '1'}}));
+      expect((await cancelled.json()).status).toBe('cancelled');
+      release(); await running;
+    });
+    const done = (await request(stub, path)).data;
+    expect(done).toMatchObject({status: 'cancelled', next: 40, deep: {total: 4, done: 0}, coachProof: null,
+      quota: {reserved: {total: 0, precise: 0}, completed: {total: 0, precise: 0}, preciseRemaining: 20}});
+    expect(done.results).toEqual(Array.from({length: 40}, (_, i) => result(i)));
+  });
 });

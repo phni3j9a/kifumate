@@ -330,3 +330,36 @@ def test_coach_facts_http_does_not_start_engine(monkeypatch):
         assert bridge.engine is None
     finally:
         server.shutdown(); server.server_close(); serving.join()
+
+
+def test_deep_http_uses_fixed_precise_settings(monkeypatch):
+    engine = bridge.Engine([sys.executable, str(ROOT / 'tests/fake_engine.py')])
+    monkeypatch.setattr(bridge, 'engine', engine)
+    monkeypatch.setattr(engine, 'send', Mock(wraps=engine.send))
+    server = bridge.ThreadingHTTPServer(('127.0.0.1', 0), bridge.Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+
+    def send(data, path='/analyze/deep'):
+        req = Request(f'http://127.0.0.1:{server.server_port}{path}', json.dumps(data).encode())
+        with urlopen(req, timeout=3) as response:
+            return json.load(response)
+
+    try:
+        for bad in (payload(), payload(mode='precise', movetimeMs=5000), payload(mode='precise', ply=True),
+                    payload(mode='precise', moves=['7g7e'])):
+            with pytest.raises(HTTPError) as error:
+                send(bad)
+            assert error.value.code == 422
+        engine.send.assert_not_called()
+        data = payload(mode='precise', moves=['7g7f'])  # 途中局面でも棋譜全体を検査する。
+        assert send(data) == send(data, '/analyze')
+        assert [c.args[0] for c in engine.send.call_args_list] == [
+            'setoption name Threads value 2', 'setoption name MultiPV value 3', 'isready', 'usinewgame',
+            'position startpos', 'go movetime 5000', 'position startpos', 'go movetime 1000',
+        ]
+    finally:
+        server.shutdown()
+        worker.join(timeout=1)
+        server.server_close()
+        engine.close()
