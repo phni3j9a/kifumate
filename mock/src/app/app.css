@@ -239,6 +239,13 @@ body[data-plan="free"] .vc .aib{background:#fff}
 .vc .try::after{content:"";position:absolute;inset:-5px -4px}
 .vc .try .ic{width:11px;height:11px;fill:currentColor;stroke-width:1.5}
 /* the same card, saying something other than a move: not analysed yet, analysing, branch states */
+.vc .brl.hold{background:var(--mint-soft, #dcfaed)}
+.vc .bc .rtmeta{grid-column:1}
+.vc .bc .pw:has(+ .rtmeta) ~ .w{grid-row:1/4}
+.vc .bc.deep{margin-top:8px;padding-block:6px}
+.vc .bc.deep b.rtmeta{font:900 12.5px/1.4 var(--f-maru)}
+.vc .bc.deep .x{grid-row:1/4}
+.vc .deep:not(.bc){margin-top:8px}
 .vc .bc.say .m{font-size:15.5px;gap:6px}
 .vc .pgs{display:block;height:9px;margin:3px 0 2px;border:1.5px solid var(--ink);border-radius:99px;background:#fff;overflow:hidden}
 .vc .pgs i{display:block;height:100%;background:var(--mint);border-right:1.5px solid var(--ink)}

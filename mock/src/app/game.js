@@ -1,7 +1,7 @@
 /* ---------- game screen: replay, analysis results, trying moves on a branch ---------- */
 let CUR = null, G = null, P = [], N = 0, M = null, SELF = 's', OTHER = 'g', FLIP = false, OWN = true;
 let POS = [], PH = [], MARKS = [], MARKED = new Set();
-const S = { ply: 0, sel: 0, pick: null, targets: [], br: null, lastBr: null, promo: null, rtUntil: 0, rtOn: true, rtWarm: false, kind: 'pre', told: {} };
+const S = { ply: 0, sel: 0, pick: null, targets: [], br: null, lastBr: null, promo: null, rtUntil: 0, rtOn: true, rtWarm: false, rtHold: false, rtPaused: false, rtResult: null, kind: 'pre', told: {} };
 let RUN = null;      /* the analysis in progress: { id, done, total, kind, timer, paused } */
 const QUEUE = [];    /* records waiting for their turn: { id, kind }. One analysis runs at a time. */
 let rtTimer = 0, rtIdle = 0;
@@ -56,11 +56,13 @@ const brNow = () => (S.br ? S.br.line[S.br.at - 1] : null);
 const gameOver = () => !S.br && S.ply >= N;
 /* real-time analysis on a branch: 'free' not in the plan, 'off' switched off by the user, 'offline',
    'limit' this month's minutes are used up, 'on' */
-const rtState = () => (!paid() ? 'free' : !S.rtOn ? 'off' : !DB.online ? 'offline' : DB.usage.rt >= DB.usage.rtMax ? 'limit' : 'on');
-const rtBusy = () => !!S.br && rtState() === 'on' && performance.now() < S.rtUntil;
+const rtState = () => (!paid() ? 'free' : !S.rtOn && !S.rtHold ? 'off' : !DB.online ? 'offline' : DB.usage.rt >= DB.usage.rtMax ? 'limit' : 'on');
+const rtBusy = () => (!!S.br || S.rtHold) && rtState() === 'on' && performance.now() < S.rtUntil;
 /* The evaluation to show for the branch position. Along a saved reading line the saved value is shown
    on every plan (nothing new is analysed); off those lines only real-time analysis can answer. */
-const brShown = () => { const e = brNow(); return e && e.an.known && !rtBusy() ? e.an : null; };
+const brShown = () => { const e = brNow(); return e && !rtBusy() ? S.rtResult || (e.an.known ? e.an : null) : null; };
+const depthText = () => S.rtResult ? `（深さ${S.rtResult.depth}）` : '';
+const searchingText = () => S.rtResult?.depth < 18 && !S.rtPaused && rtState() === 'on' ? '読み進めています' : '';
 const waiting = () => !!CUR && QUEUE.some((q) => q.id === CUR.id);
 const freeLeft = () => Math.max(0, DB.usage.freeMax - DB.usage.free);
 /* paid plan: every analysis counts toward the weekly total, and a precise one toward its own limit as well */
@@ -118,8 +120,54 @@ function enterGame(t) {
   renderGame();
   if (fresh && S.ply > 0 && R.toast.hidden) toast(OWN ? 'あなたの最初の悪手から表示しています' : '最初の悪手から表示しています');
 }
-/* the real-time analysis stops with the branch: switched off, left, or idle for a while */
-function stopRt() { clearTimeout(rtTimer); clearTimeout(rtIdle); S.rtWarm = false; S.rtUntil = 0; }
+function clearRtPosition() {
+  clearTimeout(rtTimer); clearTimeout(rtIdle);
+  S.rtUntil = 0; S.rtPaused = false; S.rtResult = null;
+}
+function stopRt() { clearRtPosition(); S.rtWarm = false; S.rtHold = false; }
+function pauseRt() {
+  clearTimeout(rtTimer); clearTimeout(rtIdle);
+  S.rtUntil = 0; S.rtWarm = false; S.rtPaused = true;
+  renderPly();
+}
+function startRt() {
+  clearRtPosition();
+  if (rtState() !== 'on') return;
+  const wait = S.rtWarm ? 650 : 1100;
+  S.rtUntil = performance.now() + wait;
+  let sample;
+  const deeper = () => {
+    if (rtState() !== 'on') return;
+    S.rtWarm = true; S.rtUntil = 0;
+    sample ??= sampleRtResult();
+    const depth = (S.rtResult?.depth ?? 6) + 2;
+    S.rtResult = { ...sample, cp: sample.cp + (depth - 8) * 5, depth };
+    renderPly();
+    if (depth < 18) rtTimer = setTimeout(deeper, 1000);
+  };
+  rtTimer = setTimeout(deeper, wait);
+  rtIdle = setTimeout(pauseRt, S.rtHold ? 300000 : 30000);
+  if (rtLow() && !S.told.rtlow) {
+    S.told.rtlow = true;
+    toast(`リアルタイム解析は、今月あと${rtLeft()}分使えます`);
+  }
+}
+function sampleRtResult() {
+  const e = brNow(), c = !e && P[S.ply].cands?.[0];
+  if (e?.an.next) return e.an;
+  if (c) return { cp: c.cp ?? 0, mate: c.mate, next: moveOfUsi(c.usi, c.ja), pv: c.pv || [] };
+  // shortcut: 見本にない局面では合法手を1つだけ選ぶ。評価・深さは表示見本で、エンジンは使わない。
+  const v = view(), g = gridOf(v.pos);
+  for (const piece of v.pos.cells) {
+    if (piece.side !== v.turn) continue;
+    const to = legalFrom(g, piece.f, piece.r)[0];
+    if (!to) continue;
+    const usi = toSq(piece.f, piece.r) + toSq(...to) + (mustPromote(piece, to[1]) && !piece.prom ? '+' : '');
+    const m = moveOfUsi(usi);
+    return { cp: 30, mate: null, next: moveOfUsi(usi, jaOf(v.pos, v.turn, m, v.last?.to)), pv: [] };
+  }
+  return { cp: P[S.ply].cp ?? 0, mate: null, next: null, pv: [] };
+}
 function leaveGame() { stopRt(); if (S.br) { S.br = null; clearSel(); } }
 
 /* ---------- game phases (a simple stand-in rule for the mock) ---------- */
@@ -197,6 +245,7 @@ function boardSVG() {
   let arrow = null;
   if (!pk && !S.promo) {
     if (v.br) { const a = brShown(); arrow = a ? a.next : null; }
+    else if (S.rtResult) arrow = S.rtResult.next;
     else if (anMode() === 'done') { const sel = rowsFor(S.ply)[S.sel]; arrow = sel ? sel.c : null; }
   }
   const Z = '一二三四五六七八九';
@@ -374,7 +423,7 @@ function readoutHTML() {
     const n = S.br.at, q = S.br.base + n, a = brShown(), rs = rtState();
     let h = `<span class="bk">分岐 ${n}手目</span>`;
     if (rtBusy()) return h + '<span>解析中…</span>';
-    if (!a) return h + `<span>${rs === 'on' ? '評価値 —' : rs === 'offline' ? '通信できないため、評価値は出ません' : rs === 'limit' ? '今月の分岐中の解析は残り0分' : rs === 'off' ? '分岐中の解析はオフ' : '評価値は出ません'}</span>`;
+    if (!a) return h + `<span>${rs === 'on' ? '評価値 —' : rs === 'offline' ? '通信できないため、評価値は出ません' : rs === 'limit' ? '今月のリアルタイム解析は残り0分' : rs === 'off' ? 'リアルタイム解析はオフ' : '評価値は出ません'}</span>`;
     h += `${EVQ}<b>${fmtVal(a)}</b>`;
     if (q <= N && mode === 'done') h += `<span>本譜の${q}手目は</span><b>${fmtVal(P[q])}</b>`;
     else if (rs !== 'on') h += '<span>保存した読み筋</span>';
@@ -425,16 +474,28 @@ function branchCard() {
   const e = brNow(), rs = rtState(), a = brShown();
   const top = !OWN ? '最善' : e.turn === SELF ? 'おすすめ' : '相手の最善';
   let h = `<div class="tbs"><span class="tbx on">${a && a.next ? top : '分岐'}</span>`;
-  if (rs === 'free') h += '<button type="button" class="tbx lkt" data-a="lockinfo" data-v="rt"><svg class="ic"><use href="#i-lock"/></svg>分岐中の解析</button>';
+  if (rs === 'free') h += '<button type="button" class="tbx lkt" data-a="lockinfo" data-v="rt"><svg class="ic"><use href="#i-lock"/></svg>リアルタイム解析</button>';
   h += aiBtn() + '</div>';
   if (rtBusy()) return h + say(`${S.rtWarm ? '解析中' : '準備中'}<span class="dots"><i></i><i></i><i></i></span>`, S.rtWarm ? 'この局面の評価値と最善手を調べています' : '解析の準備をしています');
-  if (a && a.next) return h + `<div class="bc"><span class="m">${mv(a.next.ja)}</span><span class="pw"><span class="p">${a.pv.map(mv).join(' ') || '　'}</span>${tryBtn('次の手', 'この読み筋を1手進める')}</span>${pie(a)}</div>`;
-  if (a) return h + `<div class="bc say"><span class="m">読み筋はここまで</span><span class="pw"><span class="p">${rs === 'free' ? 'この先は、分岐中の解析で調べられます' : rs === 'on' ? 'モック：この先の解析データはありません' : 'この先は、分岐中の解析で調べられます'}</span></span>${pie(a)}</div>`;
-  if (rs === 'free') return h + say('自由に指して試せます', 'この先の評価値は、分岐中の解析で出ます');
-  if (rs === 'off') return h + say('分岐中の解析はオフ', '駒は自由に動かせます。時間は使いません', '<button type="button" class="bt pri sm x" data-a="rttoggle">オンにする</button>');
-  if (rs === 'offline') return h + say('通信できません', 'つながると、評価値と最善手が出ます');
-  if (rs === 'limit') return h + say('今月の分岐中の解析は残り0分', '月が変わると、また300分使えます');
-  return h + say('解析データなし', 'モック：候補の手順に沿った局面だけ値が出ます');
+  const meta = S.rtResult ? `<span class="p rtmeta">リアルタイム解析${depthText()}${S.rtPaused ? '・休止中' : searchingText() ? '・' + searchingText() : ''}</span>` : '';
+  if (a && a.next) return h + `<div class="bc"><span class="m">${mv(a.next.ja)}</span><span class="pw"><span class="p">${a.pv.map(mv).join(' ') || '　'}</span>${tryBtn('次の手', 'この読み筋を1手進める')}</span>${meta}${pie(a)}</div>`;
+  if (a) return h + `<div class="bc say"><span class="m">読み筋はここまで</span><span class="pw"><span class="p">${rs === 'free' ? 'この先は、リアルタイム解析で調べられます' : rs === 'on' ? 'モック：この先の解析データはありません' : 'この先は、リアルタイム解析で調べられます'}</span></span>${meta}${pie(a)}</div>`;
+  if (rs === 'free') return h + say('自由に指して試せます', 'この先の評価値は、リアルタイム解析で出ます');
+  if (rs === 'off') return h + say('リアルタイム解析はオフ', '駒は自由に動かせます。時間は使いません', '<button type="button" class="bt pri sm x" data-a="rttoggle">オンにする</button>');
+  if (rs === 'offline') return h + say('通信できません', 'つながると、評価値と最善手が出ます', rtRetry());
+  if (rs === 'limit') return h + say('今月のリアルタイム解析は残り0分', '月が変わると、また300分使えます');
+  return h + say(S.rtPaused ? '休止中' : 'リアルタイム解析はオン', '次に指すと、評価値と最善手が出ます');
+}
+const rtRetry = () => '<button type="button" class="bt sm x" data-a="rtretry">もう一度試す</button>';
+function deepCard() {
+  const a = S.rtResult, rs = rtState();
+  if (rs === 'limit') return `<div class="deep">${say('今月のリアルタイム解析は残り0分', '月が変わると、また300分使えます')}</div>`;
+  const title = a ? `深く読んだ結果${depthText()}` : 'リアルタイム解析';
+  const move = a ? `<span class="m">${a.next ? mv(a.next.ja) : '読み筋はここまで'}　${fmtVal(a)}</span>` : '';
+  const dots = '<span class="dots x"><i></i><i></i><i></i></span>';
+  const line = S.rtPaused ? '休止中' : rs === 'offline' ? '通信できません' : rtBusy() ? (S.rtWarm ? '解析中' : '準備中') : [searchingText(), a?.pv.map(mv).join(' ')].filter(Boolean).join('　');
+  const action = S.rtPaused ? '<button type="button" class="bt sm x" data-a="rtretry">再開</button>' : rs === 'offline' ? rtRetry() : rtBusy() ? dots : '';
+  return `<div class="bc deep say"><b class="rtmeta">${title}</b>${move}<span class="p rtmeta">${line}</span>${action}</div>`;
 }
 function candsHTML() {
   const p = S.ply, mode = anMode();
@@ -498,7 +559,7 @@ function renderBoard() {
     el.innerHTML = html || '<i class="t0">なし</i>';
   }
 }
-function renderCands() { R.cands.innerHTML = candsHTML(); renderBoard(); }
+function renderCands() { R.cands.innerHTML = candsHTML() + (S.rtHold ? deepCard() : ''); renderBoard(); }
 function renderBar() {
   const e = brNow(), atEnd = !e && S.ply === N;
   const o = e ? brShown() : atEnd ? null : seen(S.ply) ? P[S.ply] : null;
@@ -541,11 +602,17 @@ function renderNow() {
   R.bfirst.classList.toggle('warn', !!e);
   R.bfirst.setAttribute('aria-label', e ? '本譜に戻る' : '最初へ');
   R.bfirst.innerHTML = `<svg class="ic"><use href="#${e ? 'i-undo' : 'i-first'}"/></svg>`;
-  R.brl1.hidden = R.brl2.hidden = !e;
+  R.brl1.hidden = false; R.brl2.hidden = !e;
+  R.brl1.dataset.a = e ? 'rttoggle' : 'deepread';
+  R.brl1.classList.toggle('hold', S.rtHold);
+  R.brl1.removeAttribute('aria-label');
   if (e) {
     const rs = rtState();
-    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `分岐中の解析 <b>オン</b>${rtLow() ? `・残り${rtLeft()}分` : ''}` : rs === 'off' ? '分岐中の解析 <b>オフ</b>' : rs === 'offline' ? '分岐中の解析 <b>通信なし</b>' : rs === 'limit' ? '分岐中の解析 <b>残り0分</b>' : '分岐中の解析 <svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl1.innerHTML = '<svg class="ic"><use href="#i-bolt"/></svg>' + (rs === 'on' ? `リアルタイム解析 <b>オン</b>${rtLow() ? `・残り${rtLeft()}分` : ''}` : rs === 'off' ? 'リアルタイム解析 <b>オフ</b>' : rs === 'offline' ? 'リアルタイム解析 <b>通信なし</b>' : rs === 'limit' ? 'リアルタイム解析 <b>残り0分</b>' : 'リアルタイム解析 <svg class="ic"><use href="#i-lock"/></svg>');
+    if (S.rtPaused) R.brl1.setAttribute('aria-label', R.brl1.textContent.trim() + '、休止中');
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
+  } else {
+    R.brl1.innerHTML = S.rtHold ? '<b>終了</b>' : '<svg class="ic"><use href="#i-bolt"/></svg><b>深く読む</b>' + (paid() ? '' : '<svg class="ic"><use href="#i-lock"/></svg>');
   }
 }
 function renderPly() {
@@ -566,12 +633,14 @@ function setPly(p) {
   p = Math.max(0, Math.min(N, p));
   if (!S.br && p === S.ply) return;
   const left = S.br;
+  if (left) stopRt();
   S.br = null; S.ply = p; S.sel = 0; CUR.ply = p;
   clearSel();
+  if (S.rtHold) startRt();
   renderPly();
   if (left && left.line.length > 1) {
     S.lastBr = left;
-    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { S.ply = left.base; S.br = left; clearSel(); renderPly(); } } });
+    toast('本譜に戻りました', { label: '分岐に戻る', fn: () => { if (S.lastBr === left && CUR) { stopRt(); S.ply = left.base; S.br = left; clearSel(); startRt(); renderPly(); } } });
   }
 }
 function exitBranch() {
@@ -607,22 +676,16 @@ function commitMove(m) {
   const lines = knownLines(), hit = lines.find((l) => l.usis[0] === m.usi);
   const ja = hit ? hit.jas[0] : jaOf(v.pos, side, m, v.last ? v.last.to : null);
   const first = !S.br;
-  if (first) S.br = { base: S.ply, line: [], at: 0 };
+  if (first) {
+    stopRt();
+    S.br = { base: S.ply, line: [], at: 0 };
+  }
   S.br.line.length = S.br.at;
   S.br.line.push({ mv: moveOfUsi(m.usi, ja), pos: applyMove(v.pos, m, side), turn: flip(side), an: analysisAfter(lines, m.usi) });
   S.br.at++;
-  if (rtState() === 'on') {
-    /* the first move after a pause waits for the analysis to start up; later moves answer quickly */
-    const wait = S.rtWarm ? 650 : 1500;
-    S.rtUntil = performance.now() + wait;
-    clearTimeout(rtTimer); clearTimeout(rtIdle);
-    rtTimer = setTimeout(() => { S.rtWarm = true; if (S.br && topNav() && topNav().t === 'game') renderPly(); }, wait + 20);
-    /* nothing moved for a while: the analysis goes to sleep (the minutes stop), and the next move wakes it */
-    rtIdle = setTimeout(() => { S.rtWarm = false; }, wait + 30000);
-  }
+  startRt();
   renderPly();
-  if (rtState() === 'on' && rtLow() && !S.told.rtlow) { S.told.rtlow = true; toast(`分岐中の解析は、今月あと${rtLeft()}分使えます`); }
-  else if (first && !S.told.br) { S.told.br = true; toast('分岐は保存されません。本譜や戦績は変わりません'); }
+  if (first && !S.told.br) { S.told.br = true; toast('分岐は保存されません。本譜や戦績は変わりません'); }
 }
 function tryMove(pk, f, r) {
   const v = view(), g = gridOf(v.pos), to = toSq(f, r);
@@ -680,14 +743,14 @@ A.step = (v) => {
   if (v === 'prev') b.at--;
   else if (b.at >= b.line.length) return;
   else b.at = v === 'last' ? b.line.length : b.at + 1;
-  clearSel(); S.rtUntil = 0;
+  clearSel(); startRt();
   renderPly();
 };
 A.cand = (v) => { S.sel = +v; clearSel(); renderCands(); };
 A.ply = (v) => setPly(+v);
 A.jump = (v) => { closeSheet(); if (AI.open && AI.full) setAIFull(false); setPly(+v); };
 A.toast = (v) => toast(v);
-A.brat = (v) => { S.br.at = +v; closeSheet(); clearSel(); S.rtUntil = 0; renderPly(); };
+A.brat = (v) => { S.br.at = +v; closeSheet(); clearSel(); startRt(); renderPly(); };
 A.exitbr = () => { closeSheet(); exitBranch(); };
 A.kf = () => { const d = dparts(CUR.date); openSheet(S.br ? '分岐の手順' : `棋譜（${d.m}/${d.d}・${N}手）`, S.br ? branchMovesHTML() : movesHTML(), { id: 'kf' }); markCurrent(); };
 A.kind = (v) => { S.kind = v; renderCands(); };
@@ -695,7 +758,7 @@ A.kind = (v) => { S.kind = v; renderCands(); };
 const LOCKS = () => ({
   cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
   precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
-  rt: ['分岐中の解析は、有料プランで使えます', '分岐で指すたびに、その局面の評価値と最善手が出ます。'],
+  rt: ['リアルタイム解析は、有料プランで使えます', '本譜の「深く読む」や分岐で、その局面の評価値・最善手・読み筋が出ます。'],
 });
 A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
@@ -710,11 +773,24 @@ A.more23 = () => {
 };
 A.rttoggle = () => {
   if (!paid()) { A.lockinfo('rt'); return; }
-  S.rtOn = !S.rtOn; S.rtUntil = 0; S.rtWarm = false;
-  renderPly();
+  S.rtOn = !S.rtOn;
   stopRt();
-  toast(S.rtOn ? '分岐中の解析をオンにしました。次に指した手から評価値が出ます' : '分岐中の解析をオフにしました');
+  renderPly();
+  toast(S.rtOn ? 'リアルタイム解析をオンにしました。次に指した手から評価値が出ます' : 'リアルタイム解析をオフにしました');
 };
+A.deepread = () => {
+  if (!paid()) { A.lockinfo('rt'); return; }
+  if (S.rtHold) stopRt();
+  else { S.rtHold = true; startRt(); }
+  renderPly();
+};
+A.rtretry = () => { startRt(); renderPly(); };
+document.addEventListener('visibilitychange', () => {
+  if (topNav()?.t !== 'game') return;
+  if (document.hidden) stopRt();
+  else if (S.br) startRt();
+  renderPly();
+});
 A.evalhelp = () => {
   const mark = (k, t, d) => `<div class="evm">${onbMark(k)}<div><b>${t}</b><span>${d}</span></div></div>`;
   openSheet('評価値と印の見かた', `<div class="evh"><p>評価値は、解析が出した形勢の点数です。<b>プラスは${YOU()}が有利</b>、マイナスは${OPP()}が有利です。</p><div class="evs"><span><b>±150</b>くらいまで<i>ほぼ互角</i></span><span><b>500</b>前後<i>有利</i></span><span><b>1000</b>以上<i>大きな差</i></span></div><p>上の「${YOU()} ○%」は、評価値から見積もった勝つ見込みです。戦績の勝率とは別のものです。</p></div>${mark('good', '好手', '解析のおすすめと同じ手で、ほかの手より良かった手')}${mark('dub', '疑問手', '評価値を少し下げた手')}${mark('bad', '悪手', '評価値を大きく下げた手')}${mark('mate', '詰みあり', '1手か3手で詰む手があった局面')}<p class="hint">3000を超える大きな差は、「3000以上」と表します。</p>`, { auto: true });

@@ -45,7 +45,11 @@ import { Branch, gameOutcome, legalMoves, readStoredKif } from "../../core/kif";
 import { AnalysisPanel } from "../../components/analysis-panel";
 import { useAnalysis, useRealtime } from "../../analysis/provider";
 import { positionKey } from "../../analysis/realtime-types";
-import { RealtimeToggle } from "../../components/realtime-controls";
+import {
+  DeepReadButton,
+  RealtimeToggle,
+  realtimeInfo,
+} from "../../components/realtime-controls";
 import {
   candidateRows,
   readingText,
@@ -55,6 +59,7 @@ import {
   percent,
   phaseRanges,
   pointsFor,
+  realtimeInput,
   scoreText,
   startPly,
   signed,
@@ -157,55 +162,44 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const analysis = records[id];
   const rt = useRealtime();
   const rtController = rt.controller;
-  const branchInput =
-    record && branch
-      ? {
-          initial: record.initialPosition.sfen,
-          moves: [
-            ...record.moves
-              .filter((n) => n.move instanceof Move)
-              .slice(0, branch.base)
-              .map((n) => (n.move as Move).usi),
-            ...branch.moves.slice(0, branch.at).map((m) => m.usi),
-          ],
-        }
-      : null;
-  const branchKey = branchInput ? positionKey(branchInput) : null;
-  const inputRef = useRef(branchInput);
-  inputRef.current = branchInput;
+  const isBranch = !!branch;
+  const rtInput = record && realtimeInput(record, ply, branch);
+  const rtKey = rtInput ? positionKey(rtInput) : null;
+  const inputRef = useRef(rtInput);
+  inputRef.current = rtInput;
   useFocusEffect(
     useCallback(() => {
       rtController.setVisible(true);
-      if (inputRef.current) rtController.move(inputRef.current);
       return () => rtController.setVisible(false);
     }, [rtController]),
   );
-  const previousBranchKey = useRef<string | null>(null);
   useEffect(() => {
-    if (inputRef.current) rtController.move(inputRef.current);
-    else if (previousBranchKey.current) rtController.leaveBranch();
-    previousBranchKey.current = branchKey;
-  }, [branchKey, rtController]);
+    if (!focused || !inputRef.current) return;
+    if (isBranch) rtController.move(inputRef.current);
+    else rtController.showMain(inputRef.current);
+  }, [focused, isBranch, rtKey, rtController]);
   const lowTold = useRef(false);
   useEffect(() => {
     if (
-      branchKey &&
+      (isBranch || rt.hold) &&
       rt.quota?.low &&
       rt.quota.remainingMs > 0 &&
       !lowTold.current
     ) {
       lowTold.current = true;
       toast(
-        `分岐中の解析は、今月あと${Math.ceil(rt.quota.remainingMs / 60000)}分使えます`,
+        `リアルタイム解析は、今月あと${Math.ceil(rt.quota.remainingMs / 60000)}分使えます`,
       );
     }
-  }, [branchKey, rt.quota]);
-  const rtResult = branchKey === rt.positionKey ? rt.result : null;
+  }, [isBranch, rt.hold, rt.quota]);
+  const rtResult =
+    rtKey === rt.positionKey && isBranch !== rt.hold ? rt.result : null;
   const rtBusy =
-    !!branch &&
+    isBranch &&
     rt.enabled &&
     rt.paid === true &&
-    (branchKey !== rt.positionKey ||
+    (rtKey !== rt.positionKey ||
+      rt.hold ||
       rt.status === "preparing" ||
       rt.status === "analyzing");
   const [candidateState, setCandidateState] = useState({ key: "", index: 0 });
@@ -448,18 +442,18 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
       };
     }
   }
+  const rtRow =
+    rtResult && candidateRows(position, rtResult, undefined, self, own)[0];
+  if (rtRow) rtRow.reading = readingText(position, rtRow.pv);
   if (branch && rtResult) {
-    branchRow = candidateRows(position, rtResult, undefined, self, own)[0];
-    if (branchRow) branchRow.reading = readingText(position, branchRow.pv);
-    else
-      branchRow = {
-        label: "分岐",
-        text: "読み筋はここまで",
-        move: null,
-        pv: [],
-        score: rtResult.score,
-        game: false,
-      };
+    branchRow = rtRow || {
+      label: "分岐",
+      text: "読み筋はここまで",
+      move: null,
+      pv: [],
+      score: rtResult.score,
+      game: false,
+    };
   }
   if (rtBusy) branchRow = undefined;
   const shownScore = branch ? branchRow?.score : shown?.score;
@@ -765,8 +759,16 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             turn={!over && position.color === top}
             bottom={false}
           />
-          {branch && (
+          {branch ? (
             <RealtimeToggle state={rt} toggle={() => rtController.toggle()} />
+          ) : (
+            <DeepReadButton
+              state={rt}
+              start={() =>
+                rtInput && rtController.startReading(rtInput, realtimeInfo)
+              }
+              end={() => void rtController.stop()}
+            />
           )}
         </View>
         <Board
@@ -783,9 +785,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           arrow={
             branch
               ? branchRow?.move
-              : !over && analysis?.saved && !analysis.attempt
-                ? rows[candidate]?.move
-                : null
+              : rtResult
+                ? rtRow && rtRow.move
+                : !over && analysis?.saved && !analysis.attempt
+                  ? rows[candidate]?.move
+                  : null
           }
           mark={!branch ? point?.mark : undefined}
           label={`${branch ? `分岐${at}手目` : plyLabel(ply)}の盤面`}
@@ -895,7 +899,10 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           received={!!shown}
           branch={!!branch}
           branchRow={branchRow}
-          realtime={rt}
+          realtime={branch || rt.hold ? rt : undefined}
+          realtimeResult={rtResult}
+          realtimeRow={rtRow || undefined}
+          resumeRealtime={rtController.resumeReading}
           retryRealtime={rtController.retry}
           toggleRealtime={() => rtController.toggle()}
           rows={rows}
@@ -939,11 +946,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                       : rt.paid === false
                         ? "評価値は出ません"
                         : !rt.enabled
-                          ? "分岐中の解析はオフ"
+                          ? "リアルタイム解析はオフ"
                           : rt.status === "offline"
                             ? "通信できないため、評価値は出ません"
                             : rt.status === "limit"
-                              ? "今月の分岐中の解析は残り0分"
+                              ? "今月のリアルタイム解析は残り0分"
                               : "評価値 —"}
                 </Text>
                 {comparable?.score ? (

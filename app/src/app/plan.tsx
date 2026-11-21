@@ -23,7 +23,7 @@ const rows = [
     "精密解析\n週20局\n候補3手・深い読み\n合計 週100局",
   ],
   ["分岐して手を試す", "✓", "✓"],
-  ["分岐中の解析", "—", "✓"],
+  ["リアルタイム解析", "—", "✓"],
   ["AIコーチ", "—", "解説と質問"],
 ];
 export default function Plan() {
@@ -46,7 +46,7 @@ export default function Plan() {
           <View style={{ flex: 1 }}>
             <Text style={font(900, 18, 1.2)}>{copy.heading}</Text>
             <Text style={[font(500, 11.5, 1.6, colors.ink2), { marginTop: 6 }]}>
-              精密解析、分岐中の解析、AIコーチの解説と質問が使えます。
+              精密解析、リアルタイム解析、AIコーチの解説と質問が使えます。
             </Text>
           </View>
         </Card>
@@ -139,7 +139,7 @@ export default function Plan() {
           ))}
         </View>
         <Hint>
-          分岐中の解析は月300分（解析が動いている間を数えます）、AIコーチには週ごとの利用枠があり、設定で残りを確認できます。残りが少なくなったら、お知らせします。
+          リアルタイム解析は月300分（解析が動いている間を数えます）、AIコーチには週ごとの利用枠があり、設定で残りを確認できます。残りが少なくなったら、お知らせします。
         </Hint>
         <Button
           wide

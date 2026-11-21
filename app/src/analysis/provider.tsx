@@ -60,7 +60,7 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
       if (next === paid) return;
       paid = next;
       void controller.sync();
-      if (!next) void realtime.stop();
+      if (!next) realtime.revokeAccess();
       else realtime.retry();
     });
   }, [client, controller, realtime]);

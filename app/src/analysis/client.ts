@@ -157,6 +157,7 @@ export class AnalysisClient {
       this.request("/v1/realtime", "POST", {
         initial: input.initial,
         moves: input.moves,
+        hold: input.hold,
       }),
     );
   updateRealtime = (
@@ -168,6 +169,7 @@ export class AnalysisClient {
       this.request(`/v1/realtime/${encodeURIComponent(id)}`, "PUT", {
         initial: input.initial,
         moves: input.moves,
+        hold: input.hold,
         sequence,
       }),
     );

@@ -2,7 +2,9 @@ import type { AnalysisResult } from "./types";
 export interface RealtimeInput {
   initial: string;
   moves: string[];
+  hold?: boolean;
 }
+export type RealtimeResult = AnalysisResult & { depth?: number | null };
 export interface RealtimeQuota {
   monthStart: number;
   resetsAt: number;
@@ -17,7 +19,8 @@ export interface RealtimeReply {
   sequence: number;
   status:
     "preparing" | "analyzing" | "ready" | "paused" | "off" | "limit" | "failed";
-  result: AnalysisResult | null;
+  result: RealtimeResult | null;
+  searching: boolean;
   error: string | null;
   idleMs: number;
   quota: RealtimeQuota;
@@ -26,8 +29,10 @@ export type RealtimeStatus = RealtimeReply["status"] | "offline" | "idle";
 export interface RealtimeState {
   paid: boolean | null;
   enabled: boolean;
+  hold: boolean;
   status: RealtimeStatus;
-  result: AnalysisResult | null;
+  result: RealtimeResult | null;
+  searching: boolean;
   positionKey: string | null;
   quota: RealtimeQuota | null;
   error: string | null;

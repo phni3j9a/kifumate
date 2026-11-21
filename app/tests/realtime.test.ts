@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Position, Record as ShogiRecord } from "tsshogi";
+import { Branch } from "../src/core/kif";
 import { AnalysisClient, ApiError } from "../src/analysis/client";
+import { realtimeInput } from "../src/analysis/display";
 import { RealtimeController } from "../src/analysis/realtime-controller";
 import type {
   RealtimeInput,
@@ -15,6 +18,7 @@ const reply = (patch: Partial<RealtimeReply> = {}): RealtimeReply => ({
   sessionId: "session-a",
   sequence: 0,
   status: "ready",
+  searching: false,
   result: {
     ply: 1,
     score: { kind: "cp", value: 25 },
@@ -34,7 +38,7 @@ const reply = (patch: Partial<RealtimeReply> = {}): RealtimeReply => ({
   ...patch,
 });
 const flush = async () => {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
+  for (let i = 0; i < 24; i++) await Promise.resolve();
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -45,7 +49,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function setup() {
+function setup(updateIntervalMs = 0) {
   const calls = {
     posts: [] as RealtimeInput[],
     puts: [] as number[],
@@ -74,7 +78,7 @@ function setup() {
       return reply({ status: "off" });
     },
   };
-  const controller = new RealtimeController(api, 5);
+  const controller = new RealtimeController(api, 5, 10, updateIntervalMs);
   return { api, calls, controller };
 }
 async function enter(c: RealtimeController) {
@@ -82,7 +86,7 @@ async function enter(c: RealtimeController) {
   await flush();
 }
 
-test("認証・トークンを共用し、分岐APIには局面とsequence以外を送らない", async () => {
+test("認証・トークンを共用し、リアルタイムAPIは局面とsequence、指定時だけholdを送る", async () => {
   const bodies: {
     path: string;
     method: string;
@@ -111,14 +115,23 @@ test("認証・トークンを共用し、分岐APIには局面とsequence以外
     name: "送らない",
   } as RealtimeInput);
   await api.updateRealtime("a/b", input(2), 1);
+  await api.startRealtime({ ...input(1), hold: true });
+  await api.updateRealtime("a/b", { ...input(2), hold: true }, 2);
   await api.stopRealtime("a/b");
   assert.deepEqual(
     bodies.map((b) => b.body),
-    [null, input(1), { ...input(2), sequence: 1 }, null],
+    [
+      null,
+      input(1),
+      { ...input(2), sequence: 1 },
+      { ...input(1), hold: true },
+      { ...input(2), sequence: 2, hold: true },
+      null,
+    ],
   );
   assert.equal(bodies[2]!.path, "https://example.test/v1/realtime/a%2Fb");
   assert.ok(bodies.every((b) => b.auth === `Bearer ${"a".repeat(64)}`));
-  assert.equal(bodies[3]!.method, "DELETE");
+  assert.equal(bodies[5]!.method, "DELETE");
 });
 test("準備→解析→結果、readyで短いポーリングを止める", async () => {
   const { controller: c, api, calls } = setup();
@@ -138,31 +151,119 @@ test("準備→解析→結果、readyで短いポーリングを止める", asy
   assert.equal(calls.gets, gets);
   await c.stop();
 });
-test("連続PUTは前のHTTP応答を待たず送り、逆順の結果と古いGETを捨てる", async () => {
-  const { controller: c, api, calls } = setup();
+test("グラフの連続移動は最新局面にまとめ、PUTを重ねず送信間隔を空ける", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const { controller: c, api, calls } = setup(1100);
+  await enter(c);
+  c.startReading(input(1));
+  await flush();
+  const first = deferred<RealtimeReply>();
+  const positions: RealtimeInput[] = [];
+  api.updateRealtime = async (_id, i, seq) => {
+    calls.puts.push(seq);
+    positions.push(i);
+    return seq === 1
+      ? first.promise
+      : reply({ sequence: seq, result: { ...reply().result!, ply: 3 } });
+  };
+  for (let i = 0; i < 70; i++) {
+    c.showMain(input(i % 2 ? 1 : 2));
+    await flush();
+    t.mock.timers.tick(10);
+  }
+  c.showMain(input(3));
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  first.resolve(reply({ sequence: 1, result: { ...reply().result!, ply: 2 } }));
+  await flush();
+  assert.equal(c.snapshot.result, null);
+  t.mock.timers.tick(399);
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.deepEqual(calls.puts, [1, 2]);
+  assert.deepEqual(
+    positions,
+    [2, 3].map((n) => ({ ...input(n), hold: true })),
+  );
+  assert.equal({ ...c.snapshot }.result?.ply, 3);
+  await c.stop();
+});
+test("端末時計を戻してもPUTは単調時計で1100ms後に送る", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let elapsed = 0;
+  let wallTime = 100000;
+  t.mock.method(performance, "now", () => elapsed);
+  t.mock.method(Date, "now", () => wallTime);
+  const { controller: c, calls } = setup(1100);
   await enter(c);
   c.move(input(1));
   await flush();
-  const first = deferred<RealtimeReply>(),
-    second = deferred<RealtimeReply>();
-  api.updateRealtime = async (_id, _i, seq) => {
-    calls.puts.push(seq);
-    return seq === 1 ? first.promise : second.promise;
-  };
   c.move(input(2));
   await flush();
+  assert.deepEqual(calls.puts, [1]);
+  wallTime -= 60000;
   c.move(input(3));
   await flush();
+  elapsed = 1099;
+  t.mock.timers.tick(1099);
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  elapsed = 1100;
+  t.mock.timers.tick(1);
+  await flush();
   assert.deepEqual(calls.puts, [1, 2]);
+  await c.stop();
+});
+test("分岐の次の局面はPUTの間引き待ちでも解析中にする", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const { controller: c, api, calls } = setup(1100);
+  api.updateRealtime = async (_id, i, sequence) => {
+    calls.puts.push(sequence);
+    return reply({ sequence, result: { ...reply().result!, ply: i.moves.length } });
+  };
+  await enter(c);
+  c.move(input(1));
+  await flush();
+  c.move(input(2));
+  await flush();
+  assert.equal(c.snapshot.status, "ready");
+  assert.equal(c.snapshot.result?.ply, 2);
+  c.move(input(3));
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
   assert.equal(c.snapshot.result, null);
-  second.resolve(
-    reply({ sequence: 2, result: { ...reply().result!, ply: 3 } }),
-  );
+  assert.equal(c.snapshot.status, "analyzing");
+  t.mock.timers.tick(1100);
   await flush();
+  assert.deepEqual(calls.puts, [1, 2]);
+  assert.equal(c.snapshot.status, "ready");
   assert.equal({ ...c.snapshot }.result?.ply, 3);
-  first.resolve(reply({ sequence: 1, result: { ...reply().result!, ply: 2 } }));
+  await c.stop();
+});
+test("次の局面が待つ間のPUT 429でも解析をDELETEし、途中局面が残らない", async () => {
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  c.startReading(input(1));
   await flush();
-  assert.equal({ ...c.snapshot }.result?.ply, 3);
+  const update = deferred<RealtimeReply>();
+  api.updateRealtime = async (_id, _i, seq) => {
+    calls.puts.push(seq);
+    return update.promise;
+  };
+  c.showMain(input(2));
+  await flush();
+  c.showMain(input(3));
+  update.reject(new ApiError(429, "rate_limited"));
+  await flush();
+  assert.deepEqual(calls.puts, [1]);
+  assert.deepEqual(calls.stops, ["session-a"]);
+  assert.equal(c.snapshot.status, "failed");
+  assert.equal(c.snapshot.error, "rate_limited");
+  assert.equal(c.snapshot.result, null);
   await c.stop();
 });
 test("初回POST中の連続着手も最新局面へPUTし、旧局面を見せない", async () => {
@@ -421,3 +522,233 @@ for (const scene of ["画面離脱", "バックグラウンド"] as const) {
     await c.stop();
   });
 }
+
+test("readyの結果を残したまま深まりを取得し、searching=falseで定期取得を止める", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  const result = { ...reply().result!, depth: 10 };
+  api.startRealtime = async () => reply({ searching: true, result });
+  api.realtime = async () => {
+    calls.gets++;
+    return reply({
+      searching: calls.gets === 2,
+      result: {
+        ...result,
+        depth: 10 + calls.gets,
+        score: { kind: "cp", value: 30 + calls.gets },
+      },
+    });
+  };
+  c.move(input(1));
+  await flush();
+  assert.equal(c.snapshot.status, "ready");
+  assert.equal(c.snapshot.result?.depth, 10);
+  t.mock.timers.tick(9);
+  await flush();
+  assert.equal(calls.gets, 1);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(c.snapshot.result?.depth, 12);
+  t.mock.timers.tick(10);
+  await flush();
+  assert.equal(c.snapshot.result?.depth, 13);
+  assert.equal(c.snapshot.result?.score?.value, 33);
+  assert.equal(c.snapshot.searching, false);
+  t.mock.timers.tick(100);
+  await flush();
+  assert.equal(calls.gets, 3);
+  await c.stop();
+});
+
+for (const scene of [
+  "終了",
+  "画面離脱",
+  "バックグラウンド",
+  "分岐に入る",
+] as const) {
+  test(`本譜は明示開始のみ。休止から再開し、${scene}で終了する`, async () => {
+    const { controller: c, api, calls } = setup();
+    await enter(c);
+    c.toggle(); // 分岐の設定と「深く読む」は独立。
+    c.showMain(input(0));
+    c.showMain(input(1));
+    await flush();
+    assert.deepEqual(calls.posts, []);
+    c.startReading(input(1));
+    await flush();
+    assert.deepEqual(calls.posts, [{ ...input(1), hold: true }]);
+    const puts: RealtimeInput[] = [];
+    api.updateRealtime = async (_id, i, sequence) => {
+      puts.push(i);
+      return reply({
+        sequence,
+        status: "paused",
+        result: { ...reply().result!, ply: i.moves.length },
+      });
+    };
+    c.showMain(input(2));
+    await flush();
+    assert.equal(c.snapshot.status, "paused");
+    assert.equal(c.snapshot.result?.ply, 2);
+    c.resumeReading();
+    await flush();
+    c.showMain(input(1));
+    await flush();
+    assert.deepEqual(
+      puts,
+      [input(2), input(2), input(1)].map((i) => ({ ...i, hold: true })),
+    );
+    if (scene === "終了") await c.stop();
+    if (scene === "画面離脱") c.setVisible(false);
+    if (scene === "バックグラウンド") c.setForeground(false);
+    if (scene === "分岐に入る") c.move(input(2));
+    await flush();
+    assert.equal(c.snapshot.hold, false);
+    assert.equal(c.snapshot.result, null);
+    assert.deepEqual(calls.stops, ["session-a"]);
+    await enter(c);
+    c.setForeground(true);
+    c.showMain(input(1));
+    await flush();
+    assert.equal(calls.posts.length, 1);
+  });
+}
+
+test("終了のDELETEが通信断で失敗しても、普通の本譜送りで再DELETEする", async () => {
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  c.startReading(input(1));
+  await flush();
+  const stop = deferred<RealtimeReply>();
+  api.stopRealtime = async (id) => {
+    calls.stops.push(id);
+    return calls.stops.length === 1 ? stop.promise : reply({ status: "off" });
+  };
+  const stopping = c.stop();
+  assert.equal(c.snapshot.hold, false);
+  stop.reject(new TypeError("offline"));
+  await stopping;
+  c.showMain(input(2));
+  c.showMain(input(3));
+  await flush();
+  assert.deepEqual(calls.stops, ["session-a", "session-a"]);
+  assert.equal(calls.posts.length, 1);
+  assert.equal(c.snapshot.hold, false);
+});
+
+for (const cancel of [false, true]) {
+  test(`権利確認前の「深く読む」で無料なら${cancel ? "終了後は案内しない" : "有料プランを案内する"}。POSTはしない`, async () => {
+    const { controller: c, api, calls } = setup();
+    const pending = deferred<RealtimeReply>();
+    let offered = 0;
+    api.realtime = async () => pending.promise;
+    c.setVisible(true);
+    c.startReading(input(1), () => offered++);
+    await flush();
+    assert.equal(c.snapshot.hold, true);
+    if (cancel) await c.stop();
+    pending.resolve(reply({ paid: false, sessionId: null, status: "off" }));
+    await flush();
+    assert.equal(c.snapshot.hold, false);
+    if (!cancel) assert.equal(c.snapshot.paid, false);
+    assert.equal(offered, cancel ? 0 : 1);
+    assert.deepEqual(calls.posts, []);
+  });
+}
+
+test("前面復帰の権利確認で無料と分かれば、待機中の深く読むに有料プランを案内する", async () => {
+  const { controller: c, api, calls } = setup();
+  await enter(c);
+  assert.equal(c.snapshot.paid, true);
+  c.setForeground(false);
+  const pending = deferred<RealtimeReply>();
+  api.realtime = async () => pending.promise;
+  c.setForeground(true);
+  let offered = 0;
+  c.startReading(input(1), () => offered++);
+  await flush();
+  assert.equal(c.snapshot.hold, true);
+  pending.resolve(reply({ paid: false, sessionId: null, status: "off" }));
+  await flush();
+  assert.equal(c.snapshot.hold, false);
+  assert.equal(c.snapshot.paid, false);
+  assert.equal(offered, 1);
+  assert.deepEqual(calls.posts, []);
+});
+
+test("本譜・分岐の513手目以降も、途中のSFENと最大512手で同じ局面になる", () => {
+  const record = new ShogiRecord();
+  const cycle = ["5i5h", "5a5b", "5h5i", "5b5a"];
+  for (let i = 0; i < 514; i++) {
+    const move = record.position.createMoveByUSI(cycle[i % 4]!);
+    assert.ok(move && record.append(move));
+  }
+  const assertInput = (
+    input: RealtimeInput,
+    initial: string,
+    target: string,
+  ) => {
+    assert.equal(input.initial, initial);
+    assert.equal(input.moves.length, 512);
+    const replay = Position.newBySFEN(input.initial)!;
+    for (const usi of input.moves) {
+      const move = replay.createMoveByUSI(usi);
+      assert.ok(move && replay.doMove(move));
+    }
+    assert.equal(replay.sfen, target);
+  };
+  assertInput(
+    realtimeInput(record, 512, null),
+    record.initialPosition.sfen,
+    record.moves[512]!.sfen,
+  );
+  assertInput(
+    realtimeInput(record, 513, null),
+    record.moves[1]!.sfen,
+    record.moves[513]!.sfen,
+  );
+  const branch = new Branch(512, Position.newBySFEN(record.moves[512]!.sfen)!);
+  branch.play(branch.position.createMoveByUSI("5i4h")!);
+  assertInput(
+    realtimeInput(record, 512, branch),
+    record.moves[1]!.sfen,
+    branch.position.sfen,
+  );
+  const longBranch = new Branch(0, record.initialPosition);
+  for (let i = 0; i < 513; i++)
+    longBranch.play(longBranch.position.createMoveByUSI(cycle[i % 4]!)!);
+  assertInput(
+    realtimeInput(record, 0, longBranch),
+    longBranch.positions[1]!.sfen,
+    longBranch.position.sfen,
+  );
+});
+
+test("既知の制限：512手より前を切り詰めると同じ盤面でも千日手の履歴が欠ける", () => {
+  const record = new ShogiRecord();
+  const cycle = ["5i5h", "5a5b", "5h5i", "5b5a"];
+  const detour = ["4h3h", "5b4b", "3h4h", "4b5b"];
+  const line = [
+    ...cycle,
+    ...cycle,
+    "5i4h",
+    "5a5b",
+    ...Array.from({ length: 126 }, () => detour).flat(),
+    "4h5i",
+    "5b5a",
+  ];
+  for (const usi of line) {
+    const move = record.position.createMoveByUSI(usi);
+    assert.ok(move && record.append(move));
+  }
+  assert.equal(record.repetition, true);
+  const truncated = realtimeInput(record, line.length, null);
+  const replay = new ShogiRecord(Position.newBySFEN(truncated.initial)!);
+  for (const usi of truncated.moves) {
+    const move = replay.position.createMoveByUSI(usi);
+    assert.ok(move && replay.append(move));
+  }
+  assert.equal(replay.position.sfen, record.position.sfen);
+  assert.equal(replay.repetition, false);
+});

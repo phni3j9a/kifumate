@@ -6,8 +6,8 @@ import { ask, toast } from "./overlay";
 import { colors, font, line, radius } from "./theme";
 export function realtimeInfo() {
   ask({
-    title: "分岐中の解析は、有料プランで使えます",
-    text: "分岐で指すたびに、その局面の評価値と最善手が出ます。",
+    title: "リアルタイム解析は、有料プランで使えます",
+    text: "本譜の「深く読む」や分岐で、その局面の評価値・最善手・読み筋が出ます。",
     ok: "有料プランを見る",
     no: "閉じる",
     onOk: () => router.push("/plan"),
@@ -31,7 +31,7 @@ export function RealtimeToggle({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`分岐中の解析 ${label || "有料プラン"}${state.status === "paused" ? "、休止中" : ""}`}
+      accessibilityLabel={`リアルタイム解析 ${label || "有料プラン"}${state.status === "paused" ? "、休止中" : ""}`}
       hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
       onPress={() => {
         if (state.paid !== true) {
@@ -41,18 +41,44 @@ export function RealtimeToggle({
         toggle();
         toast(
           state.enabled
-            ? "分岐中の解析をオフにしました"
-            : "分岐中の解析をオンにしました。次に指した手から評価値が出ます",
+            ? "リアルタイム解析をオフにしました"
+            : "リアルタイム解析をオンにしました。次に指した手から評価値が出ます",
         );
       }}
       style={s.toggle}
     >
       <Icon name="bolt" size={12} strokeWidth={2.2} />
       <Text style={font(700, 11, 1.2, colors.ink2)}>
-        分岐中の解析{label ? " " : ""}
+        リアルタイム解析{label ? " " : ""}
         <Text style={font(900, 11, 1.2)}>{label}</Text>
       </Text>
       {state.paid !== true && <Icon name="lock" size={11} />}
+    </Pressable>
+  );
+}
+export function DeepReadButton({
+  state,
+  start,
+  end,
+}: {
+  state: RealtimeState;
+  start: () => void;
+  end: () => void;
+}) {
+  const label = state.hold ? "終了" : "深く読む";
+  const locked = !state.hold && state.paid === false;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={locked ? "有料プランの案内を開きます" : undefined}
+      hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+      onPress={state.hold ? end : locked ? realtimeInfo : start}
+      style={[s.toggle, state.hold && { backgroundColor: colors.mintSoft }]}
+    >
+      {!state.hold && <Icon name="bolt" size={12} strokeWidth={2.2} />}
+      <Text style={font(900, 11, 1.2)}>{label}</Text>
+      {locked && <Icon name="lock" size={11} />}
     </Pressable>
   );
 }
