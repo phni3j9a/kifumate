@@ -326,6 +326,34 @@ describe('精密の2段目', () => {
     expect(done.results).toEqual(Array.from({length: 40}, (_, i) => result(i)));
     await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), input, done.results, done.coachProof)).resolves.toBeUndefined();
   });
+  it('512手・長い候補・詰み応手を含む全件を返し、コーチの1 MiB上限は維持する', async () => {
+    const stub = await setup(true);
+    const long = {...input, moves: Array(512).fill('7g7f')};
+    const created = (await request(stub, '/v1/jobs', 'POST', long)).data;
+    const target = Array.from({length: 51}, (_, i) => i + 30);
+    const positions = Array.from({length: 513}, (_, ply) => {
+      const r = {ply, score: {kind: 'cp', value: 100, bound: 'lowerbound'},
+        candidates: [1, 2, 3].map(rank => ({rank, score: {kind: 'cp', value: 100}, move: '7g7f+', depth: 20, pv: Array(128).fill('7g7f+')})),
+        mate: ply % 20 === 0 ? {plies: 3, pv: ['7g7f', '3c3d', '2g2f'], branches: Array(40).fill({reply: '3c3d', mate: '2g2f'})} : null};
+      return target.includes(ply) ? {...r, deep: r} : r;
+    });
+    // 探索結果のサイズだけを検証する人工データ。棋譜の合法性はbridgeのテストで確認する。
+    await runInDurableObject(stub, (instance: any, state) => {
+      instance.env.COACH_SIGNING_KEY = 'deep-device-test-key';
+      state.storage.transactionSync(() => {
+        state.storage.sql.exec("UPDATE jobs SET status='running',cursor=513,deep_targets=?,deep_done=51 WHERE id=?", JSON.stringify(target), created.id);
+        for (const r of positions) state.storage.sql.exec('INSERT INTO results VALUES (?,?,?)', created.id, r.ply, JSON.stringify(r));
+      });
+      return instance.alarm();
+    });
+    const reply = (await request(stub, `/v1/jobs/${created.id}?from=513`)).data;
+    expect(reply).toMatchObject({status: 'completed', next: 513, deep: {total: 51, done: 51}});
+    expect(reply.results).toEqual(positions);
+    expect(new TextEncoder().encode(JSON.stringify(reply)).length).toBeGreaterThan(1_048_576);
+    await expect(verifyAnalysis('deep-device-test-key', stub.id.toString(), long, reply.results, reply.coachProof)).resolves.toBeUndefined();
+    const coach = await request(stub, '/v1/coach', 'POST', {analysis: {...long, results: reply.results}, proof: reply.coachProof});
+    expect(coach).toMatchObject({status: 413, data: {error: 'input_too_large'}});
+  });
   it('深読み中に中止すると遅れて届いた結果を保存せず予約を返す', async () => {
     let started!: () => void;
     let release!: () => void;
