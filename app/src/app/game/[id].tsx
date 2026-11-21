@@ -43,7 +43,11 @@ import {
 import { useGame } from "../../components/use-game";
 import { dateParts, moveText } from "../../core/format";
 import { Branch, gameOutcome, legalMoves, readStoredKif } from "../../core/kif";
-import { AnalysisPanel } from "../../components/analysis-panel";
+import { AnalysisPanel, redoPrecise } from "../../components/analysis-panel";
+import {
+  TurningPointsButton,
+  TurningPointsSheet,
+} from "../../components/turning-points";
 import { useAnalysis, useRealtime } from "../../analysis/provider";
 import { positionKey } from "../../analysis/realtime-types";
 import {
@@ -66,8 +70,13 @@ import {
   scoreText,
   startPly,
   signed,
+  turningPoints,
 } from "../../analysis/display";
-import { needsRetryConfirmation, type Mode } from "../../analysis/types";
+import {
+  needsRetryConfirmation,
+  partialSaved,
+  type Mode,
+} from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
 
 /** 対局者名（.id）。手番の側はミント色になり「手番」と出る */
@@ -138,7 +147,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [promotion, setPromotion] = useState<Move[]>([]),
     [flipped, setFlipped] = useState(false),
     [sheet, setSheet] = useState<
-      "moves" | "menu" | "export" | "evaluation" | null
+      "moves" | "turns" | "menu" | "export" | "evaluation" | null
     >(null),
     [favorite, setFavorite] = useState<number | null>(null);
   const told = useRef(false);
@@ -159,7 +168,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   useFocusEffect(
     useCallback(() => {
       const unwatch = loaded
-        ? watchReview({ id, jump: () => reviewJump.current() })
+        ? watchReview({
+            id,
+            closeSheet: () => setSheet(null),
+            jump: () => reviewJump.current(),
+          })
         : undefined;
       return () => {
         unwatch?.();
@@ -235,6 +248,21 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [record, results, game?.self_side],
   );
   const phases = useMemo(() => (record ? phaseRanges(record) : []), [record]);
+  // 勝負所の一覧は、解析がそろってから出す（解析中は好手の選び直しで行が入れかわる。復元した途中結果は全局の結果ではない）
+  const turnsReady =
+    !!analysis?.saved && !analysis.attempt && !partialSaved(analysis.saved);
+  const turns = useMemo(
+    () =>
+      record && turnsReady
+        ? turningPoints(
+            record,
+            results,
+            evaluated,
+            game?.self_side === "white" ? Color.WHITE : Color.BLACK,
+          )
+        : [],
+    [record, turnsReady, results, evaluated, game?.self_side],
+  );
   if (record && ready && !initialized) {
     setInitialized(true);
     if (analysis?.saved && !analysis.attempt) setPly(startPly(evaluated));
@@ -831,7 +859,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           }
           style={[s.nmr, { height: 21 + u * 0.2, justifyContent: "flex-end" }]}
         >
-          {branch && (
+          {branch ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="本譜に戻る"
@@ -844,6 +872,15 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 本譜（{plyLabel(branch.base)}）に戻る
               </Text>
             </Pressable>
+          ) : (
+            <TurningPointsButton
+              count={turnsReady ? turns.length : null}
+              onPress={() => {
+                clear();
+                hideToast(); // モックの openSheet と同じ。開いた直後の知らせが見出しに重ならないように
+                setSheet("turns");
+              }}
+            />
           )}
           <PlayerName
             name={nameOf(bottom)}
@@ -1008,7 +1045,14 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 )}
                 <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
                 {current?.deep && (
-                  <Text style={font(700, 10.5, 1, colors.ink2)}>
+                  // 幅が足りないときはこの補足から縮め、おすすめの手へのリンクを切らない
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      font(700, 10.5, 1.5, colors.ink2),
+                      { flexShrink: 1 },
+                    ]}
+                  >
                     深く読んだ局面
                   </Text>
                 )}
@@ -1184,6 +1228,42 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             })
           )}
         </Sheet>
+      )}
+      {sheet === "turns" && (
+        <TurningPointsSheet
+          onClose={() => setSheet(null)}
+          state={
+            turnsReady
+              ? "done"
+              : analysis?.attempt
+                ? needsRetryConfirmation(analysis.attempt)
+                  ? "none"
+                  : "running"
+                : analysis?.saved
+                  ? "partial"
+                  : "none"
+          }
+          list={turns}
+          ply={ply}
+          own={own}
+          you={own ? "あなた" : sideOf(self)}
+          opponent={own ? "相手" : "後手"}
+          upgrade={
+            // 権利は照会済みの値で決める（解析回数の取得とは別。回数が未取得でも有料の人に有料プランを案内しない）
+            results.some((r) => r.deep) || rt.paid === null
+              ? null
+              : !rt.paid
+                ? "plan"
+                : analysis?.saved?.mode === "std"
+                  ? "redo"
+                  : null
+          }
+          onRedo={() => redoPrecise(start)}
+          onJump={(to) => {
+            setSheet(null);
+            jumpMain(to);
+          }}
+        />
       )}
       <Sheet
         auto

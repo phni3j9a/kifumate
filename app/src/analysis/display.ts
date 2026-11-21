@@ -147,6 +147,82 @@ export function startPly(points: Point[]) {
   if (i < 0) i = points.findIndex((p, i) => i > 30 && p.mark === "悪手");
   return Math.max(0, i);
 }
+export interface TurningPoint {
+  /** 着手後の手数。行を押すとこの局面へ移る（最初の悪手から開くときと同じ選び方）。 */
+  ply: number;
+  text: string;
+  self: boolean;
+  mark?: Mark;
+  /** 自分の側（観戦では先手）の勝率。着手の前と後。 */
+  before: number;
+  after: number;
+  /** 本譜と違うおすすめの手。 */
+  best?: string;
+  /** 逃した詰みの手数。 */
+  mate?: 1 | 3;
+  /** 着手前後とも深読みがある手だけ。おすすめの手を指したときの評価と、その先の読み筋。 */
+  deep?: { score: string; reading: string[] };
+}
+/** 勝負所の一覧：印の付いた手と、印がなくても着手前後とも深読みのある手。手数順。 */
+export function turningPoints(
+  record: ShogiRecord,
+  results: AnalysisResult[],
+  points: Point[],
+  self: Color,
+): TurningPoint[] {
+  const by = new Map(results.map((r) => [r.ply, r]));
+  const sign = self === Color.BLACK ? 1 : -1;
+  const pos = new Position();
+  pos.resetBySFEN(record.initialPosition.sfen);
+  const out: TurningPoint[] = [];
+  let i = 0;
+  for (const node of record.moves) {
+    if (!(node.move instanceof Move)) continue;
+    const move = node.move;
+    i++;
+    const [prev, curr] = comparisonPair(by.get(i - 1), by.get(i));
+    const deep = !!by.get(i - 1)?.deep && !!by.get(i)?.deep;
+    const before = cp(prev?.score),
+      after = cp(curr?.score);
+    if (
+      (points[i]?.mark || deep) &&
+      prev &&
+      before !== null &&
+      after !== null
+    ) {
+      const mate = prev.mate && prev.mate.pv[0] !== move.usi ? prev.mate : null;
+      const top = prev.candidates[0];
+      const line = mate ?? top;
+      const usi = mate ? mate.pv[0] : top?.move;
+      out.push({
+        ply: i,
+        text: moveText(node.displayText),
+        self: move.color === self,
+        mark: points[i]?.mark,
+        before: percent(sign * before),
+        after: percent(sign * after),
+        // 入玉宣言の候補には指し手がない。本譜の手（宣言しなかった）とは必ず違う
+        best:
+          !mate && top?.declarationWin
+            ? "入玉宣言"
+            : usi && usi !== move.usi
+              ? readingText(pos, [usi])[0]
+              : undefined,
+        mate: mate?.plies,
+        deep: deep
+          ? {
+              score: mate
+                ? `${mate.plies}手詰め`
+                : scoreText(top?.score ?? prev.score, self),
+              reading: line ? readingText(pos, line.pv).slice(1) : [],
+            }
+          : undefined,
+      });
+    }
+    pos.doMove(move);
+  }
+  return out;
+}
 export function phaseRanges(record: ShogiRecord) {
   const moves = record.moves
       .filter((n) => n.move instanceof Move)

@@ -38,6 +38,8 @@ function gameFromData(G, an, fav) {
     tags: { s: t(m.tags.sente), g: t(m.tags.gote) }, an, fav: !!fav, data: G, ai: null, edited: false,
   };
 }
+// shortcut: 見本の深読み済みの局面は、30・31手目と悪手の前後に固定する。実際はサーバーが勝率の下がり幅で選ぶので、選定の確認は製品テストで行う
+function deepOf(G) { return [...new Set([30, 31, ...G.positions.flatMap((p, i) => (p.mark === '悪手' ? [i - 1, i] : []))])]; }
 const I = '居飛車', F = '振り飛車';
 /* the state the mock normally opens in: an app that has been used for a few months */
 function seedData() {
@@ -77,6 +79,7 @@ function seedData() {
     mkGame('2026-08-15', 'kogera', 's', 'w', 84, '投了', [I, '棒銀'], ['舟囲い'], [F, '四間飛車'], ['美濃囲い'], 'std'),
   ];
   GAME1 = DB.games.find((g) => g.data === window.KIFU);
+  GAME1.deep = deepOf(window.KIFU);
 }
 /* a first launch: nothing saved, no names registered, nothing analysed yet */
 function clearData() {

@@ -28,7 +28,7 @@ import { tokenStore } from "./token";
 import { RealtimeController } from "./realtime-controller";
 import { claimFirstReview, firstReviewKey } from "./first-review";
 const RealtimeContext = createContext<RealtimeController | null>(null);
-type Review = { id: string; jump: () => void };
+type Review = { id: string; closeSheet: () => void; jump: () => void };
 const Context = createContext<{
   controller: AnalysisController;
   watchReview: (review: Review) => () => void;
@@ -134,6 +134,8 @@ export function AnalysisProvider({ children }: PropsWithChildren) {
           await db.runAsync("DELETE FROM settings WHERE key=?", firstReviewKey);
           return notice(id, false);
         }
+        // 案内は別ウィンドウに出る。勝負所の一覧などを開いたまま完了を待っていたら、先に閉じる（ほかの確認と同じ）
+        screen.closeSheet();
         ask({
           title: "はじめての解析ができました",
           text: "グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、印のついた手を見てみましょう。",

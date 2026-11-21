@@ -1,5 +1,5 @@
 /* ---------- game screen: replay, analysis results, trying moves on a branch ---------- */
-let CUR = null, G = null, P = [], N = 0, M = null, SELF = 's', OTHER = 'g', FLIP = false, OWN = true;
+let CUR = null, G = null, P = [], N = 0, M = null, SELF = 's', OTHER = 'g', BOT = 's', FLIP = false, OWN = true;
 let POS = [], PH = [], MARKS = [], MARKED = new Set();
 const S = { ply: 0, sel: 0, pick: null, targets: [], br: null, lastBr: null, promo: null, rtUntil: 0, rtOn: true, rtWarm: false, rtHold: false, rtPaused: false, rtResult: null, kind: 'pre', told: {} };
 let RUN = null;      /* the analysis in progress: { id, done, total, kind, timer, paused } */
@@ -19,7 +19,7 @@ const marksOf = (p) => (seen(p.ply) ? markHTML(p.mark) + (p.missedTsume ? '<em c
 const cpOf = (o) => (o.mate != null ? (o.mate > 0 ? 3000 : -3000) : o.cp);
 const wrSelf = (o) => { const w = 100 / (1 + Math.exp(-cpOf(o) / 600)); return SELF === 's' ? w : 100 - w; };
 const pct = (w) => Math.max(1, Math.min(99, Math.round(w)));
-/* evaluation from the bottom player's side: plus means you are ahead. Clamped to ±3000 for the graph. */
+/* evaluation from your side (sente's when watching): plus means you are ahead. Clamped to ±3000 for the graph. */
 const valOf = (o) => (SELF === 's' ? 1 : -1) * cpOf(o);
 const sgn = (v) => (v > 0 ? '+' + v : v < 0 ? '−' + -v : '±0');
 /* who won, as recorded for this game (it can be corrected by hand): 's' / 'g', or null for a draw or unknown */
@@ -92,17 +92,19 @@ function view() {
 
 function loadGame(gm) {
   CUR = gm; G = gm.data; P = G.positions; N = P.length - 1; M = G.meta;
-  /* your side sits at the bottom; a record that is not yours is seen from sente unless turned round */
-  OWN = !!gm.self; SELF = gm.self || gm.view || 's'; OTHER = flip(SELF); FLIP = SELF === 'g';
+  /* your side sits at the bottom; a record that is not yours is seen from sente unless turned round.
+     Turning it round moves the board and the two names only: the win rate, the graph, the marks and
+     the turning points stay on sente's side (SELF), as in the app */
+  OWN = !!gm.self; SELF = gm.self || 's'; OTHER = flip(SELF); BOT = gm.self || gm.view || 's'; FLIP = BOT === 'g';
   POS = P.map((p) => parseSfen(p.sfen));
   markProven();
   PH = phases(); MARKS = allMarks(); MARKED = new Set(MARKS.map((m) => m.i));
   Object.assign(S, { sel: 0, pick: null, targets: [], br: null, promo: null, rtUntil: 0 });
-  R.youname.textContent = SELF === 's' ? gm.sente : gm.gote;
-  R.oppname.textContent = SELF === 's' ? gm.gote : gm.sente;
-  R.youav.textContent = SELF === 's' ? '☗' : '☖';
-  R.oppav.textContent = OTHER === 's' ? '☗' : '☖';
-  R.youid.dataset.side = SELF; R.oppid.dataset.side = OTHER;
+  R.youname.textContent = BOT === 's' ? gm.sente : gm.gote;
+  R.oppname.textContent = BOT === 's' ? gm.gote : gm.sente;
+  R.youav.textContent = BOT === 's' ? '☗' : '☖';
+  R.oppav.textContent = BOT === 's' ? '☖' : '☗';
+  R.youid.dataset.side = BOT; R.oppid.dataset.side = flip(BOT);
   R.youl.textContent = YOU(); R.oppl.textContent = OPP();
   R.graph.setAttribute('aria-valuemax', N);
   S.ply = gm.ply != null ? Math.min(N, gm.ply) : startPly();
@@ -215,9 +217,9 @@ const xy = (f, r) => (FLIP ? [OX + (f - 1) * CW, OY + (9 - r) * CH] : [OX + (9 -
 function pieceG(k, prom, side, x, y, o) {
   o = o || {};
   const sc = SZ[k], t = prom ? KJP[k] : k === 'K' ? (side === 's' ? '玉' : '王') : KJ[k];
-  const rot = side !== SELF ? ' rotate(180 50 54)' : '';
+  const rot = side !== BOT ? ' rotate(180 50 54)' : '';
   const scl = sc !== 1 ? ` translate(${(50 * (1 - sc)).toFixed(2)} ${(58 * (1 - sc)).toFixed(2)}) scale(${sc})` : '';
-  const cls = `pc${side === SELF ? '' : ' po'}${prom ? ' pr' : ''}${k === 'K' ? ' kg' : ''}${o.cls || ''}`;
+  const cls = `pc${side === BOT ? '' : ' po'}${prom ? ' pr' : ''}${k === 'K' ? ' kg' : ''}${o.cls || ''}`;
   return `<g class="${cls}" transform="translate(${x} ${y})"><path class="sh" d="${PATH}" transform="translate(0 6)${rot}${scl}"/><g transform="translate(0 ${o.lift ? -7 : 0})${rot}${scl}"><path class="fc" d="${PATH}"/><text x="50" y="64" dy=".35em" text-anchor="middle">${t}</text></g></g>`;
 }
 function arrowG(m, side) {
@@ -303,7 +305,7 @@ function trayHTML(h, side) {
   const live = !gameOver() && view().turn === side;
   return ['R', 'B', 'G', 'S', 'N', 'L', 'P'].filter((k) => h[k]).map((k) => {
     const on = live && S.pick && S.pick.hand === k;
-    return `<button type="button" class="hk${on ? ' on' : ''}" data-a="hand" data-v="${k}" data-side="${side}" aria-label="持ち駒 ${KJ[k]}">${faceSVG(KJ[k], side === SELF ? '' : ' po')}${h[k] > 1 ? `<b>${h[k]}</b>` : ''}</button>`;
+    return `<button type="button" class="hk${on ? ' on' : ''}" data-a="hand" data-v="${k}" data-side="${side}" aria-label="持ち駒 ${KJ[k]}">${faceSVG(KJ[k], side === BOT ? '' : ' po')}${h[k] > 1 ? `<b>${h[k]}</b>` : ''}</button>`;
   }).join('');
 }
 
@@ -432,7 +434,7 @@ function readoutHTML() {
   if (!seen(p)) return `${EVQ}<b>—</b><span>${mode !== 'run' ? (waiting() ? '順番が来たら解析します' : 'まだ解析していません') : RUN.paused ? '通信が戻ると、続きから再開します' : 'アプリを閉じても解析は続きます'}</span>`;
   const pos = P[p], deep = mode === 'done' && !!CUR.deep?.includes(p);
   const mixedDepth = deep !== (mode === 'done' && !!CUR.deep?.includes(p - 1));
-  const deepLabel = deep ? '<span>深く読んだ局面</span>' : '';
+  const deepLabel = deep ? '<span class="dp">深く読んだ局面</span>' : '';
   if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
   if (p === N) return `<span>終局</span><b>${N}手で${resultText()}</b><span>${endNote()}</span>`;
   const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
@@ -541,6 +543,42 @@ function branchMovesHTML() {
   return h + '</div>';
 }
 
+/* ---------- turning points: the marked moves, and the moves read deeply on both sides (even without a mark), in move order ---------- */
+function turns() {
+  const deep = new Set(CUR.deep || []), out = [];
+  for (let i = 1; i <= N; i++) { const d = deep.has(i - 1) && deep.has(i); if (rawKind(P[i]) || d) out.push({ i, deep: d }); }
+  return out;
+}
+function turnsHTML() {
+  const mode = anMode();
+  if (mode !== 'done') return `<p class="empty">${mode === 'run' || waiting() ? '解析が終わると、印の付いた手がここに並びます。' : '解析すると、悪手・疑問手・好手など<br>印の付いた手がここに並びます。'}</p>`;
+  const list = turns();
+  if (!list.length) return '<p class="empty">印の付いた手はありませんでした。<br>印は、31手目以降で形勢が大きく動いた手に付きます。</p>';
+  /* one note for the whole list, not a lock on every row: an analysis without deep reading says what the paid plan adds */
+  const up = (CUR.deep || []).length ? '' : !paid() ? 'plan' : CUR.an === 'std' ? 'redo' : '';
+  let h = up ? `<button type="button" class="tpn" data-a="deeplock"><svg class="ic"><use href="#${up === 'redo' ? 'i-refresh' : 'i-lock'}"/></svg><span>${up === 'redo' ? '精密解析' : '有料プラン'}では、勝負所を5秒ずつ深く読みます</span><svg class="ic"><use href="#i-next"/></svg></button>` : '';
+  h += `<div class="tph">${YOU()}の勝率</div>`;
+  for (const { i, deep } of list) {
+    const p = P[i], prev = P[i - 1], self = moverSide(i) === SELF;
+    const t = p.missedTsume && prev.tsume ? prev.tsume : null, best = t ? t.line[0] : (prev.cands || [])[0];
+    const rec = best && best.usi !== p.move.usi ? `${OWN && self ? 'おすすめは' : '最善は'} ${mv(best.ja)}` : '';
+    const hint = deep ? rec || '最善の手' : t ? `${t.len}手詰めあり` : rec;
+    const name = p.missedTsume ? '詰み逃し' : p.mark || '', rate = `${pct(wrSelf(prev))}% → ${pct(wrSelf(p))}%`;
+    const score = t ? `${t.len}手詰め` : best ? fmtVal(best) : '', pv = (t ? t.line.map((m) => m.ja) : (best && best.pv) || []).slice(1).map(mv).join(' ');
+    const label = [`${i}手目 ${mv(p.move.ja)}`, `${self ? YOU() : OPP()}の手`, name, `${YOU()}の勝率 ${rate.replace(' → ', 'から')}`, deep ? `深読み ${hint}` : hint, deep ? `評価値 ${score}` : '', deep && pv ? `読み筋 ${pv}` : ''].filter(Boolean).join('、');
+    h += `<button type="button" class="tp${i === S.ply ? ' cur' : ''}" data-a="jump" data-v="${i}" aria-label="${label}"><span class="t1"><span class="no"><i${self ? ' class="you"' : ''}></i>${i}</span><span class="mm">${mv(p.move.ja)}</span>${name ? `<span class="tm">${onbMark(p.missedTsume ? 'dub' : MKC[p.mark])}${name}</span>` : ''}<b class="pr2">${rate}</b></span>`;
+    h += deep ? `<span class="td"><span class="t1"><em>深読み</em><b class="hm">${hint}</b><b class="pr2">${score}</b></span>${pv ? `<span class="p">${pv}</span>` : ''}</span>` : hint ? `<span class="th">${hint}</span>` : '';
+    h += '</button>';
+  }
+  return h;
+}
+A.turns = () => {
+  openSheet(`勝負所${anMode() === 'done' ? `（${turns().length}手）` : ''}`, turnsHTML(), { id: 'tp' });
+  ensureVisible(R.shc, R.shc.querySelector('.tp.cur'));
+};
+/* the dialog is its own layer in the app, so the sheet closes first (the same as deleting a record) */
+A.deeplock = () => { closeSheet(); if (paid()) redoPrecise(); else A.lockinfo('deep'); };
+
 /* ---------- rendering ---------- */
 function ensureVisible(box, row) {
   if (!box || !row || !box.clientHeight || !row.offsetParent) return;
@@ -559,7 +597,7 @@ function markCurrent() {
 function renderBoard() {
   const v = view();
   R.board.innerHTML = boardSVG() + promoHTML();
-  for (const [el, side] of [[R.youhand, SELF], [R.opphand, OTHER]]) {
+  for (const [el, side] of [[R.youhand, BOT], [R.opphand, flip(BOT)]]) {
     const html = trayHTML(v.pos.hands[side], side);
     el.classList.toggle('none', !html);
     el.innerHTML = html || '<i class="t0">なし</i>';
@@ -608,7 +646,12 @@ function renderNow() {
   R.bfirst.classList.toggle('warn', !!e);
   R.bfirst.setAttribute('aria-label', e ? '本譜に戻る' : '最初へ');
   R.bfirst.innerHTML = `<svg class="ic"><use href="#${e ? 'i-undo' : 'i-first'}"/></svg>`;
-  R.brl1.hidden = false; R.brl2.hidden = !e;
+  R.brl1.hidden = false; R.brl2.hidden = false;
+  /* the free half of the lower name row: the way back on a branch, the list of turning points on the game line */
+  const tn = !e && anMode() === 'done' ? turns().length : null;
+  R.brl2.classList.toggle('bk2', !!e);
+  R.brl2.dataset.a = e ? 'exitbr' : 'turns';
+  R.brl2.setAttribute('aria-label', e ? '本譜に戻る' : `勝負所の一覧${tn == null ? '' : `、${tn}手`}`);
   R.brl1.dataset.a = e ? 'rttoggle' : 'deepread';
   R.brl1.classList.toggle('hold', S.rtHold);
   R.brl1.removeAttribute('aria-label');
@@ -619,6 +662,7 @@ function renderNow() {
     R.brl2.innerHTML = `<svg class="ic"><use href="#i-undo"/></svg>本譜（${plyLabel(S.br.base)}）に戻る`;
   } else {
     R.brl1.innerHTML = S.rtHold ? '<b>終了</b>' : '<svg class="ic"><use href="#i-bolt"/></svg><b>深く読む</b>' + (paid() ? '' : '<svg class="ic"><use href="#i-lock"/></svg>');
+    R.brl2.innerHTML = `<svg class="ic"><use href="#i-flag"/></svg>勝負所${tn == null ? '' : ` <b>${tn}</b>`}`;
   }
 }
 function renderPly() {
@@ -630,7 +674,8 @@ function renderPly() {
   renderBar();
   markCurrent();
 }
-function renderGame() { renderPly(); buildGraph(); }
+/* an open list of turning points follows whatever changed under it: an analysis that ended or failed, the plan */
+function renderGame() { renderPly(); buildGraph(); if (UI.sheet === 'tp') A.turns(); }
 function clearSel() { S.pick = null; S.targets = []; S.promo = null; }
 function clearPick() { if (S.pick || S.promo) { clearSel(); renderBoard(); } }
 /* Going somewhere else on the game line leaves the branch. A branch is not saved, so when that happens
@@ -765,6 +810,7 @@ const LOCKS = () => ({
   cands: ['2位・3位の候補は、精密解析で出ます', `精密解析（有料プラン）では、候補を3手まで比べられ、AIコーチも使えます。週${DB.usage.preciseMax}局まで使えます。`],
   precise: ['精密解析は、有料プランで使えます', `候補を3手まで出し、より深く読みます。AIコーチも、精密解析した対局で使えます。週${DB.usage.preciseMax}局まで使えます。`],
   rt: ['リアルタイム解析は、有料プランで使えます', '本譜の「深く読む」や分岐で、その局面の評価値・最善手・読み筋が出ます。'],
+  deep: ['深読みは、有料プランで使えます', `精密解析（有料プラン）では、形勢が大きく動いた局面を5秒ずつ深く読み直し、おすすめの手・評価値・読み筋をこの一覧に出します。週${DB.usage.preciseMax}局まで使えます。`],
 });
 A.lockinfo = (k) => { const x = LOCKS()[k]; ask(x[0], x[1], '有料プランを見る', () => push({ t: 'plan' }), { no: '閉じる' }); };
 const preciseCost = () => `精密解析を1局分使います（今週あと${preciseLeft()}局）。`;
@@ -873,8 +919,7 @@ function tickRun() {
     r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
     if (r.done >= r.total) {
       if (r.kind !== 'pre' || r.total <= 31) { finishRun(); return; }
-      // shortcut: 見た目の確認用に30・31手目を固定で使う。探索結果や選定規則の検証は製品テストで行う。
-      r.deep = { total: 2, done: 0 };
+      r.deep = { total: deepOf(gm.data).length, done: 0 };
       r.deepNextAt = performance.now() + 420;
       refreshWaiting(gm);
     }
@@ -895,7 +940,7 @@ function finishRun() {
   RUN = null;
   if (!gm) return;
   gm.an = r.kind;
-  gm.deep = r.deep ? [30, 31] : undefined;
+  gm.deep = r.deep ? deepOf(gm.data) : undefined;
   if (!paid()) DB.usage.free++;
   else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
@@ -904,6 +949,7 @@ function finishRun() {
     if (DB.celebrated) toast('解析が終わりました');
     else {
       DB.celebrated = true;
+      closeSheet();   /* the dialog is its own layer in the app, so a sheet left open while waiting (the turning points) closes first */
       ask('はじめての解析ができました', 'グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、印のついた手を見てみましょう。', '見てみる', () => { if (CUR === gm) setPly(startPly()); }, { single: true, img: 'learn-first' });
     }
   }
@@ -933,12 +979,12 @@ A.gmenu = () => {
   let h = row('gfav', 'i-star', g.fav ? 'お気に入りから外す' : 'お気に入りに入れる', '', g.fav ? ' on' : '');
   h += row('ginfo', 'i-info', '対局情報', '対局者・結果・戦法と囲い（修正もここから）');
   if (g.an === 'std' && !busy) h += row('reanalyze', 'i-refresh', '精密解析でやり直す', paid() ? `候補3手とAIコーチ（今週あと${preciseLeft()}局）` : '有料プランの機能です');
-  if (!g.self) h += row('gflip', 'i-refresh', '盤の向きを変える', `いまは${SELF === 's' ? '先手' : '後手'}の側から見ています`);
+  if (!g.self) h += row('gflip', 'i-refresh', '盤の向きを変える', `いまは${BOT === 's' ? '先手' : '後手'}の側から見ています`);
   h += row('kifout', 'i-export', 'KIFを書き出す', 'コピー・ファイルに保存・共有');
   h += row('gdel', 'i-trash', 'この棋譜を削除', '', ' dng');
   openSheet('この対局', h, { auto: true });
 };
-A.gflip = () => { const g = CUR, p = S.ply; closeSheet(); g.view = SELF === 's' ? 'g' : 's'; loadGame(g); S.ply = p; renderGame(); };
+A.gflip = () => { const g = CUR, p = S.ply; closeSheet(); g.view = BOT === 's' ? 'g' : 's'; loadGame(g); S.ply = p; renderGame(); };
 A.gfav = () => { CUR.fav = !CUR.fav; closeSheet(); toast(CUR.fav ? 'お気に入りに入れました' : 'お気に入りから外しました'); };
 A.ginfo = () => { closeSheet(); push({ t: 'info', id: CUR.id }); };
 A.reanalyze = () => {

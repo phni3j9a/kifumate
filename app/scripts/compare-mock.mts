@@ -5,8 +5,7 @@ import { seedGames, type MockGame } from "../tests/helpers/seed-games";
 // 出力は .local/compare/<幅x高さ>/NN-名前.png（左：モック、中：アプリ Web、右：あれば Android 実機）。
 // 実機の画面は `adb exec-out screencap -p > .local/compare/android/名前.png` で置くと、3列目に並ぶ。
 // 未実装の購入先や、実モデル用の待機・失敗表示の追加は差として残す。
-import { fakeAnalysis } from "../tests/helpers/fake-analysis";
-import type { AnalysisResult } from "../src/analysis/types";
+import { fakeAnalysis, sampleResults } from "../tests/helpers/fake-analysis";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -134,6 +133,11 @@ async function run(width: number, height: number) {
   const both = async (f: number, r: number) => {
     await mockSquare(f, r);
     await appSquare(f, r);
+  };
+  const turns = async () => {
+    await act("turns");
+    await a.getByRole("button", { name: /^勝負所の一覧/ }).click();
+    await a.waitForTimeout(250);
   };
 
   let n = 0;
@@ -346,6 +350,10 @@ async function run(width: number, height: number) {
   await shot("game-saved-toast");
   await pause(2800);
   await shot("game-not-analysed");
+  await turns();
+  await shot("turns-not-analysed");
+  await closeSheet();
+  await tap("閉じる");
   await act("evalhelp");
   await tap("評価値");
   await shot("sheet-evaluation-help");
@@ -661,28 +669,11 @@ async function run(width: number, height: number) {
   const sample = JSON.parse(
     readFileSync("../mock/data/sample-game-2.json", "utf8"),
   );
-  const score = (p: any) =>
-    p.mate != null
-      ? { kind: "mate", value: p.mate, winner: p.mate < 0 ? "gote" : "sente" }
-      : { kind: "cp", value: p.cp };
-  fake.results = sample.positions.map((p: any) => ({
-    ply: p.ply,
-    score: score(p),
-    candidates: p.cands.map((c: any, i: number) => ({
-      rank: i + 1,
-      depth: 10,
-      score: score(c),
-      move: c.usi,
-      pv: c.pvUsi,
-    })),
-    mate: p.tsume
-      ? {
-          plies: p.tsume.len,
-          pv: p.tsume.line.map((m: any) => m.usi),
-          branches: [],
-        }
-      : null,
-  })) as AnalysisResult[];
+  fake.results = sampleResults(sample);
+  // 見本データは印を決めたあとで評価値に揺らぎを入れているので、境目の44〜46手目だけ印がモックと食い違う。
+  // 勝負所の一覧を同じ行で比べるため、その2局面だけ揺らぎの分を戻す。
+  fake.results[44]!.score = { kind: "cp", value: 335 };
+  fake.results[46]!.score = { kind: "cp", value: 335 };
   // アプリ側の待機中にモックが完了しないよう、開始とタイマー停止を同じイベント内で行う。
   await m.evaluate(() => {
     (window as any).__compare(
@@ -809,8 +800,10 @@ async function run(width: number, height: number) {
     .getByText("勝負所を深く読んでいます（1/2）", { exact: true })
     .waitFor();
   await shot("analysis-deep-running");
+  // 深読み済みの局面は、モックが決めたもの（30・31手目と悪手の前後）にそろえる
+  const deepPlies = (await rtMock("deepOf(window.KIFU2)")) as number[];
   fake.results = fake.results.map((r) =>
-    r.ply === 30 || r.ply === 31 ? { ...r, deep: { ...r } } : r,
+    deepPlies.includes(r.ply) ? { ...r, deep: { ...r } } : r,
   );
   fake.deep = { total: 2, done: 2 };
   fake.complete = true;
@@ -835,6 +828,17 @@ async function run(width: number, height: number) {
   await tap("閉じる");
   await a.getByText("深く読んだ局面", { exact: true }).waitFor();
   await shot("analysis-deep-completed");
+  // 勝負所の一覧：深読みのある手（印のない31手目を含む）→ 行から局面へ → いまの手の強調
+  await turns();
+  await shot("turns-deep");
+  await click('#scr .tp[data-v="54"]');
+  await a.getByRole("button", { name: /^54手目 / }).click();
+  await a.getByRole("img", { name: "54手目の盤面", exact: true }).waitFor();
+  await shot("turns-jump");
+  await turns();
+  await shot("turns-current");
+  await closeSheet();
+  await tap("閉じる");
   await m.keyboard.press("Home");
   await tap("最初へ");
   // AIコーチ。非同期の偽APIだけを使い、実モデルへの費用は発生させない。
@@ -1092,6 +1096,11 @@ async function run(width: number, height: number) {
   await act("step", "first");
   await tap("最初へ");
   await shot("sample-game"); // モックの合成値ではなく、実探索の同梱値を表示する差を残す。
+  // 無料プラン・深読みのない解析：一覧の先頭に、有料プランの深読みの案内を1つだけ出す
+  await turns();
+  await shot("turns-locked");
+  await closeSheet();
+  await tap("閉じる");
   await act("back");
   await tap("戻る");
   await shot("sample-list");

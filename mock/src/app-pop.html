@@ -103,7 +103,7 @@
             <div class="bdw" data-b="board"></div>
             <div class="col" data-who="you"><span class="tray" data-b="youhand"></span></div>
           </div>
-          <div class="nmr b"><button type="button" class="brl bk2" data-b="brl2" data-a="exitbr" aria-label="本譜に戻る" hidden></button><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
+          <div class="nmr b"><button type="button" class="brl" data-b="brl2" data-a="turns" hidden></button><span class="id" data-who="you" data-b="youid"><i class="tn">手番</i><span class="nm" data-b="youname"></span><span class="av" data-b="youav"></span></span></div>
           <i class="sp"></i>
           <div class="ct">
             <button type="button" class="rb" data-a="step" data-v="first" data-b="bfirst" aria-label="最初へ"><svg class="ic"><use href="#i-first"/></svg></button>
@@ -152,6 +152,7 @@
         <button type="button" data-jump="import">取り込み</button>
         <button type="button" data-jump="fresh">取り込み直後（未解析）</button>
         <button type="button" data-jump="game">解析画面</button>
+        <button type="button" data-jump="turns">勝負所の一覧</button>
         <button type="button" data-jump="branch">分岐して試す</button>
         <button type="button" data-jump="ai">AIコーチ</button>
         <button type="button" data-jump="stats">戦績</button>
@@ -175,6 +176,7 @@
       <ul>
         <li>棋譜一覧の「取り込む」→「クリップボードから貼り付け」→「保存して解析する」。解析はグラフが伸びていく形で進み、数秒で終わります（実際は、ふつうの解析で数十秒、精密解析で2分前後の見込みです）。この対局はあなたが後手なので、盤が後手側から見た向きになります。</li>
         <li>解析画面で駒をタップして動かすと、分岐になります。候補手の「試す」「次の手」で、読み筋を1手ずつ盤で進められます。左端のボタンか、盤の下の「本譜に戻る」で戻ります。</li>
+        <li>盤の左下の「勝負所」で、印の付いた手と、深く読んだ手の一覧が開きます。行をタップすると、その局面に移ります。無料プランでふつうの解析をした対局では、先頭に有料プランの深読みの案内が1つ出ます。</li>
         <li>「AIに聞く」でスタイルを選んで解説を作ります。文中の手をタップすると、盤がその局面になります。続けて質問できます。</li>
         <li>戦績で戦法や囲いの行をタップすると、その対局の一覧が開きます。</li>
         <li>上の「プラン」で無料と有料の見え方を、「通信」で通信が切れたときの見え方を切り替えられます。</li>
@@ -212,6 +214,7 @@
         <li>詰みは、印（詰）と、候補の「詰み」タブ・「3手詰め」の札で示します。評価値の欄には「詰み」と書かず、3000を超える差はどれも「3000以上」と書きます。</li>
         <li>リアルタイム解析は、分岐では盤の上でオン・オフを切り替え、本譜では「深く読む」で始めます。局面を止めていても結果が深まり、分岐は30秒、本譜は5分で休止します。残り時間は、1割を切るまで出しません。</li>
         <li>有料プランの画面には、AIコーチとリアルタイム解析の上限を小さく書いています（買う前に分からない上限を避けるためです）。</li>
+        <li>勝負所の一覧の鍵は、行ごとではなく一覧の先頭に1つだけにしました。深読みのある手だけ、白い枠でおすすめ・評価値・読み筋を出します。</li>
         <li>AIコーチは、盤が隠れない高さのシートにしました。解析結果にもとづく部分と、学習プロフィールに合わせた助言を、見た目で分けています。</li>
         <li>取り込みは1局ずつです。同じ棋譜をもう一度取り込もうとすると、保存せずに知らせます（取り込みを2回試すと見られます）。</li>
       </ul>
