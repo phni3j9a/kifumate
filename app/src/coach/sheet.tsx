@@ -66,7 +66,7 @@ export function CoachSheet({
   branch: boolean;
   start: () => void;
   jump: (p: number) => void;
-  tryLine: (p: number, pv: string[]) => void;
+  tryLine: (reference: Reference) => void;
   onFullChange: (full: boolean) => void;
 }) {
   const slide = useSlideUp(true);
@@ -399,9 +399,9 @@ export function CoachSheet({
                           onFullChange(false);
                           jump(p);
                         }}
-                        tryLine={(p, pv) => {
+                        tryLine={(reference) => {
                           onClose();
-                          tryLine(p, pv);
+                          tryLine(reference);
                         }}
                       />
                     ))}
@@ -643,7 +643,7 @@ function SectionView({
   saved: ReturnType<typeof useAnalysis>["records"][string]["saved"] | undefined;
   self: Color;
   jump: (p: number) => void;
-  tryLine: (p: number, pv: string[]) => void;
+  tryLine: (reference: Reference) => void;
 }) {
   return (
     <View
@@ -714,7 +714,7 @@ function ReferenceView({
   saved: ReturnType<typeof useAnalysis>["records"][string]["saved"] | undefined;
   self: Color;
   jump: (p: number) => void;
-  tryLine: (p: number, pv: string[]) => void;
+  tryLine: (reference: Reference) => void;
 }) {
   const position = new Position();
   let words: string[] = [];
@@ -748,9 +748,7 @@ function ReferenceView({
           <Text selectable style={font(500, 11.5, 1.7)}>
             {words.join(" ")}
           </Text>
-          <TextButton onPress={() => tryLine(r.ply, r.pv)}>
-            この読み筋を試す
-          </TextButton>
+          <TextButton onPress={() => tryLine(r)}>この読み筋を試す</TextButton>
         </>
       )}
     </View>

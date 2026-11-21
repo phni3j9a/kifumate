@@ -82,6 +82,59 @@ test("AIコーチの深読み参照を評価値、盤面リンク、読み筋の
   expect(analysis.errors).toEqual([]);
 });
 
+test("リアルタイム解析オフの分岐では、AIコーチが参照した1段目の読み筋を続けられる", async ({
+  page,
+}) => {
+  const { analysis, coach } = await imported(page, false);
+  const record = readKif(readFileSync("tests/fixtures/standard.kif", "utf8"));
+  const results = makeResults(analysisInput(record, "precise"));
+  const start = results[0]!;
+  const shallow = {
+    ...start.candidates[0]!,
+    move: "2g2f",
+    pv: ["2g2f", "3c3d", "2f2e"],
+  };
+  const deep = { ...shallow, pv: ["2g2f", "8c8d"] };
+  results[0] = {
+    ...start,
+    candidates: [shallow],
+    deep: { ...start, candidates: [deep] },
+  };
+  analysis.results = results;
+  analysis.complete = true;
+  coach.status = "completed";
+  coach.sections = [
+    {
+      ...coachSections[0]!,
+      references: [
+        {
+          id: "0:candidate:1",
+          ply: 0,
+          score: shallow.score,
+          pv: shallow.pv,
+          provenMate: false,
+        },
+      ],
+    },
+  ];
+  await button(page, "解析する").click();
+  await button(page, "AIに聞く").click();
+  await button(page, "解説をつくる").click();
+  await button(page, "この読み筋を試す").click();
+  await button(page, "リアルタイム解析 オン").click();
+  await button(page, "本譜に戻る").first().click();
+  await button(page, "AIに聞く").click();
+  await button(page, "この読み筋を試す").click();
+  await expect(button(page, "リアルタイム解析 オフ")).toBeVisible();
+  const next = button(page, "この手を盤で試す").filter({ hasText: "次の手" });
+  await expect(page.getByText("△3四歩", { exact: true })).toBeVisible();
+  await expect(page.getByText("△8四歩", { exact: true })).toHaveCount(0);
+  await next.click();
+  await expect(button(page, "棋譜を開く")).toContainText("分岐2手目△3四歩");
+  await button(page, "1手進む").click();
+  await expect(button(page, "棋譜を開く")).toContainText("分岐3手目▲2五歩");
+});
+
 test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と再起動・追加質問・無料/通信なしでも履歴閲覧", async ({
   page,
 }) => {

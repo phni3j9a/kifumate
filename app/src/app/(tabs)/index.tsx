@@ -447,6 +447,8 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
         }
         renderItem={({ item: g, index }) => {
           const deep = deepProgress(records[g.id]?.attempt?.job);
+          const deepLabel =
+            deep && !offline ? `深読み中 ${deep.done}/${deep.total}` : "";
           const month = monthOf(g);
           const stamp = g.self_side ? stamps[g.result] : null;
           return (
@@ -463,7 +465,7 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
               <View style={{ marginBottom: 9 }}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${g.black} 対 ${g.white}、${g.plies}手を開く`}
+                  accessibilityLabel={`${g.black} 対 ${g.white}、${g.plies}手を開く${deepLabel ? `、${deepLabel}` : ""}`}
                   onPress={() => router.push(`/game/${g.id}`)}
                   style={({ pressed }) => [
                     s.gcd,
@@ -549,9 +551,8 @@ export default function Games({ drilldown = false }: { drilldown?: boolean }) {
                               ? "中断中"
                               : records[g.id]!.attempt!.job?.status === "queued"
                                 ? "解析待ち"
-                                : deep
-                                  ? `深読み中 ${deep.done}/${deep.total}`
-                                  : `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
+                                : deepLabel ||
+                                  `解析中 ${Math.max(0, (records[g.id]!.attempt!.job?.next || 0) - 1)}/${g.plies}`}
                         </Text>
                       </View>
                     ) : records[g.id]?.saved ? (

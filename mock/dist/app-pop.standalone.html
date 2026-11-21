@@ -2277,7 +2277,7 @@ function setPaused(on) {
   r.paused = on;
   if (gm && onGame(gm)) renderPly();
   const pill = SCR.querySelector('[data-runpill]');
-  if (pill) pill.textContent = `${on ? '中断中' : '解析中'} ${r.done}/${r.total}`;
+  if (pill) pill.textContent = runPill(r);
   if (!on) toast('通信が戻りました。解析を続きから再開します');
 }
 function endRun(failed) {

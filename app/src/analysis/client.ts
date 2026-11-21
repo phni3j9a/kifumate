@@ -64,7 +64,8 @@ export class AnalysisClient {
       throw new AnalysisConfigurationError("解析の接続先はHTTPSにしてください");
     const token = auth ? await this.getToken() : null;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const abort = () => controller.abort();
+    let timer = setTimeout(abort, 15000);
     try {
       const response = await this.http(this.base + path, {
         method,
@@ -80,7 +81,28 @@ export class AnalysisClient {
             }
           : {}),
       });
-      const data = await response.json();
+      let data;
+      const stream = path.startsWith("/v1/jobs") ? response.body : null;
+      if (stream) {
+        // 精密の完了応答などは全件を返す。全体の所要時間ではなく無通信の時間を測る。
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let text = "";
+        try {
+          for (;;) {
+            clearTimeout(timer);
+            timer = setTimeout(abort, 15000);
+            const { value, done } = await reader.read();
+            if (done) break;
+            text += decoder.decode(value, { stream: true });
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        data = JSON.parse(text + decoder.decode());
+      } else {
+        data = await response.json();
+      }
       if (!response.ok)
         throw new ApiError(
           response.status,

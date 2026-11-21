@@ -133,6 +133,20 @@ const fs = require('fs');
   await ctl('.pg-ctl [data-net="on"]'); await wait(900); await has('解析中', 'resumes when the connection is back');
   await jump('fail'); await wait(3200); await has('解析を終えられませんでした'); await has('回数は減っていません');
 
+  // 7b. keep the list open while disconnecting and reconnecting in the second stage.
+  await ctl('.pg-ctl [data-state="lived"]'); await jump('fresh');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await act('analyze'); await act('back');
+  const pill = page.locator('#scr [data-runpill]');
+  for (let i = 0; i < 150 && await pill.innerText() !== '深読み中 1/2'; i++)
+    await page.clock.runFor(70);
+  ok(await pill.innerText() === '深読み中 1/2', 'list shows the second-stage progress');
+  await ctl('.pg-ctl [data-net="off"]'); await page.clock.runFor(70);
+  ok(await pill.innerText() === '中断中', 'offline pill does not use first-stage counts');
+  await ctl('.pg-ctl [data-net="on"]'); await page.clock.runFor(70);
+  ok(await pill.innerText() === '深読み中 1/2', 'reconnection restores the same second-stage progress');
+  await page.clock.resume();
+
   // 8. first launch: onboarding, empty library, sample record, import asks which side
   await ctl('.pg-ctl [data-state="first"]'); await has('kifumateへ ようこそ');
   await act('onbskip'); await has('まだ棋譜がありません');

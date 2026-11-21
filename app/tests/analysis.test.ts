@@ -124,6 +124,73 @@ test("偽HTTPサーバー: 登録一度・安全な保存後に認証・本文�
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+test("精密の完了応答が止まれば中断し、転送が続けば15秒を超えても全件と署名を保存する", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  let signal!: AbortSignal;
+  const api = new AnalysisClient(
+    "https://example.test",
+    { get: async () => "a".repeat(64), set: async () => {} },
+    async (url, init) => {
+      const path = new URL(String(url));
+      if (path.pathname === "/v1/quota") return Response.json(quota);
+      if (path.pathname === "/v1/entitlements")
+        return Response.json({ paid: true, source: "invite", expiresAt: null });
+      if (init?.method === "POST") return Response.json(reply());
+      assert.equal(path.search, "?from=1");
+      signal = init!.signal!;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            body = controller;
+            signal.addEventListener("abort", () => body.error(signal.reason), {
+              once: true,
+            });
+          },
+        }),
+      );
+    },
+  );
+  const { controller, storage, sql } = await setup(api);
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    await controller.start("a", input);
+    const deep = { ...result(0), score: { kind: "cp" as const, value: 500 } };
+    const results = [{ ...result(0), deep }, result(1)];
+    const coachProof = { signature: "opaque-署名", expiresAt: 99 };
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        ...reply("completed", 2),
+        results,
+        coachProof,
+      }),
+    );
+    const stalled = controller.sync();
+    await flush();
+    body.enqueue(bytes.slice(0, 10));
+    await flush();
+    t.mock.timers.tick(15000);
+    await stalled;
+    assert.equal(controller.snapshot.offline, true);
+    assert.equal((await storage.load())[0]?.saved, null);
+    const resumed = controller.sync();
+    await flush();
+    t.mock.timers.tick(8000);
+    body.enqueue(bytes.slice(0, 10));
+    await flush();
+    t.mock.timers.tick(8000);
+    assert.equal(signal.aborted, false);
+    body.enqueue(bytes.slice(10));
+    body.close();
+    await resumed;
+    const saved = (await storage.load())[0];
+    assert.equal(saved?.attempt, null);
+    assert.deepEqual(saved?.saved?.results, results);
+    assert.deepEqual(saved?.saved?.coachProof, coachProof);
+  } finally {
+    sql.close();
+  }
+});
 test("送信応答喪失→再起動→重複再送→差分を重複排除して完成・署名をそのまま保存", async () => {
   let lost = true,
     from = -1;
