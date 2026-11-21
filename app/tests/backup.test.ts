@@ -45,6 +45,8 @@ async function seed(db: SQLiteDatabase) {
     id,
   );
   const doc = JSON.parse(a!.document);
+  const shallow = doc.saved.results[0];
+  shallow.deep = { ...shallow, score: { kind: "cp", value: 123 } };
   doc.saved.coachProof = {
     version: 1,
     signature: "検証署名",
@@ -70,7 +72,15 @@ async function seed(db: SQLiteDatabase) {
               kind: "advice",
               title: "次の練習",
               text: "終盤を振り返りましょう",
-              references: [],
+              references: [
+                {
+                  id: "0:deep:candidate:1",
+                  ply: 0,
+                  score: shallow.deep.score,
+                  pv: ["7g7f"],
+                  provenMate: false,
+                },
+              ],
             },
           ],
         },
@@ -115,7 +125,7 @@ const dump = (sql: any, table: string) =>
       ...r,
       ...(r.document ? { document: JSON.parse(r.document) } : {}),
     }));
-test("全対象の往復：署名・手動の先後/結果/分類・回答/質問・名前・プロフィール・設定が空DBで一致", async () => {
+test("全対象の往復：深読み・署名・手動の先後/結果/分類・回答/質問・名前・プロフィール・設定が空DBで一致", async () => {
   const source = await database(),
     target = await database();
   try {
@@ -163,6 +173,23 @@ test("全対象の往復：署名・手動の先後/結果/分類・回答/質�
     target.sql.close();
   }
 });
+test("不正な深読み局面のバックアップは復元前に拒否する", async () => {
+  const { db, sql } = await database();
+  try {
+    await seed(db);
+    const backup = await text(db);
+    const bad = backup.replace('"deep":{"ply":0', '"deep":{"ply":1');
+    assert.notEqual(bad, backup);
+    await assert.rejects(prepare(db, bad), /バックアップが壊れているか/);
+    assert.equal(
+      await text(db).then((s) => s.split("\n")[2]),
+      backup.split("\n")[2],
+    );
+  } finally {
+    sql.close();
+  }
+});
+
 test("壊れたJSON・切れた末尾・不正棋譜・子文書・不正プロフィールを拒否して既存を保持", async () => {
   const s = await database();
   try {

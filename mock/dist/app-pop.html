@@ -1856,13 +1856,15 @@ function readoutHTML() {
     return h;
   }
   if (!seen(p)) return `${EVQ}<b>—</b><span>${mode !== 'run' ? (waiting() ? '順番が来たら解析します' : 'まだ解析していません') : RUN.paused ? '通信が戻ると、続きから再開します' : 'アプリを閉じても解析は続きます'}</span>`;
-  const pos = P[p];
+  const pos = P[p], deep = mode === 'done' && !!CUR.deep?.includes(p);
+  const mixedDepth = deep !== (mode === 'done' && !!CUR.deep?.includes(p - 1));
+  const deepLabel = deep ? '<span>深く読んだ局面</span>' : '';
   if (!p) return `<span>開始局面</span><b>${fmtVal(pos)}</b>`;
   if (p === N) return `<span>終局</span><b>${N}手で${resultText()}</b><span>${endNote()}</span>`;
   const prev = P[p - 1], plain = (o) => !o.end && o.mate == null;
   const v0 = fmtVal(prev), v1 = fmtVal(pos);
-  let h = `${EVQ}<b>${v0 === v1 && v1.endsWith('以上') ? v1 : `${v0} → ${v1}`}</b>`;
-  if (plain(prev) && plain(pos)) { const d = valOf(pos) - valOf(prev); h += `<span class="dl${d > 0 ? ' up' : d < 0 ? ' dn' : ''}">${sgn(d)}</span>`; }
+  let h = `${EVQ}<b>${mixedDepth || (v0 === v1 && v1.endsWith('以上')) ? v1 : `${v0} → ${v1}`}</b>${deepLabel}`;
+  if (!deep && !mixedDepth && plain(prev) && plain(pos)) { const d = valOf(pos) - valOf(prev); h += `<span class="dl${d > 0 ? ' up' : d < 0 ? ' dn' : ''}">${sgn(d)}</span>`; }
   if (mode !== 'done') return h;
   if (pos.missedTsume && prev.tsume) h += `<button type="button" class="rl" data-a="jump" data-v="${p - 1}">${pos.missedTsume}手詰めあり ›</button>`;
   else if (pos.mark === '好手') h += '<span class="rn">好手！</span>';
@@ -1892,9 +1894,13 @@ function todoCard() {
   const sub = !DB.online ? '通信できません。つながると解析できます' : !paid() ? `今週の解析　あと${freeLeft()}局` : kind === 'pre' ? `候補3手とAIコーチ　今週あと${preciseLeft()}局` : `候補1手・AIコーチなし　今週あと${totalLeft()}局`;
   return h + say('この対局を解析する', sub, '<button type="button" class="bt pri sm x" data-a="analyze">解析する</button>');
 }
+const runProgress = (r) => r.deep ? r.deep.done / r.deep.total : r.done / r.total;
+const deepText = (r) => `勝負所を深く読んでいます（${r.deep.done}/${r.deep.total}）`;
+const runPill = (r) => r.paused ? '中断中' : r.deep ? `深読み中 ${r.deep.done}/${r.deep.total}` : `解析中 ${r.done}/${r.total}`;
 function runCard() {
-  const pz = RUN.paused;
-  return `<div class="tbs"><span class="tbx on">${RUN.kind === 'pre' ? '精密解析' : '解析'}</span>${aiBtn()}</div><div class="bc say"><span class="m">${pz ? '中断中' : '解析中'}${pz ? '<small>通信が戻ると、続きから再開します</small>' : `<small data-run="n">${RUN.done} / ${RUN.total}手</small>`}</span><span class="pgs${pz ? ' pz' : ''}"><i data-run="bar" style="width:${(100 * RUN.done / RUN.total).toFixed(1)}%"></i></span><button type="button" class="bt sm x" data-a="stopan">中止</button></div>`;
+  const pz = RUN.paused, deep = RUN.deep && !pz;
+  const progress = deep ? `<span class="p rtmeta" data-run="n">${deepText(RUN)}</span>` : '';
+  return `<div class="tbs"><span class="tbx on">${RUN.kind === 'pre' ? '精密解析' : '解析'}</span>${aiBtn()}</div><div class="bc say"><span class="m">${pz ? '中断中<small>通信が戻ると、続きから再開します</small>' : '解析中'}${pz || deep ? '' : `<small data-run="n">${RUN.done} / ${RUN.total}手</small>`}</span>${progress}<span class="pgs${pz ? ' pz' : ''}"><i data-run="bar" style="width:${(100 * runProgress(RUN)).toFixed(1)}%"></i></span><button type="button" class="bt sm x" data-a="stopan">中止</button></div>`;
 }
 function branchCard() {
   const e = brNow(), rs = rtState(), a = brShown();
@@ -2219,7 +2225,7 @@ document.addEventListener('visibilitychange', () => {
 });
 A.evalhelp = () => {
   const mark = (k, t, d) => `<div class="evm">${onbMark(k)}<div><b>${t}</b><span>${d}</span></div></div>`;
-  openSheet('評価値と印の見かた', `<div class="evh"><p>評価値は、解析が出した形勢の点数です。<b>プラスは${YOU()}が有利</b>、マイナスは${OPP()}が有利です。</p><div class="evs"><span><b>±150</b>くらいまで<i>ほぼ互角</i></span><span><b>500</b>前後<i>有利</i></span><span><b>1000</b>以上<i>大きな差</i></span></div><p>上の「${YOU()} ○%」は、評価値から見積もった勝つ見込みです。戦績の勝率とは別のものです。</p></div>${mark('good', '好手', '解析のおすすめと同じ手で、ほかの手より良かった手')}${mark('dub', '疑問手', '評価値を少し下げた手')}${mark('bad', '悪手', '評価値を大きく下げた手')}${mark('mate', '詰みあり', '1手か3手で詰む手があった局面')}<p class="hint">3000を超える大きな差は、「3000以上」と表します。</p>`, { auto: true });
+  openSheet('評価値と印の見かた', `<div class="evh"><p>評価値は、解析が出した形勢の点数です。<b>プラスは${YOU()}が有利</b>、マイナスは${OPP()}が有利です。</p><div class="evs"><span><b>±150</b>くらいまで<i>ほぼ互角</i></span><span><b>500</b>前後<i>有利</i></span><span><b>1000</b>以上<i>大きな差</i></span></div><p>上の「${YOU()} ○%」は、評価値から見積もった勝つ見込みです。戦績の勝率とは別のものです。</p></div>${mark('good', '好手', '解析のおすすめと同じ手で、ほかの手より良かった手')}${mark('dub', '疑問手', '候補1位ではなく、指した側の勝つ見込みが10ポイント以上下がった手')}${mark('bad', '悪手', '候補1位ではなく、指した側の勝つ見込みが20ポイント以上下がった手')}${mark('mate', '詰みあり', '1手か3手で詰む手があった局面')}<p class="hint">グラフには深く読んだ局面の評価値が優先して出ます。印は、前後の局面を同じ条件で読んだ結果どうしで比べて付けます。</p><p class="hint">3000を超える大きな差は、「3000以上」と表します。</p>`, { auto: true });
 };
 
 /* ---------- analysis run (simulated: the real one runs on the server and takes about 1 to 3 minutes) ---------- */
@@ -2263,7 +2269,7 @@ function setPaused(on) {
   r.paused = on;
   if (gm && onGame(gm)) renderPly();
   const pill = SCR.querySelector('[data-runpill]');
-  if (pill) pill.textContent = `${on ? '中断中' : '解析中'} ${r.done}/${r.total}`;
+  if (pill) pill.textContent = runPill(r);
   if (!on) toast('通信が戻りました。解析を続きから再開します');
 }
 function endRun(failed) {
@@ -2284,17 +2290,30 @@ function tickRun() {
     if (!on && gm) toast(`${gm.self ? oppName(gm) + ' 戦' : gm.date + ' の対局'}の解析を終えられませんでした`, { label: '開く', fn: () => { if (gameById(gm.id)) push({ t: 'game', id: gm.id }); } });
     return;
   }
-  r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
-  if (!gm || r.done >= r.total) { finishRun(); return; }
+  if (!gm) { finishRun(); return; }
+  if (r.deep) {
+    if (performance.now() < r.deepNextAt) return;
+    r.deepNextAt = performance.now() + 420;
+    if (++r.deep.done >= r.deep.total) { finishRun(); return; }
+  } else {
+    r.done = Math.min(r.total, r.done + (r.kind === 'pre' ? (r.done < 24 ? 2 : 1) : 4));
+    if (r.done >= r.total) {
+      if (r.kind !== 'pre' || r.total <= 31) { finishRun(); return; }
+      // shortcut: 見た目の確認用に30・31手目を固定で使う。探索結果や選定規則の検証は製品テストで行う。
+      r.deep = { total: 2, done: 0 };
+      r.deepNextAt = performance.now() + 420;
+      refreshWaiting(gm);
+    }
+  }
   if (on) {
     const n = R.cands.querySelector('[data-run="n"]'), b = R.cands.querySelector('[data-run="bar"]');
-    if (n) n.textContent = `${r.done} / ${r.total}手`;
-    if (b) b.style.width = (100 * r.done / r.total).toFixed(1) + '%';
+    if (n) n.textContent = r.deep ? deepText(r) : `${r.done} / ${r.total}手`;
+    if (b) b.style.width = (100 * runProgress(r)).toFixed(1) + '%';
     if (before !== seen(S.ply)) renderPly();
     buildGraph();
   }
   const pill = SCR.querySelector('[data-runpill]');
-  if (pill) pill.textContent = `解析中 ${r.done}/${r.total}`;
+  if (pill) pill.textContent = runPill(r);
 }
 function finishRun() {
   const r = RUN, gm = gameById(r.id);
@@ -2302,6 +2321,7 @@ function finishRun() {
   RUN = null;
   if (!gm) return;
   gm.an = r.kind;
+  gm.deep = r.deep ? [30, 31] : undefined;
   if (!paid()) DB.usage.free++;
   else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
@@ -2310,7 +2330,7 @@ function finishRun() {
     if (DB.celebrated) toast('解析が終わりました');
     else {
       DB.celebrated = true;
-      ask('はじめての解析ができました', 'グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、形勢が大きく動いた手を見てみましょう。', '見てみる', () => { if (CUR === gm) setPly(startPly()); }, { single: true, img: 'learn-first' });
+      ask('はじめての解析ができました', 'グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、印のついた手を見てみましょう。', '見てみる', () => { if (CUR === gm) setPly(startPly()); }, { single: true, img: 'learn-first' });
     }
   }
   else {
@@ -2750,7 +2770,7 @@ function gameCard(g) {
   } else {
     tags = ['s', 'g'].map((s) => `<i class="t op"><small>${s === 's' ? '☗' : '☖'}</small>${stNames(g.tags[s])[0] || '未分類'}</i>`).join('');
   }
-  const right = run ? `<span class="runpill" data-runpill>${RUN.paused ? '中断中' : '解析中'} ${RUN.done}/${RUN.total}</span>` : wait ? '<span class="runpill wt">解析待ち</span>' : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
+  const right = run ? `<span class="runpill" data-runpill>${runPill(RUN)}</span>` : wait ? '<span class="runpill wt">解析待ち</span>' : g.an === 'none' ? '<span class="nopill">未解析</span>' : spark(valsFor(g));
   return `<div class="gcd" role="button" tabindex="0" data-a="open" data-v="${g.id}">${stamp}<div class="gin"><div class="g1"><b>${own ? esc(oppName(g)) : `${esc(g.sente)} 対 ${esc(g.gote)}`}</b><span class="sd">${g.sample ? 'サンプル' : own ? `あなたは${g.self === 's' ? '☗先手' : '☖後手'}` : '自分以外の対局'}</span></div><div class="tg">${tags}</div><div class="g3"><span>${dshort(g.date)}・${g.plies}手</span>${g.an === 'pre' && !run ? '<span class="pre">精密解析</span>' : ''}</div></div><div class="gx">${right}<button type="button" class="fv" data-a="fav" data-v="${g.id}" aria-pressed="${g.fav}" aria-label="お気に入り"><svg class="ic"><use href="#i-star"/></svg></button></div></div>`;
 }
 function listHTML(gs, canClear) {

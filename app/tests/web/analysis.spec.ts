@@ -1,15 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { analysisInput } from "../../src/analysis/display";
-import { readKif } from "../../src/core/kif";
+import { analysisInput, readingText } from "../../src/analysis/display";
+import { Record as ShogiRecord } from "tsshogi";
+import { readKif, writeKif } from "../../src/core/kif";
 import { fakeAnalysis, makeResults } from "../helpers/fake-analysis";
 const kif = readFileSync("tests/fixtures/standard.kif", "utf8");
 const button = (p: Page, name: string) =>
   p.getByRole("button", { name, exact: true });
-async function importOne(p: Page) {
+async function importOne(p: Page, source = kif) {
   await p.goto("/");
   await button(p, "棋譜を取り込む").click();
-  await p.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(kif);
+  await p.getByRole("textbox", { name: "KIF形式の棋譜" }).fill(source);
   await p.getByRole("radio", { name: "自分ではない" }).click();
   await button(p, "保存だけする").click();
   await expect(p.getByText("開始局面", { exact: true })).toBeVisible();
@@ -54,6 +55,128 @@ test("解析依頼・進行・通信断・再起動・別画面の完了通知�
   await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
   expect(fake.errors).toEqual([]);
 });
+test("精密の2段目を表示し、完了後とオフライン再起動後に深読み結果を表示する", async ({
+  page,
+}) => {
+  const sample = JSON.parse(
+    readFileSync("../mock/data/sample-game-2.json", "utf8"),
+  );
+  const record = new ShogiRecord();
+  for (const { move } of sample.positions.slice(1, 34))
+    record.append(record.position.createMoveByUSI(move.usi)!);
+  const fake = await fakeAnalysis(page, { firstReview: true });
+  fake.deep = { total: 0, done: 0 };
+  await importOne(page, writeKif(record));
+  await button(page, "解析する").click();
+  await expect(button(page, "中止")).toBeVisible();
+  fake.next = 34;
+  fake.deep = { total: 2, done: 0 };
+  await expect(page.getByText("勝負所を深く読んでいます（0/2）")).toBeVisible();
+  fake.deep = { total: 2, done: 1 };
+  await expect(page.getByText("勝負所を深く読んでいます（1/2）")).toBeVisible();
+  await button(page, "戻る").click();
+  await expect(page.getByText("深読み中 1/2", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: /33手を開く、深読み中 1\/2$/ })
+    .click();
+  const showDeepPly = async () => {
+    await button(page, "棋譜を開く").click();
+    await page.getByRole("button", { name: /^30 / }).click();
+    await button(page, "閉じる").click();
+  };
+  await showDeepPly();
+  const graph = page.getByRole("slider", { name: /形勢グラフ/ });
+  const path = graph.locator(
+    'path[stroke-width="2"][fill="none"][stroke-linejoin="round"]',
+  );
+  const shallowPath = await path.getAttribute("d");
+  fake.results = fake.results.map((r) =>
+    r.ply === 30 || r.ply === 31
+      ? {
+          ...r,
+          deep: {
+            ...r,
+            score: { kind: "cp", value: 1650 },
+            candidates: r.candidates.slice(0, 1),
+          },
+        }
+      : r,
+  );
+  fake.deep = { total: 2, done: 2 };
+  fake.complete = true;
+  await button(page, "見てみる").click();
+  await showDeepPly();
+  await expect(page.getByText("深く読んだ局面", { exact: true })).toBeVisible();
+  await expect(page.getByText("+1650", { exact: true })).toBeVisible();
+  await expect(path).not.toHaveAttribute("d", shallowPath!);
+  await expect(button(page, "2位")).not.toBeVisible();
+  await button(page, "1手戻る").click();
+  await expect(
+    page.getByText("深く読んだ局面", { exact: true }),
+  ).not.toBeVisible();
+  await expect(button(page, "2位")).toBeVisible();
+  fake.online = false;
+  await page.reload();
+  await showDeepPly();
+  await expect(page.getByText("深く読んだ局面", { exact: true })).toBeVisible();
+  await expect(page.getByText("+1650", { exact: true })).toBeVisible();
+  expect(fake.errors).toEqual([]);
+});
+
+test("悪手の推奨手リンクは、片側に深読みがあっても判定に使った候補・読み筋・矢印を示す", async ({
+  page,
+}) => {
+  const sample = JSON.parse(
+    readFileSync("../mock/data/sample-game-2.json", "utf8"),
+  );
+  const record = new ShogiRecord();
+  for (const { move } of sample.positions.slice(1, 34))
+    record.append(record.position.createMoveByUSI(move.usi)!);
+  const fake = await fakeAnalysis(page);
+  const results = makeResults(analysisInput(record, "precise"));
+  const before = results[30]!;
+  const shallow = before.candidates[1]!;
+  const deep = { ...before.candidates[2]!, rank: 1 };
+  record.goto(30);
+  const [shallowText] = readingText(record.position, [shallow.move!]);
+  const [deepText] = readingText(record.position, [deep.move!]);
+  const next = record.position.clone();
+  next.doMove(next.createMoveByUSI(shallow.move!)!);
+  const reply = makeResults({ initial: next.sfen, moves: [], mode: "std" })[0]!
+    .candidates[0]!.move!;
+  const [replyText] = readingText(next, [reply]);
+  results[30] = {
+    ...before,
+    score: { kind: "cp", value: 1200 },
+    candidates: [{ ...shallow, rank: 1, pv: [shallow.move!, reply] }],
+    deep: { ...before, candidates: [deep] },
+  };
+  results[31]!.score = { kind: "cp", value: -1200 };
+  fake.results = results;
+  fake.complete = true;
+  await importOne(page, writeKif(record));
+  await button(page, "解析する").click();
+  const link = page.getByRole("button", {
+    name: `最善は ${shallowText} ›`,
+    exact: true,
+  });
+  const arrow = page
+    .getByRole("img", { name: "30手目の盤面", exact: true })
+    .locator('line[stroke="#19C6A5"][stroke-width="15"]');
+  await expect(link).toBeVisible();
+  await button(page, "1手戻る").click();
+  await expect(page.getByText(deepText!, { exact: true })).toBeVisible();
+  const deepArrow = await arrow.evaluate((node) => node.outerHTML);
+  await button(page, "1手進む").click();
+  await link.click();
+  await expect(page.getByText(shallowText!, { exact: true })).toBeVisible();
+  await expect(page.getByText(replyText!, { exact: true })).toBeVisible();
+  expect(await arrow.evaluate((node) => node.outerHTML)).not.toBe(deepArrow);
+  await button(page, "この手を盤で試す").click();
+  await button(page, "リアルタイム解析 オン").click();
+  await expect(page.getByText(replyText!, { exact: true })).toBeVisible();
+});
+
 test("中止の確認・解析待ちの取り消し・上限と設定・失敗後の再依頼", async ({
   page,
 }) => {
@@ -198,8 +321,9 @@ test("精密依頼の応答喪失後に失効しても、再起動で結果を�
 }) => {
   const fake = await fakeAnalysis(page);
   fake.loseCreateResponse = true;
+  await page.clock.install();
   await importOne(page);
-  await page.clock.pauseAt(new Date());
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1500));
   await button(page, "解析する").click();
   await expect.poll(() => fake.requests.length).toBe(1);
   await expect(page.getByText("中断中", { exact: true }).first()).toBeVisible();

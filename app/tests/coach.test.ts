@@ -21,11 +21,36 @@ const quota = {
   exhausted: false,
 };
 const overview: CoachOverview = { paid: true, quota, latest: null };
+const base = { ply: 0, score: null, candidates: [], mate: null };
+const deepReference = {
+  id: "0:deep:candidate:1",
+  ply: 0,
+  score: { kind: "cp" as const, value: 30 },
+  pv: ["2g2f", "3c3d"],
+  provenMate: false,
+};
 const saved = {
   initial: "startpos",
   moves: ["7g7f"],
   mode: "precise" as const,
-  results: [],
+  results: [
+    {
+      ...base,
+      deep: {
+        ...base,
+        score: deepReference.score,
+        candidates: [
+          {
+            rank: 1,
+            depth: 20,
+            score: deepReference.score,
+            move: deepReference.pv[0],
+            pv: deepReference.pv,
+          },
+        ],
+      },
+    },
+  ],
   coachProof: { signature: "proof" },
   jobId: "job",
 };
@@ -52,7 +77,7 @@ const reply = (status: CoachReply["status"] = "pending"): CoachReply => ({
             kind: "facts" as const,
             title: "対局の振り返り",
             text: "落ち着いた駒組みでした。",
-            references: [],
+            references: [deepReference],
           },
         ],
       }
@@ -139,6 +164,7 @@ test("送信境界：目標・質問・利用者とAI双方の履歴を伏せ、
     assert(!json.includes(name));
   assert.equal(p.proof, saved.coachProof);
   assert.equal(p.analysis.results, saved.results);
+  assert.deepEqual(JSON.parse(json).analysis.results, saved.results);
   const long = coachInput(
     "id",
     saved,
@@ -326,6 +352,10 @@ test("非同期：画面離脱では中止せず、再起動で同じIDをGETし
   assert.equal(
     reopened.snapshot.records.a!.answers[0]!.sections[0]!.text,
     "落ち着いた駒組みでした。",
+  );
+  assert.deepEqual(
+    reopened.snapshot.records.a!.answers[0]!.sections[0]!.references,
+    [deepReference],
   );
   s.sql.close();
 });

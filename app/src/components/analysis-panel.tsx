@@ -6,6 +6,7 @@ import { Color } from "tsshogi";
 import { useAnalysis } from "../analysis/provider";
 import { cp, percent, scoreText, type CandidateRow } from "../analysis/display";
 import {
+  deepProgress,
   needsRetryConfirmation,
   partialSaved,
   type Analysis,
@@ -113,6 +114,7 @@ export function AnalysisPanel({
   const t = analysis?.attempt,
     job = t?.job,
     saved = analysis?.saved;
+  const deep = deepProgress(job);
   const confirmation = needsRetryConfirmation(t);
   const waiting = !!t && job?.status === "queued";
   const running = !branch && !!t && !waiting && !confirmation;
@@ -464,7 +466,7 @@ export function AnalysisPanel({
               {title}
             </Text>
             {branch && realtimeBusy && <WaitingDots />}
-            {running && (
+            {running && (!deep || offline) && (
               <Text
                 style={font(700, offline ? 9 : 10, 1.3, colors.ink2)}
                 numberOfLines={1}
@@ -531,11 +533,19 @@ export function AnalysisPanel({
               {`リアルタイム解析${depthLabel}${paused ? "・休止中" : searchingLabel ? `・${searchingLabel}` : ""}`}
             </Text>
           )}
+          {running && deep && !offline && (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={font(700, 10.5, 1.3, colors.ink2)}
+            >
+              {`勝負所を深く読んでいます（${deep.done}/${deep.total}）`}
+            </Text>
+          )}
           {running && (
             <View style={s.progress}>
               <View
                 style={{
-                  width: `${(100 * (job?.next || 0)) / Math.max(1, t.moves.length + 1)}%`,
+                  width: `${deep ? (100 * deep.done) / deep.total : (100 * (job?.next || 0)) / Math.max(1, t.moves.length + 1)}%`,
                   height: "100%",
                   backgroundColor: offline ? colors.orange : colors.mint,
                   overflow: "hidden",

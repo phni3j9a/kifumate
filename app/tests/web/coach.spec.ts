@@ -1,7 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { fakeAnalysis } from "../helpers/fake-analysis";
-import { fakeCoach } from "../helpers/fake-coach";
+import { fakeAnalysis, makeResults } from "../helpers/fake-analysis";
+import { coachSections, fakeCoach } from "../helpers/fake-coach";
+import { analysisInput, readingText } from "../../src/analysis/display";
+import { readKif } from "../../src/core/kif";
+
 const button = (p: Page, name: string) =>
   p.getByRole("button", { name, exact: true });
 async function imported(p: Page, precise = true) {
@@ -22,6 +25,116 @@ async function imported(p: Page, precise = true) {
   }
   return { analysis, coach };
 }
+test("AIコーチの深読み参照を評価値、盤面リンク、読み筋の再生に使う", async ({
+  page,
+}) => {
+  const { analysis, coach } = await imported(page, false);
+  const record = readKif(readFileSync("tests/fixtures/standard.kif", "utf8"));
+  const results = makeResults(analysisInput(record, "precise"));
+  const shallow = results[1]!;
+  const candidate = shallow.candidates[1]!;
+  const score = { kind: "cp" as const, value: 420 };
+  const deep = {
+    ...shallow,
+    score,
+    candidates: [{ ...candidate, rank: 1, score }],
+  };
+  results[1] = { ...shallow, deep };
+  analysis.results = results;
+  analysis.complete = true;
+  coach.status = "completed";
+  coach.sections = [
+    {
+      ...coachSections[0]!,
+      references: [
+        {
+          id: "1:deep:candidate:1",
+          ply: 1,
+          score,
+          pv: candidate.pv,
+          provenMate: false,
+        },
+      ],
+    },
+  ];
+  await button(page, "解析する").click();
+  await expect(button(page, "3位")).toBeVisible();
+  await button(page, "AIに聞く").click();
+  await button(page, "解説をつくる").click();
+  const link = button(page, "1手目の局面　評価値 +420");
+  await expect(link).toBeVisible();
+  expect(coach.requests[0]!.analysis.results).toEqual(results);
+  expect(coach.requests[0]!.proof).toMatchObject({
+    signature: "opaque-proof-kept",
+  });
+  record.goto(1);
+  const words = readingText(record.position, candidate.pv);
+  expect(words.length).toBeGreaterThan(0);
+  await expect(
+    page.getByTestId("coach-sheet").getByText(words.join(" "), { exact: true }),
+  ).toBeVisible();
+  await link.click();
+  await expect(
+    page.getByRole("img", { name: "1手目の盤面", exact: true }),
+  ).toBeVisible();
+  await button(page, "この読み筋を試す").click();
+  await expect(page.getByText("分岐1手目", { exact: true })).toBeVisible();
+  expect(analysis.errors).toEqual([]);
+});
+
+test("リアルタイム解析オフの分岐では、AIコーチが参照した1段目の読み筋を続けられる", async ({
+  page,
+}) => {
+  const { analysis, coach } = await imported(page, false);
+  const record = readKif(readFileSync("tests/fixtures/standard.kif", "utf8"));
+  const results = makeResults(analysisInput(record, "precise"));
+  const start = results[0]!;
+  const shallow = {
+    ...start.candidates[0]!,
+    move: "2g2f",
+    pv: ["2g2f", "3c3d", "2f2e"],
+  };
+  const deep = { ...shallow, pv: ["2g2f", "8c8d"] };
+  results[0] = {
+    ...start,
+    candidates: [shallow],
+    deep: { ...start, candidates: [deep] },
+  };
+  analysis.results = results;
+  analysis.complete = true;
+  coach.status = "completed";
+  coach.sections = [
+    {
+      ...coachSections[0]!,
+      references: [
+        {
+          id: "0:candidate:1",
+          ply: 0,
+          score: shallow.score,
+          pv: shallow.pv,
+          provenMate: false,
+        },
+      ],
+    },
+  ];
+  await button(page, "解析する").click();
+  await button(page, "AIに聞く").click();
+  await button(page, "解説をつくる").click();
+  await button(page, "この読み筋を試す").click();
+  await button(page, "リアルタイム解析 オン").click();
+  await button(page, "本譜に戻る").first().click();
+  await button(page, "AIに聞く").click();
+  await button(page, "この読み筋を試す").click();
+  await expect(button(page, "リアルタイム解析 オフ")).toBeVisible();
+  const next = button(page, "この手を盤で試す").filter({ hasText: "次の手" });
+  await expect(page.getByText("△3四歩", { exact: true })).toBeVisible();
+  await expect(page.getByText("△8四歩", { exact: true })).toHaveCount(0);
+  await next.click();
+  await expect(button(page, "棋譜を開く")).toContainText("分岐2手目△3四歩");
+  await button(page, "1手進む").click();
+  await expect(button(page, "棋譜を開く")).toContainText("分岐3手目▲2五歩");
+});
+
 test("AIコーチ：プロフィール保存・伏せ字・非同期の離脱と再起動・追加質問・無料/通信なしでも履歴閲覧", async ({
   page,
 }) => {

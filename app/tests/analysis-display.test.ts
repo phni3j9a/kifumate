@@ -122,6 +122,106 @@ test("悪手は指した側の勝率低下で判定し、初めて開くと自�
   assert.equal(startPly(pointsFor(r, [], Color.BLACK)), 0);
 });
 
+test("悪手・疑問手は同じ深さの組で判定し、グラフは局面単位で深読みを優先する", () => {
+  const r = record();
+  const prev = { ...result(32, 0), deep: result(32, 1000) };
+  const current = { ...result(33, -1000), deep: result(33, 750) };
+  const points = (a: AnalysisResult, b: AnalysisResult) =>
+    pointsFor(r, [a, b], Color.BLACK)[33]!;
+  assert.equal(points(prev, current).mark, undefined);
+  assert.equal(points(prev, current).value, 750);
+  assert.equal(points({ ...prev, deep: undefined }, current).mark, "悪手");
+  assert.equal(points({ ...prev, deep: undefined }, current).value, 750);
+  assert.equal(points(prev, { ...current, deep: undefined }).mark, "悪手");
+  assert.equal(
+    points(prev, { ...current, deep: result(33, 450) }).mark,
+    "疑問手",
+  );
+  const best = {
+    rank: 1,
+    depth: 20,
+    move: (r.moves[33]!.move as Move).usi,
+    pv: [],
+    score: null,
+  };
+  assert.equal(
+    points(
+      { ...prev, deep: { ...prev.deep, candidates: [best] } },
+      { ...current, deep: result(33, -1000) },
+    ).mark,
+    undefined,
+  );
+});
+
+test("深読みの証明済み詰みと好手も前後がそろったときだけ判定に使う", () => {
+  const r = record();
+  const ply = r.moves.findIndex(
+    (n, i) =>
+      i > 30 &&
+      n.move instanceof Move &&
+      n.move.color === Color.BLACK &&
+      !n.move.capturedPieceType &&
+      !n.move.to.equals((r.moves[i - 1]!.move as Move).to),
+  );
+  assert(ply > 30);
+  const move = (r.moves[ply]!.move as Move).usi;
+  const prev = result(ply - 1, 0),
+    current = result(ply, 0);
+  const pts = (deep: AnalysisResult) =>
+    pointsFor(
+      r,
+      [
+        { ...prev, deep },
+        { ...current, deep: current },
+      ],
+      Color.BLACK,
+    )[ply];
+  const mate = { plies: 1 as const, pv: ["7g7f"], branches: [] };
+  assert.notEqual(move, mate.pv[0]);
+  assert.equal(pts({ ...prev, mate })?.mark, "詰み逃し");
+  assert.equal(
+    pointsFor(r, [{ ...prev, deep: { ...prev, mate } }, current], Color.BLACK)[
+      ply
+    ]?.mark,
+    undefined,
+  );
+  const good = {
+    ...prev,
+    candidates: [
+      { rank: 1, depth: 20, move, pv: [move], score: prev.score },
+      {
+        rank: 2,
+        depth: 20,
+        pv: [],
+        score: { kind: "cp" as const, value: -400 },
+      },
+    ],
+  };
+  assert.equal(pts(good)?.mark, "好手");
+  assert.equal(
+    pointsFor(r, [{ ...prev, deep: good }, current], Color.BLACK)[ply]?.mark,
+    undefined,
+  );
+});
+
+test("候補と読み筋は深読みを優先し、深読みなしなら従来の候補を出す", () => {
+  const r = record();
+  const base = result(0, 0);
+  const withCandidate = (move: string) => ({
+    ...base,
+    candidates: [
+      { rank: 1, depth: 20, move, pv: [move, "3c3d"], score: base.score },
+    ],
+  });
+  const shallow = withCandidate("7g7f");
+  const deep = withCandidate("2g2f");
+  r.goto(0);
+  const rows = (a: AnalysisResult) =>
+    candidateRows(r.position, a, undefined, Color.BLACK, true);
+  assert.deepEqual(rows({ ...shallow, deep })[0]?.pv, ["2g2f", "3c3d"]);
+  assert.deepEqual(rows(shallow)[0]?.pv, ["7g7f", "3c3d"]);
+});
+
 test("復元した途中結果は解析済み扱いにせず、結果のない局面は未解析と分かる", async () => {
   const { partialSaved } = await import("../src/analysis/types");
   const saved = {

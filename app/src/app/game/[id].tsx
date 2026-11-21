@@ -1,5 +1,6 @@
 import { CoachSheet } from "../../coach/sheet";
 import { useCoach } from "../../coach/provider";
+import type { Reference } from "../../coach/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
@@ -52,6 +53,8 @@ import {
 } from "../../components/realtime-controls";
 import {
   candidateRows,
+  comparisonPair,
+  preferredResult,
   readingText,
   type CandidateRow,
   analysisInput,
@@ -124,8 +127,13 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [kif],
   );
   const [ply, setPly] = useState(0),
-    [branch, setBranch] = useState<Branch | null>(null),
+    [branch, setBranch] = useState<
+      (Branch & { reference?: Pick<Reference, "pv" | "score"> }) | null
+    >(null),
     [, redraw] = useState(0);
+  const [shallowCandidatesAt, setShallowCandidatesAt] = useState<number | null>(
+    null,
+  );
   const [selected, setSelected] = useState<Square | PieceType | null>(null),
     [promotion, setPromotion] = useState<Move[]>([]),
     [flipped, setFlipped] = useState(false),
@@ -314,6 +322,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     clear();
   }
   function jumpMain(to: number) {
+    setShallowCandidatesAt(null);
     setPly(Math.max(0, Math.min(total, to)));
     setBranch(null);
     clear();
@@ -322,6 +331,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
       if (undoBranch.current !== restore) return;
       clearBranchUndo();
       setPly(branch.base);
+      setShallowCandidatesAt(shallowCandidatesAt);
       setBranch(branch);
       clear();
     };
@@ -342,8 +352,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     // 本譜の次の手と同じなら、分岐にせず本譜を1手進める（モックの commitMove と同じ）
     const next = mainMoves[ply]?.move;
     if (!branch && next instanceof Move && move.equals(next)) {
-      setPly(ply + 1);
-      clear();
+      step(ply + 1);
       return;
     }
     try {
@@ -397,18 +406,25 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   }
   function step(to: number) {
     clear();
-    if (!branch) setPly(Math.max(0, Math.min(total, to)));
-    else if (to < 1) leaveBranch();
+    if (!branch) {
+      setShallowCandidatesAt(null);
+      setPly(Math.max(0, Math.min(total, to)));
+    } else if (to < 1) leaveBranch();
     else {
       branch.step(to);
       redraw((v) => v + 1);
     }
   }
   const point = evaluated[ply];
-  const shown = !branch ? results.find((r) => r.ply === ply) : undefined;
+  const current = !branch ? results.find((r) => r.ply === ply) : undefined;
+  const shown = preferredResult(current);
   const rows = candidateRows(
     position,
-    over ? undefined : shown,
+    over || !current
+      ? undefined
+      : shallowCandidatesAt === ply
+        ? { ...current, deep: undefined }
+        : current,
     mainMoves[ply]?.move instanceof Move
       ? (mainMoves[ply]!.move as Move)
       : undefined,
@@ -420,8 +436,13 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   });
   let branchRow: CandidateRow | undefined;
   if (branch) {
-    const atBase = results.find((r) => r.ply === branch.base);
+    const baseResult = results.find((r) => r.ply === branch.base);
+    const atBase =
+      shallowCandidatesAt === branch.base
+        ? baseResult
+        : preferredResult(baseResult);
     const lines = [
+      ...(branch.reference ? [branch.reference] : []),
       ...(atBase?.mate ? [{ pv: atBase.mate.pv, score: atBase.score }] : []),
       ...(atBase?.candidates || []),
     ];
@@ -461,13 +482,18 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const comparablePly = branch ? branch.base + branch.at : -1;
   const comparable =
     branchRow && analysis?.saved && !analysis.attempt && comparablePly <= total
-      ? results.find((r) => r.ply === comparablePly)
+      ? preferredResult(results.find((r) => r.ply === comparablePly))
       : undefined;
-  const previousResult = results.find((r) => r.ply === ply - 1);
+  const previous = results.find((r) => r.ply === ply - 1);
+  const [previousResult] = comparisonPair(previous, current);
+  const mixedDepth = !!current?.deep !== !!previous?.deep;
   const textBefore = scoreText(previousResult?.score, self),
     textAfter = scoreText(shownScore, self);
   const deltaText =
-    previousResult?.score?.kind === "cp" && shownScore?.kind === "cp"
+    !mixedDepth &&
+    !current?.deep &&
+    previousResult?.score?.kind === "cp" &&
+    shownScore?.kind === "cp"
       ? signed(
           ((cp(shownScore) || 0) - (cp(previousResult.score) || 0)) *
             (self === Color.BLACK ? 1 : -1),
@@ -501,7 +527,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         : "結果は不明";
   const evaluationLabel = over
     ? `${total}手で${resultLabel}`
-    : ply > 0 && shown
+    : ply > 0 && shown && !mixedDepth
       ? textBefore === textAfter && textAfter.endsWith("以上")
         ? textAfter
         : `${textBefore} → ${textAfter}`
@@ -604,7 +630,10 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     run();
   }
   function tryRow(row: CandidateRow) {
-    if (row.move) commit(row.move);
+    if (!row.move) return;
+    if (branch?.reference && branch.moves[branch.at]?.equals(row.move))
+      step(branch.at + 1);
+    else commit(row.move);
   }
   const isFavorite = !!(favorite ?? game.favorite);
   async function fav() {
@@ -978,6 +1007,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                   evalHelp
                 )}
                 <Text style={font(900, 12.5)}>{evaluationLabel}</Text>
+                {current?.deep && (
+                  <Text style={font(700, 10.5, 1, colors.ink2)}>
+                    深く読んだ局面
+                  </Text>
+                )}
                 <Text style={font(700, 10.5, 1, colors.ink2)}>
                   {over
                     ? ""
@@ -998,7 +1032,13 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
                 {recommendation && (
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() => jumpMain(ply - 1)}
+                    onPress={() => {
+                      if (rt.hold) void rtController.stop();
+                      jumpMain(ply - 1);
+                      setCandidateState({ key: "", index: 0 });
+                      if (previous?.deep && previousResult === previous)
+                        setShallowCandidatesAt(ply - 1);
+                    }}
                   >
                     <Text style={font(900, 10.5, 1, colors.ink2)}>
                       {recommendation} ›
@@ -1034,8 +1074,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           branch={!!branch}
           start={() => start("precise")}
           jump={jumpMain}
-          tryLine={(p, pv) => {
+          tryLine={({ ply: p, pv, score }) => {
             clearBranchUndo();
+            setShallowCandidatesAt(null);
             record.goto(p);
             const next = new Branch(p, record.position);
             for (const usi of pv) {
@@ -1045,7 +1086,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             }
             next.step(Math.min(1, next.moves.length));
             setPly(p);
-            setBranch(next);
+            setBranch(
+              Object.assign(next, {
+                reference: { pv: next.moves.map((m) => m.usi), score },
+              }),
+            );
             clear();
           }}
         />
@@ -1105,7 +1150,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           ) : (
             // shortcut: 全手を一度に描く。数千手の棋譜で開くのが遅ければ FlatList にする
             [null, ...mainMoves].map((n, i) => {
-              const score = results.find((r) => r.ply === i)?.score;
+              const score = preferredResult(
+                results.find((r) => r.ply === i),
+              )?.score;
               return (
                 <Pressable
                   key={i}

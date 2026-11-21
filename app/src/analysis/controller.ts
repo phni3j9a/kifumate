@@ -79,6 +79,7 @@ export class AnalysisController {
   private async receive(a: Analysis, reply: Reply) {
     const attempt = a.attempt!;
     const merged = new Map(attempt.results.map((r) => [r.ply, r]));
+    // 精密の完了時は全件が届く。受信済み局面も deep を含むオブジェクトで上書きする。
     reply.results.forEach((r) => merged.set(r.ply, r));
     const results = [...merged.values()].sort((a, b) => a.ply - b.ply);
     const ended = ["completed", "failed", "cancelled"].includes(reply.status);

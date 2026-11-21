@@ -6,7 +6,12 @@ import { AnalysisController } from "../src/analysis/controller";
 import { analysisStorage } from "../src/analysis/storage";
 import { database } from "./helpers/database";
 import { migrate, migrations } from "../src/storage/schema";
-import type { Input, Reply, Quota } from "../src/analysis/types";
+import {
+  deepProgress,
+  type Input,
+  type Reply,
+  type Quota,
+} from "../src/analysis/types";
 const quota: Quota = {
   paid: true,
   weekStart: 0,
@@ -119,6 +124,110 @@ test("偽HTTPサーバー: 登録一度・安全な保存後に認証・本文�
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+test("精密の完了応答が止まれば中断し、転送が続けば15秒を超えても全件と署名を保存する", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  let signal!: AbortSignal;
+  const api = new AnalysisClient(
+    "https://example.test",
+    { get: async () => "a".repeat(64), set: async () => {} },
+    async (url, init) => {
+      const path = new URL(String(url));
+      if (path.pathname === "/v1/quota") return Response.json(quota);
+      if (path.pathname === "/v1/entitlements")
+        return Response.json({ paid: true, source: "invite", expiresAt: null });
+      if (init?.method === "POST") return Response.json(reply());
+      assert.equal(path.search, "?from=1");
+      signal = init!.signal!;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            body = controller;
+            signal.addEventListener("abort", () => body.error(signal.reason), {
+              once: true,
+            });
+          },
+        }),
+      );
+    },
+  );
+  const { controller, storage, sql } = await setup(api);
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    await controller.start("a", input);
+    const deep = { ...result(0), score: { kind: "cp" as const, value: 500 } };
+    const results = [{ ...result(0), deep }, result(1)];
+    const coachProof = { signature: "opaque-署名", expiresAt: 99 };
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        ...reply("completed", 2),
+        results,
+        coachProof,
+      }),
+    );
+    const stalled = controller.sync();
+    await flush();
+    body.enqueue(bytes.slice(0, 10));
+    await flush();
+    t.mock.timers.tick(15000);
+    await stalled;
+    assert.equal(controller.snapshot.offline, true);
+    assert.equal((await storage.load())[0]?.saved, null);
+    const resumed = controller.sync();
+    await flush();
+    t.mock.timers.tick(8000);
+    body.enqueue(bytes.slice(0, 10));
+    await flush();
+    t.mock.timers.tick(8000);
+    assert.equal(signal.aborted, false);
+    body.enqueue(bytes.slice(10));
+    body.close();
+    await resumed;
+    const saved = (await storage.load())[0];
+    assert.equal(saved?.attempt, null);
+    assert.deepEqual(saved?.saved?.results, results);
+    assert.deepEqual(saved?.saved?.coachProof, coachProof);
+  } finally {
+    sql.close();
+  }
+});
+test("本文を逐次読めないfetchでも、精密の完了応答は15秒を超えて受信できる", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const results = [{ ...result(0), deep: result(0) }, result(1)];
+  let signal!: AbortSignal;
+  const api = new AnalysisClient(
+    "https://example.test",
+    { get: async () => "a".repeat(64), set: async () => {} },
+    async (url, init) => {
+      const path = new URL(String(url));
+      if (path.pathname === "/v1/quota") return Response.json(quota);
+      if (path.pathname === "/v1/entitlements")
+        return Response.json({ paid: true, source: "invite", expiresAt: null });
+      if (init?.method === "POST") return Response.json(reply());
+      signal = init!.signal!;
+      const data = { ...reply("completed", 2), results, coachProof: null };
+      return {
+        ok: true,
+        status: 200,
+        body: null,
+        headers: new Headers(),
+        json: () => new Promise((r) => setTimeout(() => r(data), 20000)),
+      } as unknown as Response;
+    },
+  );
+  const { controller, storage, sql } = await setup(api);
+  try {
+    await controller.start("a", input);
+    const done = controller.sync();
+    await new Promise<void>((r) => setImmediate(r));
+    t.mock.timers.tick(20000);
+    await done;
+    assert.equal(signal.aborted, false);
+    assert.deepEqual((await storage.load())[0]?.saved?.results, results);
+  } finally {
+    sql.close();
+  }
+});
 test("送信応答喪失→再起動→重複再送→差分を重複排除して完成・署名をそのまま保存", async () => {
   let lost = true,
     from = -1;
@@ -160,6 +269,55 @@ test("送信応答喪失→再起動→重複再送→差分を重複排除し�
   );
   assert.deepEqual(reopened.snapshot.records.a?.saved?.moves, input.moves);
   assert.equal(reopened.snapshot.records.a?.attempt, null);
+  sql.close();
+});
+test("勝負所の進捗を保存し、完了時の全件で受信済みの局面も上書きする", async () => {
+  const total = 34;
+  const precise = { ...input, moves: Array(total - 1).fill("7g7f") };
+  const shallow = Array.from({ length: total }, (_, i) => result(i));
+  const progress = { total: 2, done: 1 };
+  const running = {
+    ...reply("running", total),
+    total,
+    deep: progress,
+    results: shallow,
+  };
+  const results = shallow.map((r) =>
+    r.ply === 30 || r.ply === 31
+      ? { ...r, deep: { ...r, score: { kind: "cp" as const, value: 300 } } }
+      : r,
+  );
+  const coachProof = { signature: "deep込み" };
+  const { controller, storage, sql } = await setup({
+    create: async () => running,
+    get: async (_, from) => {
+      assert.equal(from, total);
+      return {
+        ...running,
+        status: "completed",
+        deep: { total: 2, done: 2 },
+        results,
+        coachProof,
+      };
+    },
+  });
+  await controller.start("a", precise);
+  assert.equal(deepProgress(reply()), undefined);
+  assert.equal(
+    deepProgress({ ...running, deep: { total: 0, done: 0 } }),
+    undefined,
+  );
+  assert.equal(deepProgress({ ...running, status: "completed" }), undefined);
+  assert.deepEqual(
+    deepProgress((await storage.load())[0]?.attempt?.job),
+    progress,
+  );
+  assert.deepEqual((await storage.load())[0]?.attempt?.results, shallow);
+  await controller.sync();
+  const saved = (await storage.load())[0];
+  assert.equal(saved?.attempt, null);
+  assert.deepEqual(saved?.saved?.results, results);
+  assert.deepEqual(saved?.saved?.coachProof, coachProof);
   sql.close();
 });
 test("待ち・取り消し・通信断中の中止意思を永続化し再開・失敗は前回の精密結果を残す", async () => {
