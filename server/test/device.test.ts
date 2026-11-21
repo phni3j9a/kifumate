@@ -297,6 +297,9 @@ describe('精密の2段目', () => {
     const scores = new Map([[30, 600], [31, 0], [32, 0], [33, -600]]);
     const rows = Array.from({length: 37}, (_, ply) => ({ply, score: scores.has(ply) ? score(scores.get(ply)!) : null, mate: null}));
     expect(deepPositions('startpos', rows)).toEqual([30, 31]);
+    const mirrored = new Map([[30, -62], [31, -93], [34, 93], [35, 62]]);
+    const rows2 = Array.from({length: 37}, (_, ply) => ({ply, score: mirrored.has(ply) ? score(mirrored.get(ply)!) : null, mate: null}));
+    expect(deepPositions('startpos', rows2)).toEqual([30, 31]);
   });
   it('再起動して続きから探索し、完了時は全件を返して深読みを含む署名と1局を確定する', async () => {
     const called: number[] = [];

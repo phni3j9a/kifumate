@@ -11,7 +11,10 @@ export function deepPositions(initial: string, results: PositionResult[]): numbe
     const before = results[ply - 1], after = results[ply];
     if (!before.score || !after.score || (before.mate && after.mate)) continue;
     const sign = ply % 2 === 1 ? first : -first;
-    const drop = winRate(sign * cp(before.score)) - winRate(sign * cp(after.score));
+    let x = sign * cp(before.score), y = sign * cp(after.score);
+    // w(x)-w(y) = w(-y)-w(-x) なので、対称な組は同じ向きにそろえて同じ計算にする。
+    if (x + y < 0) [x, y] = [-y, -x];
+    const drop = winRate(x) - winRate(y);
     // 数学上同点の低下が浮動小数点の誤差だけで前後しないよう、比較用に丸める。
     if (drop > 0) drops.push({ply, drop: Math.round(drop * 1e10)});
   }
