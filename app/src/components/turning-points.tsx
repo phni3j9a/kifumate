@@ -57,8 +57,8 @@ export function TurningPointsSheet({
   onJump,
 }: {
   onClose: () => void;
-  /** none：未解析、running：解析中・解析待ち、done：解析済み */
-  state: "none" | "running" | "done";
+  /** none：未解析、running：解析中・解析待ち、partial：復元した途中結果、done：解析済み */
+  state: "none" | "running" | "partial" | "done";
   list: TurningPoint[];
   ply: number;
   own: boolean;
@@ -83,12 +83,14 @@ export function TurningPointsSheet({
         <EmptyNote>
           {state === "running"
             ? "解析が終わると、印の付いた手がここに並びます。"
-            : "解析すると、悪手・疑問手・好手など\n印の付いた手がここに並びます。"}
+            : state === "partial"
+              ? "途中までの結果だけを復元しています。\n解析し直すと、印の付いた手がここに並びます。"
+              : "解析すると、悪手・疑問手・好手など\n印の付いた手がここに並びます。"}
         </EmptyNote>
       ) : !list.length ? (
         <EmptyNote>
           {
-            "印の付いた手はありませんでした。\n印は、31手目より後で形勢が大きく動いた手に付きます。"
+            "印の付いた手はありませんでした。\n印は、31手目以降で形勢が大きく動いた手に付きます。"
           }
         </EmptyNote>
       ) : (

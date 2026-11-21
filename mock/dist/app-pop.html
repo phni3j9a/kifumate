@@ -1453,7 +1453,7 @@ SCR.addEventListener('keydown', (e) => {
 });
 
 /* ---------- game screen: replay, analysis results, trying moves on a branch ---------- */
-let CUR = null, G = null, P = [], N = 0, M = null, SELF = 's', OTHER = 'g', FLIP = false, OWN = true;
+let CUR = null, G = null, P = [], N = 0, M = null, SELF = 's', OTHER = 'g', BOT = 's', FLIP = false, OWN = true;
 let POS = [], PH = [], MARKS = [], MARKED = new Set();
 const S = { ply: 0, sel: 0, pick: null, targets: [], br: null, lastBr: null, promo: null, rtUntil: 0, rtOn: true, rtWarm: false, rtHold: false, rtPaused: false, rtResult: null, kind: 'pre', told: {} };
 let RUN = null;      /* the analysis in progress: { id, done, total, kind, timer, paused } */
@@ -1473,7 +1473,7 @@ const marksOf = (p) => (seen(p.ply) ? markHTML(p.mark) + (p.missedTsume ? '<em c
 const cpOf = (o) => (o.mate != null ? (o.mate > 0 ? 3000 : -3000) : o.cp);
 const wrSelf = (o) => { const w = 100 / (1 + Math.exp(-cpOf(o) / 600)); return SELF === 's' ? w : 100 - w; };
 const pct = (w) => Math.max(1, Math.min(99, Math.round(w)));
-/* evaluation from the bottom player's side: plus means you are ahead. Clamped to ±3000 for the graph. */
+/* evaluation from your side (sente's when watching): plus means you are ahead. Clamped to ±3000 for the graph. */
 const valOf = (o) => (SELF === 's' ? 1 : -1) * cpOf(o);
 const sgn = (v) => (v > 0 ? '+' + v : v < 0 ? '−' + -v : '±0');
 /* who won, as recorded for this game (it can be corrected by hand): 's' / 'g', or null for a draw or unknown */
@@ -1546,17 +1546,19 @@ function view() {
 
 function loadGame(gm) {
   CUR = gm; G = gm.data; P = G.positions; N = P.length - 1; M = G.meta;
-  /* your side sits at the bottom; a record that is not yours is seen from sente unless turned round */
-  OWN = !!gm.self; SELF = gm.self || gm.view || 's'; OTHER = flip(SELF); FLIP = SELF === 'g';
+  /* your side sits at the bottom; a record that is not yours is seen from sente unless turned round.
+     Turning it round moves the board and the two names only: the win rate, the graph, the marks and
+     the turning points stay on sente's side (SELF), as in the app */
+  OWN = !!gm.self; SELF = gm.self || 's'; OTHER = flip(SELF); BOT = gm.self || gm.view || 's'; FLIP = BOT === 'g';
   POS = P.map((p) => parseSfen(p.sfen));
   markProven();
   PH = phases(); MARKS = allMarks(); MARKED = new Set(MARKS.map((m) => m.i));
   Object.assign(S, { sel: 0, pick: null, targets: [], br: null, promo: null, rtUntil: 0 });
-  R.youname.textContent = SELF === 's' ? gm.sente : gm.gote;
-  R.oppname.textContent = SELF === 's' ? gm.gote : gm.sente;
-  R.youav.textContent = SELF === 's' ? '☗' : '☖';
-  R.oppav.textContent = OTHER === 's' ? '☗' : '☖';
-  R.youid.dataset.side = SELF; R.oppid.dataset.side = OTHER;
+  R.youname.textContent = BOT === 's' ? gm.sente : gm.gote;
+  R.oppname.textContent = BOT === 's' ? gm.gote : gm.sente;
+  R.youav.textContent = BOT === 's' ? '☗' : '☖';
+  R.oppav.textContent = BOT === 's' ? '☖' : '☗';
+  R.youid.dataset.side = BOT; R.oppid.dataset.side = flip(BOT);
   R.youl.textContent = YOU(); R.oppl.textContent = OPP();
   R.graph.setAttribute('aria-valuemax', N);
   S.ply = gm.ply != null ? Math.min(N, gm.ply) : startPly();
@@ -1669,9 +1671,9 @@ const xy = (f, r) => (FLIP ? [OX + (f - 1) * CW, OY + (9 - r) * CH] : [OX + (9 -
 function pieceG(k, prom, side, x, y, o) {
   o = o || {};
   const sc = SZ[k], t = prom ? KJP[k] : k === 'K' ? (side === 's' ? '玉' : '王') : KJ[k];
-  const rot = side !== SELF ? ' rotate(180 50 54)' : '';
+  const rot = side !== BOT ? ' rotate(180 50 54)' : '';
   const scl = sc !== 1 ? ` translate(${(50 * (1 - sc)).toFixed(2)} ${(58 * (1 - sc)).toFixed(2)}) scale(${sc})` : '';
-  const cls = `pc${side === SELF ? '' : ' po'}${prom ? ' pr' : ''}${k === 'K' ? ' kg' : ''}${o.cls || ''}`;
+  const cls = `pc${side === BOT ? '' : ' po'}${prom ? ' pr' : ''}${k === 'K' ? ' kg' : ''}${o.cls || ''}`;
   return `<g class="${cls}" transform="translate(${x} ${y})"><path class="sh" d="${PATH}" transform="translate(0 6)${rot}${scl}"/><g transform="translate(0 ${o.lift ? -7 : 0})${rot}${scl}"><path class="fc" d="${PATH}"/><text x="50" y="64" dy=".35em" text-anchor="middle">${t}</text></g></g>`;
 }
 function arrowG(m, side) {
@@ -1757,7 +1759,7 @@ function trayHTML(h, side) {
   const live = !gameOver() && view().turn === side;
   return ['R', 'B', 'G', 'S', 'N', 'L', 'P'].filter((k) => h[k]).map((k) => {
     const on = live && S.pick && S.pick.hand === k;
-    return `<button type="button" class="hk${on ? ' on' : ''}" data-a="hand" data-v="${k}" data-side="${side}" aria-label="持ち駒 ${KJ[k]}">${faceSVG(KJ[k], side === SELF ? '' : ' po')}${h[k] > 1 ? `<b>${h[k]}</b>` : ''}</button>`;
+    return `<button type="button" class="hk${on ? ' on' : ''}" data-a="hand" data-v="${k}" data-side="${side}" aria-label="持ち駒 ${KJ[k]}">${faceSVG(KJ[k], side === BOT ? '' : ' po')}${h[k] > 1 ? `<b>${h[k]}</b>` : ''}</button>`;
   }).join('');
 }
 
@@ -2005,7 +2007,7 @@ function turnsHTML() {
   const mode = anMode();
   if (mode !== 'done') return `<p class="empty">${mode === 'run' || waiting() ? '解析が終わると、印の付いた手がここに並びます。' : '解析すると、悪手・疑問手・好手など<br>印の付いた手がここに並びます。'}</p>`;
   const list = turns();
-  if (!list.length) return '<p class="empty">印の付いた手はありませんでした。<br>印は、31手目より後で形勢が大きく動いた手に付きます。</p>';
+  if (!list.length) return '<p class="empty">印の付いた手はありませんでした。<br>印は、31手目以降で形勢が大きく動いた手に付きます。</p>';
   /* one note for the whole list, not a lock on every row: an analysis without deep reading says what the paid plan adds */
   const up = (CUR.deep || []).length ? '' : !paid() ? 'plan' : CUR.an === 'std' ? 'redo' : '';
   let h = up ? `<button type="button" class="tpn" data-a="deeplock"><svg class="ic"><use href="#${up === 'redo' ? 'i-refresh' : 'i-lock'}"/></svg><span>${up === 'redo' ? '精密解析' : '有料プラン'}では、勝負所を5秒ずつ深く読みます</span><svg class="ic"><use href="#i-next"/></svg></button>` : '';
@@ -2049,7 +2051,7 @@ function markCurrent() {
 function renderBoard() {
   const v = view();
   R.board.innerHTML = boardSVG() + promoHTML();
-  for (const [el, side] of [[R.youhand, SELF], [R.opphand, OTHER]]) {
+  for (const [el, side] of [[R.youhand, BOT], [R.opphand, flip(BOT)]]) {
     const html = trayHTML(v.pos.hands[side], side);
     el.classList.toggle('none', !html);
     el.innerHTML = html || '<i class="t0">なし</i>';
@@ -2126,7 +2128,8 @@ function renderPly() {
   renderBar();
   markCurrent();
 }
-function renderGame() { renderPly(); buildGraph(); }
+/* an open list of turning points follows whatever changed under it: an analysis that ended or failed, the plan */
+function renderGame() { renderPly(); buildGraph(); if (UI.sheet === 'tp') A.turns(); }
 function clearSel() { S.pick = null; S.targets = []; S.promo = null; }
 function clearPick() { if (S.pick || S.promo) { clearSel(); renderBoard(); } }
 /* Going somewhere else on the game line leaves the branch. A branch is not saved, so when that happens
@@ -2396,11 +2399,11 @@ function finishRun() {
   else { DB.usage.total++; if (r.kind === 'pre') DB.usage.precise++; }
   if (onGame(gm)) {
     renderGame();
-    if (UI.sheet === 'tp') A.turns();
     if (AI.open) renderAI();
     if (DB.celebrated) toast('解析が終わりました');
     else {
       DB.celebrated = true;
+      closeSheet();   /* the dialog is its own layer in the app, so a sheet left open while waiting (the turning points) closes first */
       ask('はじめての解析ができました', 'グラフの印をタップすると、その手に移れます。盤の駒を動かせば、別の手も試せます。まずは、印のついた手を見てみましょう。', '見てみる', () => { if (CUR === gm) setPly(startPly()); }, { single: true, img: 'learn-first' });
     }
   }
@@ -2430,12 +2433,12 @@ A.gmenu = () => {
   let h = row('gfav', 'i-star', g.fav ? 'お気に入りから外す' : 'お気に入りに入れる', '', g.fav ? ' on' : '');
   h += row('ginfo', 'i-info', '対局情報', '対局者・結果・戦法と囲い（修正もここから）');
   if (g.an === 'std' && !busy) h += row('reanalyze', 'i-refresh', '精密解析でやり直す', paid() ? `候補3手とAIコーチ（今週あと${preciseLeft()}局）` : '有料プランの機能です');
-  if (!g.self) h += row('gflip', 'i-refresh', '盤の向きを変える', `いまは${SELF === 's' ? '先手' : '後手'}の側から見ています`);
+  if (!g.self) h += row('gflip', 'i-refresh', '盤の向きを変える', `いまは${BOT === 's' ? '先手' : '後手'}の側から見ています`);
   h += row('kifout', 'i-export', 'KIFを書き出す', 'コピー・ファイルに保存・共有');
   h += row('gdel', 'i-trash', 'この棋譜を削除', '', ' dng');
   openSheet('この対局', h, { auto: true });
 };
-A.gflip = () => { const g = CUR, p = S.ply; closeSheet(); g.view = SELF === 's' ? 'g' : 's'; loadGame(g); S.ply = p; renderGame(); };
+A.gflip = () => { const g = CUR, p = S.ply; closeSheet(); g.view = BOT === 's' ? 'g' : 's'; loadGame(g); S.ply = p; renderGame(); };
 A.gfav = () => { CUR.fav = !CUR.fav; closeSheet(); toast(CUR.fav ? 'お気に入りに入れました' : 'お気に入りから外しました'); };
 A.ginfo = () => { closeSheet(); push({ t: 'info', id: CUR.id }); };
 A.reanalyze = () => {

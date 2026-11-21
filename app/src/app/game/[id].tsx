@@ -72,7 +72,11 @@ import {
   signed,
   turningPoints,
 } from "../../analysis/display";
-import { needsRetryConfirmation, type Mode } from "../../analysis/types";
+import {
+  needsRetryConfirmation,
+  partialSaved,
+  type Mode,
+} from "../../analysis/types";
 import { deleteGame, toggleFavorite } from "../../storage/repository";
 
 /** 対局者名（.id）。手番の側はミント色になり「手番」と出る */
@@ -149,8 +153,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const told = useRef(false);
   const opened = useRef(false);
   const [initialized, setInitialized] = useState(false);
-  const { records, offline, controller, ready, watchReview, quota } =
-    useAnalysis();
+  const { records, offline, controller, ready, watchReview } = useAnalysis();
   const undoBranch = useRef<(() => void) | null>(null);
   const clearBranchUndo = useCallback(() => {
     if (undoBranch.current) hideToast(undoBranch.current);
@@ -165,7 +168,11 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   useFocusEffect(
     useCallback(() => {
       const unwatch = loaded
-        ? watchReview({ id, jump: () => reviewJump.current() })
+        ? watchReview({
+            id,
+            closeSheet: () => setSheet(null),
+            jump: () => reviewJump.current(),
+          })
         : undefined;
       return () => {
         unwatch?.();
@@ -241,8 +248,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     [record, results, game?.self_side],
   );
   const phases = useMemo(() => (record ? phaseRanges(record) : []), [record]);
-  // 勝負所の一覧は、解析がそろってから出す（解析中は好手の選び直しで行が入れかわる）
-  const turnsReady = !!analysis?.saved && !analysis.attempt;
+  // 勝負所の一覧は、解析がそろってから出す（解析中は好手の選び直しで行が入れかわる。復元した途中結果は全局の結果ではない）
+  const turnsReady =
+    !!analysis?.saved && !analysis.attempt && !partialSaved(analysis.saved);
   const turns = useMemo(
     () =>
       record && turnsReady
@@ -1227,9 +1235,13 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           state={
             turnsReady
               ? "done"
-              : analysis?.attempt && !needsRetryConfirmation(analysis.attempt)
-                ? "running"
-                : "none"
+              : analysis?.attempt
+                ? needsRetryConfirmation(analysis.attempt)
+                  ? "none"
+                  : "running"
+                : analysis?.saved
+                  ? "partial"
+                  : "none"
           }
           list={turns}
           ply={ply}
@@ -1237,9 +1249,10 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
           you={own ? "あなた" : sideOf(self)}
           opponent={own ? "相手" : "後手"}
           upgrade={
-            results.some((r) => r.deep)
+            // 権利は照会済みの値で決める（解析回数の取得とは別。回数が未取得でも有料の人に有料プランを案内しない）
+            results.some((r) => r.deep) || rt.paid === null
               ? null
-              : !quota?.paid
+              : !rt.paid
                 ? "plan"
                 : analysis?.saved?.mode === "std"
                   ? "redo"

@@ -327,6 +327,42 @@ test("勝負所のおすすめは判定に使った段階から出し、深読�
   );
 });
 
+test("勝負所は入玉宣言を逃した手のおすすめを「入玉宣言」と出し、深読みでも「最善の手」扱いにしない", () => {
+  const r = record();
+  // 宣言勝ちの候補には指し手がない。36手目（後手）は宣言せずに別の手で勝率を落とした
+  const declaration = {
+    rank: 1,
+    depth: 0,
+    declarationWin: true,
+    pv: [],
+    score: {
+      kind: "declaration" as const,
+      value: null,
+      winner: "gote" as const,
+    },
+  };
+  const results: AnalysisResult[] = sample.positions.map((p: any) =>
+    result(p.ply, p.ply >= 36 ? 1000 : -1000),
+  );
+  results[35] = { ...results[35]!, candidates: [declaration] };
+  const list = () =>
+    turningPoints(
+      r,
+      results,
+      pointsFor(r, results, Color.WHITE),
+      Color.WHITE,
+    ).map((t) => [t.ply, t.mark, t.best, t.deep]);
+  assert.deepEqual(list(), [[36, "悪手", "入玉宣言", undefined]]);
+  results[35] = {
+    ...results[35]!,
+    deep: { ...result(35, -1000), candidates: [declaration] },
+  };
+  results[36] = { ...results[36]!, deep: result(36, 1000) };
+  assert.deepEqual(list(), [
+    [36, "悪手", "入玉宣言", { score: "+3000以上", reading: [] }],
+  ]);
+});
+
 test("候補と読み筋は深読みを優先し、深読みなしなら従来の候補を出す", () => {
   const r = record();
   const base = result(0, 0);

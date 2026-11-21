@@ -191,8 +191,9 @@ export function turningPoints(
       after !== null
     ) {
       const mate = prev.mate && prev.mate.pv[0] !== move.usi ? prev.mate : null;
-      const line = mate ?? prev.candidates[0];
-      const usi = mate ? mate.pv[0] : prev.candidates[0]?.move;
+      const top = prev.candidates[0];
+      const line = mate ?? top;
+      const usi = mate ? mate.pv[0] : top?.move;
       out.push({
         ply: i,
         text: moveText(node.displayText),
@@ -200,13 +201,19 @@ export function turningPoints(
         mark: points[i]?.mark,
         before: percent(sign * before),
         after: percent(sign * after),
-        best: usi && usi !== move.usi ? readingText(pos, [usi])[0] : undefined,
+        // 入玉宣言の候補には指し手がない。本譜の手（宣言しなかった）とは必ず違う
+        best:
+          !mate && top?.declarationWin
+            ? "入玉宣言"
+            : usi && usi !== move.usi
+              ? readingText(pos, [usi])[0]
+              : undefined,
         mate: mate?.plies,
         deep: deep
           ? {
               score: mate
                 ? `${mate.plies}手詰め`
-                : scoreText(prev.candidates[0]?.score ?? prev.score, self),
+                : scoreText(top?.score ?? prev.score, self),
               reading: line ? readingText(pos, line.pv).slice(1) : [],
             }
           : undefined,

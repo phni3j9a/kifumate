@@ -46,6 +46,8 @@ const fs = require('fs');
   ok(await tp('.tpn').count() === 0, 'no note when the analysis has deep reading');
   await click('#scr .tp[data-v="62"]'); ok(await page.locator('#scr [data-b="sheet"]').isHidden(), 'a row closes the sheet'); await has('62手目'); await has('深く読んだ局面');
   await act('turns'); ok((await tp('.tp.cur').evaluateAll((els) => els.map((e) => e.dataset.v).join())) === '62', 'the move on the board is highlighted'); await act('closesheet');
+  /* 印も深読みもない解析は見本データにないので、文面だけ確かめる。印は31手目にも付くので「31手目以降」 */
+  ok(src.includes('印は、31手目以降で形勢が大きく動いた手に付きます。') && !src.includes('31手目より後'), 'nothing marked: says where marks start');
 
   // 2. stop an analysis: asks first, and the quota is untouched
   await jump('fresh');
@@ -75,6 +77,9 @@ const fs = require('fs');
   await act('analyze'); await wait(500); await act('turns'); await wait(10000); await has('勝負所（12手）', 'the open list fills in when the analysis ends');
   ok(await tp('.tpn').count() === 1 && await tp('.tp .td').count() === 0, 'one note for the list, not a lock on every row');
   await has('有料プランでは、勝負所を5秒ずつ深く読みます');
+  /* 開いたままプランが変わったら、案内も押した先（精密解析でのやり直し）に合わせる */
+  await ctl('.pg-ctl [data-plan="paid"]'); await has('精密解析では、勝負所を5秒ずつ深く読みます', 'the open list follows a plan change'); await hasNot('有料プランでは、勝負所を5秒ずつ深く読みます', 'the open list follows a plan change');
+  await ctl('.pg-ctl [data-plan="free"]'); await has('有料プランでは、勝負所を5秒ずつ深く読みます', 'the open list follows a plan change');
   await act('deeplock'); await has('深読みは、有料プランで使えます'); await click('#scr .dla [data-a="dlgok"]'); await has('月額'); await act('back');
   await act('back'); await has('あと6局', 'free count after one analysis');
   await jump('game'); await ctl('.pg-ctl [data-plan="free"]'); await has('2位', 'saved precise candidates readable on free');
@@ -155,7 +160,9 @@ const fs = require('fs');
   await ctl('.pg-ctl [data-net="on"]');
   await jump('offline'); await wait(3300); await has('中断中'); await has('通信が戻ると、続きから再開します');
   await ctl('.pg-ctl [data-net="on"]'); await wait(900); await has('解析中', 'resumes when the connection is back');
-  await jump('fail'); await wait(3200); await has('解析を終えられませんでした'); await has('回数は減っていません');
+  await jump('fail'); await act('turns'); await has('解析が終わると、印の付いた手がここに並びます。'); await wait(3200);
+  await has('解析すると、悪手・疑問手・好手など 印の付いた手がここに並びます。', 'the open list follows a failed analysis'); await hasNot('解析が終わると', 'the open list follows a failed analysis'); await act('closesheet');
+  await has('解析を終えられませんでした'); await has('回数は減っていません');
 
   // 7b. keep the list open while disconnecting and reconnecting in the second stage.
   await ctl('.pg-ctl [data-state="lived"]'); await jump('fresh');
@@ -176,9 +183,25 @@ const fs = require('fs');
   await act('onbskip'); await has('まだ棋譜がありません');
   await act('sample'); await wait(500); await has('先手'); await has('最善');
   await act('turns'); await has('先手の勝率'); await has('有料プランでは、勝負所を5秒ずつ深く読みます', 'the sample record has no deep reading'); await act('closesheet');
+  /* 観戦で盤の向きを変えても、勝率・印・一覧は先手の側のまま（アプリと同じ。変わるのは盤と対局者名の上下だけ） */
+  const sente = async () => {
+    await act('turns');
+    const rows = await tp('.tp').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    await act('closesheet');
+    return [await page.locator('#scr [data-b="bar"]').getAttribute('aria-label'), await page.locator('#scr [data-b="ro"]').innerText(), ...rows].join('\n');
+  };
+  const upright = await sente();
+  await act('gmenu'); await act('gflip');
+  ok(await page.locator('#scr [data-b="youav"]').innerText() === '☖', 'turning the board puts gote at the bottom');
+  ok(upright.includes('先手の勝率') && upright.includes('先手の手') && upright.includes('後手の手') && await sente() === upright, 'turning the board leaves the win rate and the list on sente\'s side');
+  await act('gmenu'); await act('gflip');
   await act('back'); await act('nav', 'import'); await act('imppaste'); await has('あなたはどちらですか？');
   await act('impside', 'g'); await has('あなたは後手');
   await act('impsave', '0'); await wait(2800); await has('この対局を解析する');
+  /* 一覧を開いたまま初回の解析が終わったら、案内の前に一覧を閉じる（ほかの確認と同じ）。「見てみる」で移った先の盤が見える */
+  await act('analyze'); await wait(500); await act('turns'); await has('解析が終わると、印の付いた手がここに並びます。'); await wait(10000); await has('はじめての解析ができました');
+  ok(await page.locator('#scr [data-b="sheet"]').isHidden(), 'the first-analysis dialog closes the open list first');
+  await click('#scr .dla [data-a="dlgok"]'); await has('54手目'); ok(await tpEntry('勝負所の一覧、12手') === 1, 'the entry shows the count after the first analysis');
   await act('back'); await act('nav', 'import'); await act('imppaste'); await has('同じ棋譜がすでに保存されています', 'duplicate blocked');
 
   await browser.close();

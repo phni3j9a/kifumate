@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { Record as ShogiRecord } from "tsshogi";
+import { Color, Record as ShogiRecord } from "tsshogi";
+import { pointsFor, startPly } from "../../src/analysis/display";
 import { writeKif } from "../../src/core/kif";
 import { fakeAnalysis, sampleResults } from "../helpers/fake-analysis";
 
@@ -186,10 +187,108 @@ test("勝負所の一覧：印の付いた手がない対局は、その旨を�
   await expect(
     page.getByRole("heading", { name: "勝負所（0手）" }),
   ).toBeVisible();
+  // 印は31手目にも付く（pointsFor の i > 30）
   await expect(
-    page.getByText(/印の付いた手はありませんでした。/),
+    page.getByText(
+      /印の付いた手はありませんでした。\s*印は、31手目以降で形勢が大きく動いた手に付きます。/,
+    ),
   ).toBeVisible();
   await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /深く読みます$/ })).toHaveCount(
+    0,
+  );
+});
+
+test("勝負所の一覧：開いたまま初回の解析が終わったら、案内の前に一覧を閉じ、「見てみる」で最初の悪手の盤が見える", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page, { firstReview: true });
+  fake.results = sampleResults(sample);
+  await importOne(page, /☖/);
+  await button(page, "解析する").click();
+  await expect(button(page, "中止")).toBeVisible();
+  await entry(page).click();
+  await expect(
+    page.getByText("解析が終わると、印の付いた手がここに並びます。"),
+  ).toBeVisible();
+  fake.complete = true;
+  await expect(
+    page.getByRole("heading", { name: "はじめての解析ができました" }),
+  ).toBeVisible();
+  // 案内は別ウィンドウ。一覧が残ると重なる（Web では「見てみる」を押せない）ので、先に閉じる
+  await expect(page.getByRole("heading", { name: /^勝負所/ })).toHaveCount(0);
+  await button(page, "見てみる").click();
+  const first = startPly(pointsFor(record, fake.results, Color.WHITE));
+  expect(first).toBeGreaterThan(30);
+  await expect(
+    page.getByRole("img", { name: `${first}手目の盤面`, exact: true }),
+  ).toBeVisible();
+  expect(fake.errors).toEqual([]);
+});
+
+test("勝負所の一覧：バックアップから復元した途中までの結果を、解析済みとして数えない", async ({
+  page,
+}) => {
+  const fake = await fakeAnalysis(page);
+  await page.goto("/");
+  await button(page, "見本の対局で試してみる").click();
+  await expect(entry(page)).toHaveAccessibleName(/^勝負所の一覧、[1-9]\d*手$/);
+  await button(page, "戻る").click();
+  // 復元した途中結果と同じ形にする：85手の対局の20手目までと partial
+  await page.evaluate(async () => {
+    const require = (globalThis as any).__r;
+    const entry = [...require.getModules().entries()].find(
+      ([, m]: any) =>
+        m.verboseName === "node_modules/expo-sqlite/build/index.js",
+    ) as any;
+    const db = await require(entry[0]).openDatabaseAsync("kifumate.db");
+    const row = await db.getFirstAsync("SELECT * FROM analyses");
+    const a = JSON.parse(row.document);
+    a.saved.results = a.saved.results.slice(0, 21);
+    a.saved.partial = true;
+    await db.runAsync(
+      "UPDATE analyses SET document=? WHERE game_id=?",
+      JSON.stringify(a),
+      row.game_id,
+    );
+  });
+  await page.reload();
+  await page.getByText("サンプル", { exact: true }).click();
+  await expect(page.getByRole("img", { name: /の盤面$/ })).toBeVisible();
+  await expect(entry(page)).toHaveAccessibleName("勝負所の一覧");
+  await entry(page).click();
+  await expect(
+    page.getByRole("heading", { name: "勝負所", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      /途中までの結果だけを復元しています。\s*解析し直すと、印の付いた手がここに並びます。/,
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/印の付いた手はありませんでした/)).toHaveCount(0);
+  expect(fake.errors).toEqual([]);
+});
+
+test("勝負所の一覧：解析回数を取得できなくても、照会済みの有料プランに有料プランの案内を出さない", async ({
+  page,
+}) => {
+  await fakeAnalysis(page);
+  // 権利の照会は有料のまま、解析回数の取得だけ失敗させる（後から登録した経路が優先される）
+  await page.route("**/v1/quota", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: "unavailable" }),
+    }),
+  );
+  await page.goto("/");
+  await button(page, "見本の対局で試してみる").click();
+  // 権利は有料と照会できている（「深く読む」が鍵の案内ではなく開始になる）
+  await button(page, "深く読む").click();
+  await button(page, "終了").click();
+  await entry(page).click();
+  await expect(rows(page)).not.toHaveCount(0);
   await expect(page.getByRole("button", { name: /深く読みます$/ })).toHaveCount(
     0,
   );
