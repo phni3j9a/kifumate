@@ -82,7 +82,9 @@ export class AnalysisClient {
           : {}),
       });
       let data;
-      const stream = path.startsWith("/v1/jobs") ? response.body : null;
+      const jobs = path.startsWith("/v1/jobs");
+      const stream =
+        jobs && typeof TextDecoder === "function" ? response.body : null;
       if (stream) {
         // 精密の完了応答などは全件を返す。全体の所要時間ではなく無通信の時間を測る。
         const reader = stream.getReader();
@@ -101,6 +103,11 @@ export class AnalysisClient {
         }
         data = JSON.parse(text + decoder.decode());
       } else {
+        if (jobs) {
+          // 本文を逐次読めないfetchでは、全件の受信に長めの上限を使う。
+          clearTimeout(timer);
+          timer = setTimeout(abort, 60000);
+        }
         data = await response.json();
       }
       if (!response.ok)

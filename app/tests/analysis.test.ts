@@ -191,6 +191,43 @@ test("精密の完了応答が止まれば中断し、転送が続けば15秒を
     sql.close();
   }
 });
+test("本文を逐次読めないfetchでも、精密の完了応答は15秒を超えて受信できる", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const results = [{ ...result(0), deep: result(0) }, result(1)];
+  let signal!: AbortSignal;
+  const api = new AnalysisClient(
+    "https://example.test",
+    { get: async () => "a".repeat(64), set: async () => {} },
+    async (url, init) => {
+      const path = new URL(String(url));
+      if (path.pathname === "/v1/quota") return Response.json(quota);
+      if (path.pathname === "/v1/entitlements")
+        return Response.json({ paid: true, source: "invite", expiresAt: null });
+      if (init?.method === "POST") return Response.json(reply());
+      signal = init!.signal!;
+      const data = { ...reply("completed", 2), results, coachProof: null };
+      return {
+        ok: true,
+        status: 200,
+        body: null,
+        headers: new Headers(),
+        json: () => new Promise((r) => setTimeout(() => r(data), 20000)),
+      } as unknown as Response;
+    },
+  );
+  const { controller, storage, sql } = await setup(api);
+  try {
+    await controller.start("a", input);
+    const done = controller.sync();
+    await new Promise<void>((r) => setImmediate(r));
+    t.mock.timers.tick(20000);
+    await done;
+    assert.equal(signal.aborted, false);
+    assert.deepEqual((await storage.load())[0]?.saved?.results, results);
+  } finally {
+    sql.close();
+  }
+});
 test("送信応答喪失→再起動→重複再送→差分を重複排除して完成・署名をそのまま保存", async () => {
   let lost = true,
     from = -1;
