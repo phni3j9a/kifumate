@@ -139,12 +139,12 @@ node scripts/invitations.mjs revoke --env staging --hash "$HASH"
 
 公式bindingは**拠点ごとの近似カウンター**で、同期前のバーストや複数拠点では設定値を超え得ます。請求の厳密な上限ではありません。招待の追加制限は単一DOのトランザクションで全拠点共有、形式不正や成功も数えます。窓は最初の試行から15分、古い試行行は次の試行時に削除。端末とIPはハッシュだけを保持します。IP共有のモバイル回線では他人の試行も含むので、正当な入力が拒否された場合も連打せず待ってください。端末の実在性検証は別課題です。
 
-**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed / coach_provider_failed`（公開エラー・固定の発生箇所・例外種別・提供元HTTPステータス・所要時間）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed / coach_provider_failed / coach_responses_tools`（公開エラー・固定の発生箇所・例外種別・固定の回答検査コード・提供元HTTPステータス・所要時間・道具呼び出し数・ターン数）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
 
 診断は`npx wrangler tail --env staging`（本番は`production`）で構造化consoleログを確認します。**tailの出力を共有・記録しないでください。** 自動メタデータにはリクエスト情報が含まれるため、報告には上記の固定診断フィールドだけを必要最小限で転記します。secretが表示された場合は閲覧だけでも漏えいとして扱い、原因の修正後に該当secretを差し替え、提供元キーは旧キーも失効させます（後述）。旧版の`X-Coach-Config`はsecretを内部ヘッダーに含めていたため撤去しました。現在はDO自身のenvから読み、設定一式をヘッダー・本文・ログへシリアライズしません。独自診断も例外のmessage・stack・任意のname、提供元本文・入力・キーを出しません。処理完了時に期限タイマーを解除し、ログや処理終了を期限まで引き延ばしません。
 
 - 配布開始後は毎日、Cloudflare Dashboard → 対象Worker → Observabilityで`coach_completed`・`coach_failed`・`analysis_completed`の件数と429/5xx、端末発行数を前日と比較してください。最初の見直し目安は**AIコーチ成功100件/日、全局解析200局/日、端末発行30台/日、提供元失敗10件/日**。少人数向けの警戒値で、サーバーがこの値で自動停止するものではありません。
-- 月の端末別上限（全局週10/100局、精密20局、分岐月300分、コーチ月100回）・最大6コンテナ・無操作停止・提供元240秒/32768トークンで増加を抑えます。失敗でも提供元費用は発生し得るので、成功数だけでなく失敗数とDeepSeek使用量・Cloudflare Billingも確認します。費用式は[measurement.md](docs/measurement.md)。
+- 端末別上限（全局週10/100局、精密週20局、分岐月300分、コーチ週の提供元費用枠）・最大6コンテナ・無操作停止・コーチ全体240秒・道具30回の上限で増加を抑えます。失敗でも提供元費用は発生し得るので、成功数だけでなく失敗数とLLM提供元の使用量・Cloudflare Billingも確認します。費用式は[measurement.md](docs/measurement.md)。
 - 異常時は該当招待を取り消し、新規配布を止めます。LLMを緊急停止する場合は`npx wrangler secret delete COACH_API_KEY --env production`（新規要求が503、既に送信済みの要求は止まりません）。全Workerを止める判断は影響を確認してMain／利用者が行います。
 - 自動の課金通知・厳密な月額USD上限・全体の自動遮断は未実装です。通知のための外部サービス追加やアカウント全体設定変更はせず、まず構造化ログ＋既存の利用上限で運用します。
 
@@ -249,7 +249,7 @@ POST本文（追加キー・人名フィールドは拒否）：
 {"requestId":"...","status":"pending","expiresAt":1793459040000,"error":null,"quota":{}}
 ```
 
-`status`は`pending / completed / failed / cancelled`。completedだけに`sections`が付きます。失敗理由は`error`（例：`coach_timeout / invalid_output / paid_required`）。時刻はUnixミリ秒、pendingのexpiresAtは実行期限、終了後は保存期限です。未知IDは404、結果保存期限後は410 `result_expired`。入力形式・署名・回数エラーはPOST時に従来のHTTPコードで返し、受理後の提供元エラーはGETのfailedで返します。
+`status`は`pending / completed / failed / cancelled`。completedだけに`sections`が付きます。失敗理由は`error`（例：`coach_timeout / invalid_output / paid_required`）。時刻はUnixミリ秒、pendingのexpiresAtは実行期限、終了後は保存期限です。未知IDは404、結果保存期限後は410 `result_expired`。入力形式・署名・週の枠のエラーはPOST時に従来のHTTPコードで返し、受理後の提供元エラーはGETのfailedで返します。
 
 アプリは**前面で待つ間だけ2〜5秒間隔でGET**し、画面を離れる／バックグラウンドへ移るとGETだけを停止します。DELETEは送りません。復帰・再起動時に保存したIDで取得し、completedなら端末に保存してください。新規解説・質問の送信中は同時に別の質問を作りません。明示的な中止だけDELETEを使います。期限切れや失敗後の再生成は、利用者の操作で新しいUUIDを使います。
 
@@ -263,7 +263,7 @@ POST本文（追加キー・人名フィールドは拒否）：
      "references":[{"id":"0:candidate:1","ply":0,"score":{"kind":"cp","value":25},"pv":["7g7f","3c3d"],"provenMate":false}]},
     {"kind":"advice","title":"次の練習","text":"気になった局面を盤の上で確かめましょう。","references":[]}
   ],
-  "quota":{"monthStart":1793458800000,"resetsAt":1796050800000,"limit":100,"used":1,"reserved":0,"remaining":99,"low":false}
+  "quota":{"remainingRatio":0.94,"resetsAt":1795964400000,"low":false,"exhausted":false}
 }
 ```
 
@@ -274,33 +274,43 @@ POST本文（追加キー・人名フィールドは拒否）：
 - **送信前の人名の伏せ字**：アプリが持つ登録名と棋譜内の対局者名を使い、自由文中の該当する名前を伏せ字（「あなた」「相手」など）にしてください。学習プロフィール・質問だけでなく、再送する履歴の利用者／AI双方の本文にも適用します。この処理はアプリ側で実装する必要があります。名前の一覧自体はサーバーへ送らず、APIに名前の欄も追加しません。
 - サーバーは人名を推測して検出しません。LLMへの指示では引き続き「あなた」「相手」（観戦では「先手」「後手」）と呼ばせますが、人名の出力検出は行いません。
 
-**非ストリーミング＋永続alarm**：入力と予約を保存して202を返し、DOのalarmで実行します。クライアントのHTTP接続に寿命を結びつけず、未検査の文は公開しません。待機中は「解説を作っています。画面を離れても続きます」と案内できます。従来クライアントの同期POSTだけはHTTP中止で取り消します。
+**非ストリーミング＋永続alarm**：入力と処理中の状態を保存して202を返し、DOのalarmで実行します。クライアントのHTTP接続に寿命を結びつけず、未検査の文は公開しません。待機中は「解説を作っています。画面を離れても続きます」と案内できます。従来クライアントの同期POSTだけはHTTP中止で取り消します。
 
-[Cloudflare公式のDO制限](https://developers.cloudflare.com/durable-objects/platform/limits/#wall-time-limits-by-invocation-type)を2026-11-17に確認：alarmの壁時計上限は**15分**、既定CPUは**30秒**（ネットワーク・ストレージ待機はCPUに含まない）。[waitUntil](https://developers.cloudflare.com/workers/platform/limits/#duration)は応答／切断後30秒までで、この用途には足りません。コーチの最大期限10分はalarm上限内です。同期・非同期とも、入力保存前に永続alarmを予約します（同期は実行期限のwatchdog、非同期は開始用alarmを予約して実行前に期限のwatchdogを設定）。外部API送信前に実行開始を永続化し、alarm再配送やDO再生成で**同じ要求を提供元に再送しません**。実行途中の基盤障害は結果を失う場合がありますが、期限で予約を返しfailedにします。提供元への費用が既に発生している可能性はあります。
+[Cloudflare公式のDO制限](https://developers.cloudflare.com/durable-objects/platform/limits/#wall-time-limits-by-invocation-type)を2026-11-17に確認：alarmの壁時計上限は**15分**、既定CPUは**30秒**（ネットワーク・ストレージ待機はCPUに含まない）。[waitUntil](https://developers.cloudflare.com/workers/platform/limits/#duration)は応答／切断後30秒までで、この用途には足りません。コーチの最大期限10分はalarm上限内です。同期・非同期とも、入力保存前に永続alarmを予約します（同期は実行期限のwatchdog、非同期は開始用alarmを予約して実行前に期限のwatchdogを設定）。外部API送信前に実行開始を永続化し、alarm再配送やDO再生成で**同じ要求を提供元に再送しません**。実行途中の基盤障害は結果を失う場合がありますが、期限でfailedにし、枠から差し引きません。提供元への費用が既に発生している可能性はあります。
 
-### 回数・安全策
+### 週の枠・安全策
 
-- 月100回（`COACH_MONTHLY_LIMIT`、1〜10000。不正値は100）。**JST月初0時**でリセット。解説も追加質問も成功ごとに一回。受理月へ予約し、検査済み応答の確定時にその月だけへ加算します。月またぎでも二重集計しません。
-- 端末ごとに同時一件。予約中を除いた `remaining` と `reserved` を返します。失敗・明示中止・タイムアウトは加算しません。DO再生成で処理を失った予約も永続期限後に返却されます。`low` がtrue（残り10%未満）のときだけ残りを案内し、残り0では `resetsAt` を案内します。
+- 枠は1端末あたり週 $0.50（`COACH_WEEKLY_BUDGET_USD`、未設定・不正値は既定値）。**月曜0時（日本時間）**でリセットします。解説・追加質問とも、成功した相談だけ全ターンの提供元費用を受理週へ加算します。結果と費用は同じSQLiteトランザクションで確定し、再取得・alarm再配送で二重に差し引きません。失敗・中止・タイムアウトは差し引きません。
+- 残りが0より大きく、前週の処理も含めて同時に一件まで受け付けます。費用は予約しません。1相談が残り（場合によっては週の枠全体）を上回っても完了を許容し、APIの残りは0で止めます。`quota` に含めるのは `remainingRatio`（0〜1）、`resetsAt`（次の月曜0時、Unixミリ秒）、`low`（残り10%未満）、`exhausted`（残り0）だけです。費用、単価、トークンは返しません。
+- DO更新時に旧 `coach_usage`（月の回数）は費用へ換算せず削除します。依頼IDと保存済みの結果は維持し、切替前の処理中の依頼が新コードで完了した場合は移行週に計上します。累計は当週と前週を保持します。移行後は月間版Workerへの単純なロールバックはできません。提供元の切り戻しは週の枠のコードを維持したまま設定で行ってください。
 - 本文は実測1 MiB、棋譜512手、学習戦法10個×40文字、目標500文字、質問1000文字、履歴20件×4000文字。既存解析APIの16 KiB上限は変更しません。
-- `COACH_MAX_TOKENS` 既定32768（1〜65536、推論込み）、`COACH_TIMEOUT_MS` 既定240000ms（1〜600000、受理から日本語化・生成・検査までの全体）。JSON応答は1 MiBまで。提供元へのリダイレクトは拒否。入力・応答・APIキーはログに出しません。
+- `COACH_TIMEOUT_MS` 既定240000ms（1〜600000、受理から日本語化・道具実行・生成・検査までの全体）。期限間近では道具を打ち切って最終回答を求めます。提供元へのリダイレクトは拒否。入力・応答・道具引数・APIキーはログに出しません。
 - 本文／署名検査後・生成前・成功確定前に最新招待権利を確認します。提供元・署名鍵・上限はDO自身のenvを直接参照し、内部リクエストやグローバル変数へ設定をコピーしません。開発用課金判定は本番で無効です。更新時の版の切替と猶予は下記を参照してください。
 - LLMにはエンジン名・評価関数名・対局者名フィールドを渡しません。入力自由文と出力からUnicodeの書式文字（一般カテゴリ`Cf`）と既定で不可視の文字（`Default_Ignorable_Code_Point`、ゼロ幅文字等）を共通処理で除去し、NFKC正規化して既知の禁止製品名（エンジン・評価関数・他社サービス等）だけを照合します。LLMへ送る本文とアプリへ返す本文も不可視文字を除去したものです。禁止製品名を含む出力は502にして課金しません。**未知の製品名や全ての意味の正確さまでは判定しません**。日本語事実と参照を照合し、明示的な勝敗・有利側・駒と指した側・詰まされる側・宣言側・観戦の呼称の矛盾を拒否します。参照局面で確認できる駒の持ち主・位置と、符号に添えた明示的な移動方向も照合します。正しい回答の過剰拒否を避けるため、否定・仮定・目的を含む文は許可し、主語ごとに確かな断定形だけを検査します。省略・比喩・複数局面をまとめた曖昧な説明まで完全に検証できず、実モデル評価が必要です。
 - `facts` の見出しと本文では対局の範囲内の手数と、提示した実戦手・候補PV・詰みPVにあるKIF符号を使えます。`advice` では一般的な練習のための着手案も示せます。「35手目 ▲2四歩」のように並べて書いた場合は実戦手との組を照合します。移動元の括弧と「打」の省略は表記差として扱います。それ以外の資料外の符号は `facts` では拒否します。資料外の参照ID、生USI、符号付き評価値はどちらの節でも拒否します。一般知識に基づく狙いや駒の働きの解釈は、盤上で起きた事実と区別します。未解析分岐の評価は作りません（分岐中の解析とは独立）。
 
-主なエラー：400 `invalid_proof / precise_required / invalid_input / unsafe_names`、403 `paid_required`、409 `coach_busy / request_exists / cancelled`、413、415、429 `monthly_limit`、502 `provider_failed / invalid_output`、503 `provider_unavailable / signing_unavailable`、504 `coach_timeout`。コーチのエラー応答には `quota` も付きます。
+主なエラー：400 `invalid_proof / precise_required / invalid_input / unsafe_names`、403 `paid_required`、409 `coach_busy / request_exists / cancelled`、413、415、429 `weekly_limit`、502 `provider_failed / invalid_output / invalid_usage`、503 `provider_unavailable / signing_unavailable`、504 `coach_timeout`。コーチのエラー応答には `quota` も付きます。
 
 ### 設定と提供元
 
-| 設定 | 既定／staging／production |
-| --- | --- |
-| `COACH_PROVIDER` | `openai-compatible` |
-| `COACH_BASE_URL` | `https://api.deepseek.com` |
-| `COACH_MODEL` | `deepseek-flash` |
-| `COACH_TOKEN_PARAMETER` | `max_tokens`（`max_completion_tokens`へ変更可能） |
-| `COACH_MAX_TOKENS` / `COACH_TIMEOUT_MS` | `32768` / `240000` |
+| 設定 | staging・production（このブランチ） | `openai-compatible`（未指定時・切り戻し） |
+| --- | --- | --- |
+| `COACH_PROVIDER` | `openai-responses-tools` | `openai-compatible` |
+| `COACH_BASE_URL` | `https://api.openai.com/v1` | `https://api.deepseek.com` |
+| `COACH_MODEL` | `gpt-6.1-terra` | `deepseek-flash` |
+| 推論 | `COACH_REASONING_EFFORT=high`（`reasoning.effort`） | `reasoning_effort:max` 固定 |
+| `COACH_MAX_TOKENS` | `5400`（`max_output_tokens`、調査ターンは最大4200） | `32768`（`COACH_TOKEN_PARAMETER`は`max_tokens`、または`max_completion_tokens`） |
+| `COACH_TIMEOUT_MS` | `240000` | `240000` |
 
-`reasoning_effort:max`、`response_format:{type:json_object}`を送ります。キー未設定は503で、偽提供元が既定になることはありません。DeepSeekの[公式仕様](https://api-docs.deepseek.com/api/create-chat-completion/)・[料金](https://api-docs.deepseek.com/quick_start/pricing)を確認しています。日本語化・ネットワーク・応答時間の揺らぎを含め240秒を維持します。**モデル変更と無関係に署名鍵は維持**してください。
+`COACH_PRICES_USD_PER_MILLION` は `提供元/モデル` をキーに、`input`・`cacheRead`・`cacheWrite`・`output` を持つJSON文字列（USD/100万トークン、0.001ドル単位で丸め）です。Terraは順に $1、$0.05、$2.50（12時間キャッシュ書込の単価を使用）、$5 を設定しています。一括方式へ戻す場合は `openai-compatible/deepseek-flash` など、選んだモデルの単価4項目を設定してください。対象の単価が未設定・不正なら、未計上の有料リクエストを防ぐため提供元への送信前に503を返します。`fake` は常に費用0です。
+
+各応答のusageからキャッシュ読込・報告された書込を入力合計から除き、それぞれの単価で精算します。出力合計は推論を含むため二重加算しません。必須の入力・出力合計が欠落または不正なら成功扱いにせず、残りを減らしません。
+
+トークン設定は推論を含む**ターンごとの**出力上限（設定範囲1〜65536、Responses方式では累積の出力枠内）。Responses方式は1相談あたり累積入力24万・出力2.4万トークンまで。履歴の再送も数え、最終回答には設定値以内で最大5400トークンを先に確保します。最終ターンは設定値と残りの出力枠の少ない方まで使えます。初回から最終用の入力枠にも収まらない場合は、参考履歴だけを古い項目から省きます。入力はUTF-8バイト数・API整形の余裕・再生する応答トークンで安全側に予約し、応答のusageで精算。[Terraの標準単価](https://developers.openai.com/api/docs/models/gpt-6.1-terra)で入力をすべて12時間キャッシュ書き込み（$2.50/100万）、出力を$5.00/100万とすると、`240000 × $2.50/100万 + 24000 × $5.00/100万 = $0.72/相談` が保守的な上限の**見積もり**です。入力枠は長文料金の272K閾値未満。提供元の請求上限ではなく、Cloudflare料金も含みません。Responsesの各応答は2 MiB、一括方式は従来どおり1 MiBまで。キー未設定は503。**モデル変更と無関係に署名鍵は維持**してください。
+
+道具方式は最初に視点・終局・要所の見出しと参照・プロフィール・重点・詳しさ・質問だけを渡し、履歴は従来どおり会話ロールではなく参考データに入れます。盤面、指し手、保存済み候補、知識はモデルが必要なときに照会します。下書き点検はWorkerで行い、他の道具は同じターンの分をまとめて、`/coach-facts` と同じ精密slotの内部 `/coach-tools` へ送ります。戦法と囲いは既存のアプリ分類器で判定します。探索エンジンは起動せず、詰み確認はcshogiで最大1万ノード・深さ15・呼び出しあたり0.75秒、バッチの調査枠は3秒、本文の受信期限は5秒です。
+
+[OpenAIの公式手順](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses)に沿って `store:false` と `include:["reasoning.encrypted_content"]` を送り、元の入力、応答の順序を保った項目列、呼び出しIDつきの結果を次のターンへ再送します。`previous_response_id` は使いません。道具は最大30回で、回数・期限・累積予算に近づいたら `tool_choice:none` で最終回答を求めます。調査ターンが `incomplete/max_output_tokens` の場合はそのターンを実行・再送せず、直前までの完全な履歴から道具なしで一度だけ回答を求めます。完成したJSONが `validateOutput` で不合格なら、時間・入力枠に余裕があり、最終回答用の出力枠が残っている場合だけ、節番号と固定の指摘を返して道具なしで一度修正を求めます。修正後も同じ検査に通す必要があります。不正JSON・提供元の拒否や通信失敗は再試行しません。既知の `N:line:…` は署名済みの起点 `N:position` へ置換します。公開参照は重複なし・最大10件。保存済みの読み筋・仮の手順は、該当する参照または起点がある節だけで照合します。署名済み詰みの代表以外の応手も検査に使いますが、再探索はせず、変換は4096応手・0.25秒を上限とし、提供元とアプリには追加データを送りません。`openai-compatible` は [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) の一括方式のままです。
 
 `container/coach_facts.py` は本譜全体を簡潔な一覧にし、要所ごとに指す前の局面（側別の玉・盤上の駒・持駒）、形勢の前後、実戦の続き最大3手、実戦とは別の仮の読み筋（推奨手・応手、候補1位の冒頭5手）を付けます。本譜と読み筋には指した側から見た移動方向を付けます。応手の読み筋は双方の捕獲・王手・成りを集計します。要所は損失の大きい悪手・疑問手（自分5手、相手2手、観戦は先後各3手まで）に、質問の「N手目」、詰みの見逃し、形勢逆転の代表を加えます。推奨手と実戦手が同じ場合は代案を出しません。cshogiの省略字（杏・圭・全）は成香・成桂・成銀に補完します。形勢は絶対値150未満を互角、500未満をやや有利、1500未満を有利、3000未満を大きく有利、それ以上を勝勢とし、後手視点の不利も反転します。印は指した側の損失200以上を疑問手、500以上を悪手とする目安で、境界値や詰みスコアを数値比較しません。
 
@@ -312,7 +322,7 @@ POST本文（追加キー・人名フィールドは拒否）：
 
 ## ローカル開発
 
-npm・解析コンテナのPython依存の監査結果は[依存ライブラリの脆弱性精査](docs/dependency-audit.md)を参照してください。
+npm・解析コンテナのPython依存の監査結果は[依存ライブラリの脆弱性精査](docs/dependency-audit.md)を参照してください。Workerはアプリの将棋分類器を再利用するため、テスト・型検査・ビルド前に `npm ci --prefix ../app` も実行してください。
 
 必要：Node.js 22以降、Python 3.12、Docker（linux/amd64）。ホストへのsudo操作は不要です。Dockerfileのapt操作はビルドコンテナ内だけです。
 
@@ -409,7 +419,7 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 - 本番URL：**`https://kifumate-api.quarterlambda.com`**。同じアカウントのactiveなzone `quarterlambda.com` を確認済みです。第1階層のサブドメインで、[Workers Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)としてWranglerがDNSと証明書を構成します。workers.dev・preview URLは無効。既存DNSとの競合は勝手に置換せず停止して確認します。
 - ネイティブアプリ専用。CORSヘッダーを付けず、productionで`Origin`付き要求とOPTIONSは403 `browser_forbidden`。これは端末認証の代わりではなく、HTTPクライアントによる偽装を防ぐものではありません。
 - **数十人の初期配布でもstd 2・precise 2・realtime 2（合計最大6）を維持**します。全局解析は端末別キューで吸収でき、過去の85手実測はstd52秒／precise96秒程度。2枠ずつなら理想条件で毎分約2.3局／1.3局の目安となり、数十人が一斉に全局解析する前提は置きません。分岐は同時2人まで、ハッシュ衝突では空き枠があっても409です。AIコーチの日本語化は精密枠を共有。最大8 vCPU・40 GiBメモリ・80 GBディスクまでに抑え、常時その数を起動しません。混雑の409・再試行・実測を見て、コードの`% 2`と`max_instances`を必ず一緒に変更します。
-- DeepSeek `deepseek-flash` / `reasoning_effort:max`、期限240秒・出力上限32768を採用。偽提供元、`ALLOW_DEV_PAID`・`DEV_PAID_HASHES`による有料化は本番で無効（テストあり）。
+- このブランチのvarsは GPT-6.1 Terra / Responses道具方式、推論high・期限240秒です。既存環境からの切り替えは「通常の更新・再デプロイ」を参照してください。偽提供元、`ALLOW_DEV_PAID`・`DEV_PAID_HASHES`による有料化は本番で無効（テストあり）。
 
 必要な**本番専用secret**：
 
@@ -417,7 +427,7 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 | --- | --- |
 | `COACH_SIGNING_KEY` | 新規ランダム32バイト以上。**stagingからコピーしない**。発行済み証明を守るため以後は維持 |
 | `INVITE_ADMIN_KEY` | 招待発行・取消用。署名鍵／staging管理鍵とも別の新規乱数 |
-| `COACH_API_KEY` | `~/.config/kifumate/llm.env`の`DEEPSEEK_API_KEY` |
+| `COACH_API_KEY` | `~/.config/kifumate/llm.env`の`OPENAI_API_KEY`（一括方式なら`DEEPSEEK_API_KEY`） |
 
 ### デプロイ前のDNS確認（初回・通常更新共通）
 
@@ -445,7 +455,7 @@ npx wrangler deploy --env production --dry-run
 
 ### 初回登録・実デプロイ（承認後、一度だけ）
 
-**以下のブロック全体をまとめて実行**します。DeepSeekキーの原本は`~/.config/kifumate/llm.env`（0600）だけです。デプロイ直前にリポジトリ外の`~/.config/kifumate/production-deploy.XXXXXX/secrets.json`を0600で作り、登録後は削除します。trapにより途中失敗でも一時ファイルを残しません。`--secrets-file`はこの初回登録だけに使います。
+**以下のブロック全体をまとめて実行**します。OpenAIキーの原本は`~/.config/kifumate/llm.env`（0600）だけです。デプロイ直前にリポジトリ外の`~/.config/kifumate/production-deploy.XXXXXX/secrets.json`を0600で作り、登録後は削除します。trapにより途中失敗でも一時ファイルを残しません。この初回登録用のファイルには、初回に設定する三つのsecretを含めます。
 
 ```sh
 (
@@ -465,11 +475,11 @@ import {randomBytes} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
-if (!process.env.DEEPSEEK_API_KEY) throw new Error('DeepSeekキーが未設定です');
+if (!process.env.OPENAI_API_KEY) throw new Error('OpenAIキーが未設定です');
 const secrets = {
   COACH_SIGNING_KEY: randomBytes(32).toString('hex'),
   INVITE_ADMIN_KEY: randomBytes(32).toString('hex'),
-  COACH_API_KEY: process.env.DEEPSEEK_API_KEY,
+  COACH_API_KEY: process.env.OPENAI_API_KEY,
 };
 writeFileSync(join(process.env.KIFUMATE_DEPLOY_DIR, 'secrets.json'), JSON.stringify(secrets), {mode:0o600, flag:'wx'});
 // 管理APIのBearer認証に必要なため、この鍵だけはローカルに保持する。
@@ -482,34 +492,32 @@ JS
 ```
 
 - **署名鍵のローカル保存・バックアップはしません。** 初回登録後はCloudflareの`COACH_SIGNING_KEY`だけを維持し、通常のデプロイで再生成・上書きしません。Workerやsecretの削除で失うと既存の証明を復元できないため、削除前には必ず確認してください。
-- **管理鍵だけは保持が必要**です。Cloudflareから値を読み出せず、後の招待発行・取消で使うため、`~/.config/kifumate/invite-admin-production.key`（0600）へ保存します。管理スクリプトには`--key-file "$HOME/.config/kifumate/invite-admin-production.key"`を渡します。署名鍵・DeepSeekキーのコピーはこのファイルに入れません。
+- **管理鍵だけは保持が必要**です。Cloudflareから値を読み出せず、後の招待発行・取消で使うため、`~/.config/kifumate/invite-admin-production.key`（0600）へ保存します。管理スクリプトには`--key-file "$HOME/.config/kifumate/invite-admin-production.key"`を渡します。署名鍵・LLM提供元キーのコピーはこのファイルに入れません。
 - 失敗した場合も一時ファイルは削除されます。Cloudflareへ登録済みの可能性があるので**初回ブロックを無条件に再実行しない**でください。既存secretとデプロイ状態を確認し、登録済みなら次節の通常デプロイで再開します。残った管理鍵ファイルも勝手に上書き・削除しません。
 - 旧手順で`.local/production-secrets.json`などのコピーを作っていた場合は再利用せず削除し、キーの原本とCloudflareの登録値を正とします。
 
 ### 通常の更新・再デプロイ
 
-**署名鍵を生成し直さず、`--secrets-file`を付けません。** Wranglerは登録済みsecretを保持するため、古いローカルコピーでキーを戻すことはありません。
+**週の枠を使うには配布APK 0.1.2（versionCode 1002）以降が必要です。** 旧版0.1.1（versionCode 1001）は月間 `quota` を前提とし、週の上限を表示できません。ストア未公開の限定配布なので、旧版向けに回数を返す互換処理は行いません。[配布APK](../app/README.md#androidの配布apkビルド)で上書き更新を案内してください（アンインストール不要）。履歴・結果の形式は変えません。今後もAPIとアプリを同時に切り替える際は、stagingで新アプリの表示と既存データを事前に確認してください。
 
-DeepSeekキーを変更するときだけ、原本`~/.config/kifumate/llm.env`を更新し、次を実行します（既存の署名鍵・管理鍵は変更しません）：
+通常更新はテスト・型検査と「デプロイ前のDNS確認」の後に `npx wrangler deploy --env production`。署名鍵・管理鍵は再生成せず、キーを変えない更新では `--secrets-file` は付けません。
+
+**Terraへの切り替えは承認後、まずstagingで行います。** 新Workerには新コンテナの `/coach-tools` が必要なので、必ず同じ更新でWorkerとコンテナを反映し、コンテナのロールアウト完了とWorker/DOの版切り替えを確認してからAIコーチを試します。ロールアウト中は旧コンテナに届く可能性があるため、利用の少ない時間帯を選びます。`secret put` 単体は即デプロイするため、旧DeepSeek設定へOpenAIキーだけ先行適用しないでください。以下では新しいvars・コードと同じデプロイで **`COACH_API_KEY` のみ**更新します（stagingで確認できたら、承認後 `--env production` に変更）。
 
 ```sh
 (
   set -eu
   set +x
-  set -a
-  . "$HOME/.config/kifumate/llm.env"
-  set +a
-  : "${DEEPSEEK_API_KEY:?DeepSeekキーが未設定です}"
-  printf '%s' "$DEEPSEEK_API_KEY" | npx wrangler secret put COACH_API_KEY --env production
-  unset DEEPSEEK_API_KEY OPENAI_API_KEY
+  umask 077
+  deploy_dir=$(mktemp -d)
+  trap 'rm -f "$deploy_dir/secrets.json"; rmdir "$deploy_dir"; unset OPENAI_API_KEY DEEPSEEK_API_KEY' EXIT
+  set -a; . "$HOME/.config/kifumate/llm.env"; set +a
+  node -e 'if (!process.env.OPENAI_API_KEY) throw new Error("OpenAIキーが未設定です"); process.stdout.write(JSON.stringify({COACH_API_KEY: process.env.OPENAI_API_KEY}))' > "$deploy_dir/secrets.json"
+  npx wrangler deploy --env staging --secrets-file "$deploy_dir/secrets.json"
 )
 ```
 
-コード・設定の通常デプロイと、キー更新後にデプロイし直す場合は、どちらもテスト・型検査と「デプロイ前のDNS確認」を済ませて次だけを実行します：
-
-```sh
-npx wrangler deploy --env production
-```
+確認は精密解析からコーチを通し、待ち時間・中止・成功時のみの枠の減少・使用量を確認します。切り戻す場合は表の一括方式のvars一式と `DEEPSEEK_API_KEY` を同じデプロイに含めます。既存の `COACH_SIGNING_KEY`・`INVITE_ADMIN_KEY` は切り替え前後で維持します。
 
 ### envとsecret更新の反映・漏えい時の差し替え
 
@@ -527,7 +535,7 @@ npx wrangler deploy --env production
 # 5分の版切替猶予後、新規精密解析で確認する。
 ```
 
-DeepSeekキーが表示された場合は、利用者が提供元で新規発行し、`~/.config/kifumate/llm.env`を0600のまま更新します。新しい値をチャット・引数・出力で受け渡しません。「通常の更新・再デプロイ」の標準入力による`COACH_API_KEY`更新を影響環境で実行し、新しい版の切替後に実LLMを確認してください。stagingで検証のため登録した場合は終了後に削除します。最後に提供元で旧キーを失効させます。`COACH_SIGNING_KEY`や`INVITE_ADMIN_KEY`はDeepSeekキーの変更に合わせて再生成しません。
+LLM提供元のキーが表示された場合は、利用者が提供元で新規発行し、`~/.config/kifumate/llm.env`を0600のまま更新します。新しい値をチャット・引数・出力で受け渡しません。影響環境の設定先とキーの提供元を確認し、「通常の更新・再デプロイ」の `COACH_API_KEY` だけの更新手順を適用します。切替後に実LLMを確認し、提供元で旧キーを失効させます。署名鍵と管理鍵は変更しません。
 
 ### デプロイ後の確認
 
@@ -539,7 +547,7 @@ curl --silent --show-error -i -X OPTIONS https://kifumate-api.quarterlambda.com/
   -H 'Origin: https://example.com'
 ```
 
-初回は少数の期限付き招待から配布し、`GET /v1/entitlements`・AIコーチの実提供元・ログ・Cloudflare/DeepSeek使用量を確認してください。確認用コードは取消し、Containerがinactive・active=0/assigned=0になったことを確認してから終了します。実施済みのデプロイ・実LLM確認の結果は[production.md](docs/production.md)を参照してください。
+初回は少数の期限付き招待から配布し、`GET /v1/entitlements`・AIコーチの実提供元・ログ・CloudflareとLLM提供元の使用量を確認してください。確認用コードは取消し、Containerがinactive・active=0/assigned=0になったことを確認してから終了します。実施済みのデプロイ・実LLM確認の結果は[production.md](docs/production.md)を参照してください。
 
 ## 一般公開前に必要なこと
 

@@ -2,6 +2,19 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
+## #55・#59：本番反映と配布APK 0.1.2（2026-11-20）
+
+- `main` の `9e13b34` を本番に反映し、GPT-6.1 Terraの道具方式と週の費用枠を有効化。DNSは既存Custom Domainのまま（changesetの追加・削除・競合なし）。更新したsecretは `COACH_API_KEY` のみ。`COACH_SIGNING_KEY`・`INVITE_ADMIN_KEY` は維持。
+- Worker Version `2fc1d997-1a0a-4a12-95b3-246e1bc6de98` が100%。std・precise・realtimeのコンテナは同じデプロイで全てv3にロールアウト完了。確認後5分待ち、端末発行201、OPTIONS 403 `browser_forbidden`・CORS許可ヘッダーなし、secret名3件を確認。
+
+| 本番確認 | 成否・所要時間 | 道具／APIターン | 提供元費用（推計） | 週の枠・金額表示 |
+| --- | --- | ---: | ---: | --- |
+| 6手の棋譜・署名付き精密解析 | 成功（7局面、13.194秒） | — | — | — |
+| AIコーチの解説1件（再試行なし） | 成功（36.098秒、GET待ち込み） | 10／4 | $0.0282955（$0.20以内） | 残り100% → 94.3409%、応答に金額なし |
+
+- 道具とターンはObservabilityの `coach_responses_tools` で確認。費用は使用量で精算した週枠の差分からの推計（提供元の確定請求額との突合は未実施）。1端末・1時間の確認招待は取消済み。同じ端末が無料に戻り、16:43 UTCに3コンテナの全6枠が `inactive`（各 `active=0 / assigned=0`）と確認。
+- 本番dry-run（Dockerビルド込み）、Vitest 207件、型検査、pytest 74件が通過。週の枠には[配布APK 0.1.2](../../app/README.md#androidの配布apkビルド)への上書き更新が必要。
+
 ## PR #30追補：秘密情報の内部転送撤去（2026-11-17）
 
 - **前回、本番でも`wrangler tail --env production`を実行しました。** consoleの固定フィールドだけを抽出していましたが、内部HTTPの自動メタデータへsecretを載せる実装自体を撤去しました。今回の追補作業ではtailを実行・記録していません。

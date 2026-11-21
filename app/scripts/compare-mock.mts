@@ -883,21 +883,14 @@ async function run(width: number, height: number) {
     .getByRole("textbox", { name: "AIコーチへの質問" })
     .fill("もう少し教えて");
   await tap("質問を送る");
-  await a
-    .getByText(
-      "解説を終えられませんでした。回数は減っていません。もう一度試せます",
-      { exact: true },
-    )
-    .waitFor();
+  const coachFailure =
+    "解説を終えられませんでした。今週の残りは減っていません。もう一度試せます";
+  const failure = a.getByText(coachFailure, { exact: true });
+  await failure.waitFor();
   await aiMock(
-    "R.aim.innerHTML='<p class=hint>解説を終えられませんでした。回数は減っていません。もう一度試せます</p><button class=tx-b>もう一度試す</button>'+R.aim.innerHTML; R.aim.scrollTop=0",
+    `R.aim.innerHTML='<p class=hint>${coachFailure}</p><button class=tx-b>もう一度試す</button>'+R.aim.innerHTML; R.aim.scrollTop=0`,
   );
-  await a
-    .getByText(
-      "解説を終えられませんでした。回数は減っていません。もう一度試せます",
-      { exact: true },
-    )
-    .scrollIntoViewIfNeeded();
+  await failure.scrollIntoViewIfNeeded();
   await shot("coach-failed");
   fake.coach.online = false;
   await act("aiclose");
@@ -910,7 +903,7 @@ async function run(width: number, height: number) {
   );
   await shot("coach-offline");
   fake.coach.online = true;
-  fake.coach.remaining = 0;
+  fake.coach.remainingRatio = 0;
   fake.coach.low = true;
   await act("aiclose");
   await tap("AIコーチを閉じる");
@@ -932,7 +925,7 @@ async function run(width: number, height: number) {
   await shot("coach-limit");
   await act("aiclose");
   await tap("AIコーチを閉じる");
-  fake.coach.remaining = 99;
+  fake.coach.remainingRatio = 0.99;
   fake.coach.low = false;
   await aiMock("DB.usage.ai=37");
 

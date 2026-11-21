@@ -1,7 +1,8 @@
 import { normalizeInviteCode } from './invite-code.mjs';
 import { Invitations, limit, type Entitlement } from './invitations';
 export { Invitations } from './invitations';
-import { Coach, signAnalysis, type CoachEnv } from './coach';
+import { Coach, parseCoach, signAnalysis, type CoachEnv } from './coach';
+import { coachTags, readCoachResponse } from './coach-tools';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions } from './realtime';
 import { Container } from '@cloudflare/containers';
@@ -91,16 +92,35 @@ export class Device extends DurableObject<Env> {
   private entitlement: Entitlement = {paid: false, source: null, expiresAt: null};
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.coach = new Coach(ctx.storage, env, ctx.id.toString(), () => this.paid(), async (input, signal) => {
-      if (this.env.COACH_PROVIDER === 'fake') return undefined;
-      const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
-      const response = await this.env.PRECISE.getByName('slot-' + slot).fetch('http://container/coach-facts', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, signal,
-        body: JSON.stringify({initial: input.input.initial, moves: input.input.moves, results: input.results, perspective: input.perspective, question: input.question}),
+    const coachContainer = (path: 'coach-facts' | 'coach-tools', data: unknown, signal: AbortSignal) => {
+      signal.throwIfAborted();
+      const slot = parseInt(ctx.id.toString().slice(0, 8), 16) % 2;
+      return env.PRECISE.getByName('slot-' + slot).fetch('http://container/' + path, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data), signal,
       });
+    };
+    const game = (input: ReturnType<typeof parseCoach>) => ({initial: input.input.initial, moves: input.input.moves,
+      results: input.results, perspective: input.perspective, question: input.question});
+    this.coach = new Coach(ctx.storage, env, ctx.id.toString(), () => this.paid(), async (input, signal) => {
+      if (env.COACH_PROVIDER === 'fake') return undefined;
+      const response = await coachContainer('coach-facts', game(input), signal);
       if (!response.ok) throw new ApiError(502, 'facts_unavailable');
       return await response.json();
-    }, () => this.refreshEntitlement());
+    }, () => this.refreshEntitlement(), async (input, calls, signal) => {
+      const data = game(input);
+      let tags;
+      if (calls.some(call => call.name === 'game_tags')) {
+        try { tags = await coachTags(data.initial, data.moves); } catch { /* 分類未確認 */ }
+      }
+      const response = await coachContainer('coach-tools', {game: {...data, tags}, calls}, signal);
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {});
+        throw new ApiError(502, 'tools_unavailable');
+      }
+      const result = await readCoachResponse(response, signal) as {results?: unknown[]};
+      if (!Array.isArray(result?.results)) throw new ApiError(502, 'tools_unavailable');
+      return result.results;
+    });
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL,

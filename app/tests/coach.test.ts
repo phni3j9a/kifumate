@@ -15,13 +15,10 @@ import {
 import { database } from "./helpers/database";
 import { migrate, migrations } from "../src/storage/schema";
 const quota = {
-  monthStart: 0,
-  resetsAt: 1796050800000,
-  limit: 100,
-  used: 1,
-  reserved: 0,
-  remaining: 99,
+  remainingRatio: 0.99,
+  resetsAt: 1795964400000,
   low: false,
+  exhausted: false,
 };
 const overview: CoachOverview = { paid: true, quota, latest: null };
 const saved = {
@@ -157,14 +154,60 @@ test("送信境界：目標・質問・利用者とAI双方の履歴を伏せ、
   assert.equal(long.history.length, 20);
   assert.equal(long.history[0]!.content.length, 4000);
 });
-test("回数：残り10%以上を知らせず、10%未満とゼロの更新日時だけ案内", () => {
+test("週の枠：10%未満と使い切りだけを案内する", () => {
   assert.equal(quotaNotice(null), "");
-  assert.equal(quotaNotice({ ...quota, remaining: 10 }), "");
-  assert.match(quotaNotice({ ...quota, remaining: 9, low: true }), /あと9回/);
-  assert.match(
-    quotaNotice({ ...quota, remaining: 0, low: true }),
-    /2026\/12\/1 0:00:00（日本時間）/,
+  assert.equal(quotaNotice({ ...quota, remainingRatio: 0.1 }), "");
+  assert.equal(
+    quotaNotice({ ...quota, remainingRatio: 0.09, low: true }),
+    "今週のAIコーチは残りわずかです",
   );
+  assert.match(
+    quotaNotice({ ...quota, remainingRatio: 0, low: true, exhausted: true }),
+    /月曜0時（日本時間）に、また使えます/,
+  );
+});
+test("旧月間quotaを無視しても保存済み解説は残り、週の429でquotaを更新する", async () => {
+  const exhausted = { ...quota, remainingRatio: 0, low: true, exhausted: true };
+  const { c, storage } = await setup({
+    createCoach: async () => {
+      throw new ApiError(429, "weekly_limit", exhausted);
+    },
+  });
+  await storage.saveOverview({
+    ...overview,
+    quota: { remaining: 0, low: true },
+  } as unknown as CoachOverview);
+  const sections = reply("completed").sections!;
+  await storage.save({
+    gameId: "a",
+    answers: [{ requestId: "older", sections, style: input.style }],
+    attempt: null,
+    error: null,
+  });
+  await c.init();
+  assert.equal(c.snapshot.overview, null);
+  assert.deepEqual(c.snapshot.records.a!.answers[0]!.sections, sections);
+  await c.start("a", input);
+  assert.deepEqual((await storage.overview())?.quota, exhausted);
+  assert.match(
+    c.snapshot.records.a!.error!,
+    /今週のAIコーチは上限に達しました/,
+  );
+  assert.deepEqual((await storage.load())[0]!.answers[0]!.sections, sections);
+});
+test("提供元が利用できず受理されなかった依頼は自動再送しない", async () => {
+  let posts = 0;
+  const { c } = await setup({
+    createCoach: async () => {
+      posts++;
+      throw new ApiError(503, "provider_unavailable", quota);
+    },
+  });
+  await c.start("a", input);
+  await c.sync();
+  assert.equal(posts, 1);
+  assert.equal(c.snapshot.records.a!.attempt, null);
+  assert.match(c.snapshot.records.a!.error!, /今はAIコーチを利用できません/);
 });
 test("HTTP：共有認証・非同期ヘッダー・statusだけのDELETE後も同じIDでGETし確定", async () => {
   let cancelled = false;
@@ -411,7 +454,7 @@ test("追加質問・作り直し失敗で既存解説を消さず、成功時�
     s.c.snapshot.records.a!.failedQuestion,
     "次に何を練習するといい？",
   );
-  assert.match(s.c.snapshot.records.a!.error!, /回数は減っていません/);
+  assert.match(s.c.snapshot.records.a!.error!, /今週の残りは減っていません/);
   s.sql.close();
 });
 test("プロフィールとスタイル保存は順番を守り、無料・オフラインでも読み戻せる", async () => {
