@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 import bridge
-from test_coach_facts import data
+from test_coach_facts import CYCLE, KINGS, data
 
 
 def call(name, **args):
@@ -52,6 +52,36 @@ def test_ordered_batch_and_isolated_failures(api):
     assert all('エラー' in v for v in values[1:7] + values[8:])
     assert values[7]['知識'][0]['項目'] == '入玉宣言'
     assert bridge.engine is None
+
+
+def test_saved_analysis_and_claims_follow_keypoint_stage(api):
+    game = data(CYCLE * 8, initial=KINGS, perspective='observer')
+    game['question'] = '32手目'
+    rows = game['results']
+    rows[30]['deep'] = {**rows[30]}
+    rows[31]['score'] = {'kind': 'cp', 'value': 600}
+    rows[31]['candidates'] = [{'rank': 1, 'move': '4a3a', 'pv': ['4a3a'], 'score': None}]
+    rows[31]['deep'] = {**rows[31], 'score': {'kind': 'cp', 'value': -600},
+                        'candidates': [{'rank': 1, 'move': '4a4b', 'pv': ['4a4b'], 'score': None}]}
+    pos = {'ply': 31}
+    status, body = api(game, [call('keypoints'), call('saved_analysis', position=pos, stage='base'),
+                              call('saved_analysis', position=pos, stage='deep'), call('saved_analysis', position=pos),
+                              call('saved_analysis', position={'ply': 32}, stage='deep'),
+                              call('saved_analysis', position=pos, stage='invalid'), call('check_claims', claims=[
+        {'type': 'evaluation', 'position': pos, 'stage': stage, 'expected': side}
+        for stage, side in [('base', '先手'), ('deep', '後手')]])])
+    assert status == 200
+    keys, base, deep, default, missing, invalid, checks = body['results']
+    key = keys['要所'][0]
+    assert key['手数'] == 32
+    assert base['id'] == key['指す前の参照'] == '31:position'
+    assert deep == default and deep['id'] == '31:deep:position'
+    first, second = (stage['候補と詰み証明'][0] for stage in (base, deep))
+    assert first['id'] == key['推奨手の参照'] == '31:candidate:1'
+    assert second['id'] == '31:deep:candidate:1'
+    assert [c['仮の読み筋（実戦とは別）'][0]['表記'] for c in (first, second)] == ['△3一玉(41)', '△4二玉(41)']
+    assert 'エラー' in missing and 'エラー' in invalid
+    assert checks['照合'] == [{'一致': True, '正しい値': side} for side in ('先手', '後手')]
 
 
 @pytest.mark.parametrize('game', [data(initial='k8/9/9/9/9/9/9/9/8K b 99R 1'), data(['7g7f', '7g7f']),

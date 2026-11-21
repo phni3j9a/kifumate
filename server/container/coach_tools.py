@@ -9,7 +9,7 @@ import unicodedata
 
 import cshogi as sh
 
-from coach_facts import RANKS, build_facts, evaluation, label, move_fact, piece_name, position_fact, preferred_result, result_id
+from coach_facts import RANKS, build_facts, deep_result, evaluation, label, move_fact, piece_name, position_fact, preferred_result, result_id
 from coach_knowledge import lookup
 
 PIECES = tuple(map(piece_name, sh.PIECE_JAPANESE_SYMBOLS))
@@ -233,8 +233,20 @@ def ref_line(ply, line):
     return {'id': f'{ply}:line:{tag}', '手数': ply, '仮の読み筋（実戦とは別）': moves}
 
 
-def saved(game, b, prev, ply, facts, limit):
-    r = preferred_result(game['results'][ply])
+def staged_result(row, stage):
+    if stage is None:
+        return preferred_result(row)
+    if stage == 'base':
+        return row
+    if stage == 'deep':
+        if deep := deep_result(row):
+            return deep
+        raise ToolError('この局面に深読みはありません')
+    raise ToolError('探索段階は base または deep を指定してください')
+
+
+def saved(game, b, prev, ply, facts, limit, stage):
+    r = staged_result(game['results'][ply], stage)
     prefix = result_id(r)
     view = game['perspective']
     sources = [*[(f'{prefix}:candidate:{c["rank"]}', c, False) for c in r['candidates'][:limit] if c.get('pv')],
@@ -269,7 +281,7 @@ def actual_claim(game, claim, facts, search):
     if kind == 'mate':
         return search(b, prev, view)['状態']
     if kind == 'evaluation':
-        return evaluation(preferred_result(game['results'][ply])['score'], view)['優勢な側'] if not branch else '不明'
+        return evaluation(staged_result(game['results'][ply], claim.get('stage'))['score'], view)['優勢な側'] if not branch else '不明'
     raise ToolError('不明な主張の型です')
 
 
@@ -381,7 +393,7 @@ def call(game, name, args, *, facts=None, draft=None, search=mate):
         if name == 'saved_analysis':
             if branch:
                 raise ToolError('仮の分岐には保存済み解析がありません')
-            return saved(game, b, prev, ply, facts, max(1, min(5, args.get('limit', 2))))
+            return saved(game, b, prev, ply, facts, max(1, min(5, args.get('limit', 2))), args.get('stage'))
         return {'エラー': '不明な道具です'}
     except ToolError as e:
         return e.result

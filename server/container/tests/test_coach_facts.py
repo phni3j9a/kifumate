@@ -156,6 +156,22 @@ def test_marks_use_win_rate_non_best_and_only_matching_depths():
     assert build_facts(d)['実戦手'][30][2] == '判定なし'
 
 
+def test_played_shows_evaluation_and_bound_from_the_stage_used_for_its_mark():
+    d = data(CYCLE * 8, initial=KINGS, perspective='observer')
+    rows = d['results']
+    for ply in (30, 31, 32):
+        rows[ply]['score']['value'] = 0
+    rows[31]['score']['bound'] = 'lowerbound'
+    rows[30]['deep'] = {**rows[30]}
+    rows[31]['deep'] = {**rows[31], 'score': {'kind': 'cp', 'value': -600}}
+    rows[32]['score']['bound'] = 'upperbound'
+    played = build_facts(d)['実戦手']
+    assert played[30] == [31, '▲5九玉(49)', '悪手', '後手が有利', '横移動', '深読み']
+    assert played[31] == [32, '△5一玉(41)', '判定なし', '互角', '横移動', '境界値']
+    rows[31]['deep']['score']['bound'] = 'upperbound'
+    assert build_facts(d)['実戦手'][30][5:] == ['境界値', '深読み']
+
+
 def test_turning_point_and_question_do_not_duplicate_keypoint():
     d = data(['7g7f'])
     d['question'] = '1手目と１手目について'

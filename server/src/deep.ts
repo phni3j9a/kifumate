@@ -12,7 +12,8 @@ export function deepPositions(initial: string, results: PositionResult[]): numbe
     if (!before.score || !after.score || (before.mate && after.mate)) continue;
     const sign = ply % 2 === 1 ? first : -first;
     const drop = winRate(sign * cp(before.score)) - winRate(sign * cp(after.score));
-    if (drop > 0) drops.push({ply, drop});
+    // 数学上同点の低下が浮動小数点の誤差だけで前後しないよう、比較用に丸める。
+    if (drop > 0) drops.push({ply, drop: Math.round(drop * 1e10)});
   }
   drops.sort((a, b) => b.drop - a.drop || a.ply - b.ply);
   const chosen = new Set<number>();

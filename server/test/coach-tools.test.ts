@@ -295,8 +295,9 @@ describe('Responsesの道具ループ', () => {
     const line = {id: '0:line:abc', 手数: 0, [pv]: [{表記: '▲2六歩(27)'}, {表記: '△8四歩(83)'}]};
     const matching = {id: '0:candidate:1', [pv]: [{表記: '▲2六歩(27)'}]};
     const unrelated = {id: '0:candidate:2', [pv]: [{表記: '▲5六歩(57)'}]};
-    evidence.参照.push(matching, unrelated);
-    const signed = [...refs, ...[matching, unrelated].map(r => ({...refs[0], id: r.id}))];
+    const deepPosition = {id: '0:deep:position'};
+    evidence.参照.push(matching, unrelated, deepPosition);
+    const signed = [...refs, ...[matching, unrelated, deepPosition].map(r => ({...refs[0], id: r.id}))];
     const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('line', 'play_line', '{"position":{"ply":0},"moves":["▲2六歩","△8四歩"]}'))).mockResolvedValueOnce(done(wanted));
     await completeWith(send, async () => [{参照: line}], undefined, evidence);
     const quote = (id: string) => ({sections: [{...wanted.sections[0], text: '仮の応手は△8四歩です。', refs: [id]}]});
@@ -304,6 +305,7 @@ describe('Responsesの道具ループ', () => {
     expect(() => validateOutput(quote(unrelated.id), signed, evidence)).toThrow('invalid_output');
     expect(() => validateOutput(quote(matching.id), signed, evidence)).not.toThrow();
     expect(() => validateOutput(quote('0:position'), signed, evidence)).not.toThrow();
+    expect(validateOutput(quote(deepPosition.id), signed, evidence).sections[0].references.map(r => r.id)).toEqual([deepPosition.id]);
   });
 
   it('mateが証明した手順を起点局面で照合し、公開mate参照は増やさない', async () => {

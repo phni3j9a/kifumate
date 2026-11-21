@@ -4,7 +4,7 @@ interface PositionSide { 玉: string | null; 盤上: Record<string, string[]>; �
 // 生USIや評価の数値はこの型に入れない。表記・局面の確定はPython/cshogi側で行う。
 export interface CoachFacts {
   視点: string;
-  実戦手: [手数: number, 表記: string, 印: string, 形勢: string, 移動: Direction, 境界値?: string][];
+  実戦手: [手数: number, 表記: string, 印: string, 形勢: string, 移動: Direction, ...注記: ('境界値' | '深読み')[]][];
   終局: Record<string, any>;
   参照: Record<string, any>[];
   要所?: (Record<string, any> & {実戦手: {表記: string}})[];
@@ -46,7 +46,8 @@ export function lineOrigin(id: string, facts: CoachFacts): string | undefined {
 }
 
 function linesFor(facts: CoachFacts | undefined, ids: string[]) {
-  return facts?.仮の手順?.filter(line => ids.includes(`${line.手数}:position`) || ids.some(id => {
+  return facts?.仮の手順?.filter(line => ids.some(id => {
+    if (id === `${line.手数}:position` || id === `${line.手数}:deep:position`) return true;
     if (!id.startsWith(`${line.手数}:candidate:`) && !id.startsWith(`${line.手数}:deep:candidate:`)) return false;
     const candidate = facts.参照.find(r => r.id === id)?.[PV];
     // 同じ局面の別候補では足りない。少なくとも指し始めの分岐が同じことを確認する。
@@ -88,22 +89,25 @@ export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 
 }
 
 function compactPosition(id: string, facts: CoachFacts): Record<string, any> | undefined {
-  const n = /^(\d+):position$/.exec(id);
+  const n = /^(\d+)(:deep)?:position$/.exec(id);
   const row = n ? facts.実戦手[Number(n[1]) - 1] : undefined;
   if (!row) return undefined;
-  const [, kif, , state] = row;
+  const [, kif, , state, , ...notes] = row;
+  const deep = notes.includes('深読み');
+  if (n?.[2] && !deep) return undefined;
   const sender = kif.startsWith('▲') ? '先手' : '後手';
   const actor = facts.視点 === '観戦' ? sender : facts.視点.includes(`あなたが${sender}`) ? 'あなた' : '相手';
+  const position = {id, 直前の実戦手: {指した側: actor, 動いた駒: kif.match(new RegExp(KIF))?.[3] ?? ''}};
+  if (deep && !n?.[2]) return position; // 盤面は共通だが、一覧の形勢は深読みの参照にだけ使う。
   const explicit = new RegExp(`^(${ACTORS})が`).exec(state)?.[1];
   const favored = explicit ?? (/不利|敗勢/.test(state) ? '相手' : /有利|勝勢/.test(state) ? 'あなた' : 'なし');
   const other = ({あなた: '相手', 相手: 'あなた', 先手: '後手', 後手: '先手'} as Record<string, string>)[favored];
-  return {id, 優勢な側: favored, 宣言できる側: state.includes('宣言可能') ? favored : undefined,
-    詰まされる側: state.includes('が詰ませる方向') ? other : undefined,
-    直前の実戦手: {指した側: actor, 動いた駒: kif.match(new RegExp(KIF))?.[3] ?? ''}};
+  return {...position, 優勢な側: favored, 宣言できる側: state.includes('宣言可能') ? favored : undefined,
+    詰まされる側: state.includes('が詰ませる方向') ? other : undefined};
 }
 
 export function hasFactReference(id: string, facts: CoachFacts): boolean {
-  return facts.参照.some(r => r.id === id) || /^(\d+):position$/.test(id) && !!facts.実戦手[Number(id.split(':')[0]) - 1];
+  return facts.参照.some(r => r.id === id) || !!compactPosition(id, facts);
 }
 
 const OWNER_FIRST = new RegExp(`(${ACTORS})(?:の)?(${PIECES})(?:は|が|も)?\\s*(${SQUARE})(?=$|[\\s・。）、，]|です|でした|に(?:い|あ|位置))`, 'g');

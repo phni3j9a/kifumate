@@ -161,7 +161,8 @@ def build_facts(data, *, include_mate_replies=False):
     if perspective not in ('sente', 'gote', 'observer') or len(results) != len(moves) + 1:
         raise ValueError('不正な資料')
     board = cshogi.Board() if initial == 'startpos' else cshogi.Board(initial)
-    boards, positions, deep_positions, played, losses, missed, turns = [], [], {}, [], {}, [], []
+    boards, positions, deep_positions, played, played_rows = [], [], {}, [], []
+    losses, missed, turns = {}, [], []
     previous = None
 
     def pair(n):
@@ -210,6 +211,9 @@ def build_facts(data, *, include_mate_replies=False):
                 if ply >= 30:
                     f['印'] = '詰み逃し'
         played.append(f)
+        state = evaluation(after, perspective)
+        played_rows.append([ply + 1, f['表記'], f['印'], state['形勢'].removeprefix('あなたから見て'), f['移動'],
+                            *(['境界値'] if state.get('境界値') else []), *(['深読み'] if a.get('_deep') else [])])
 
     final = positions[-1]
     outcome = {'終局理由': '不明', '勝敗': '不明'}
@@ -297,8 +301,7 @@ def build_facts(data, *, include_mate_replies=False):
             branch(results[0], c)
     return {
         '視点': '観戦' if perspective == 'observer' else label(0, perspective) + 'が先手、' + label(1, perspective) + 'が後手',
-        '実戦手': [[n, f['表記'], f['印'], positions[n]['形勢'].removeprefix('あなたから見て'), f['移動'],
-                   *(['境界値'] if positions[n].get('境界値') else [])] for n, f in enumerate(played, 1)],
+        '実戦手': played_rows,
         '終局': outcome, '要所': keypoints, '参照': list(refs.values()),
         **({'詰みの別応手': mate_reply_facts([row for r in results for row in (r, deep_result(r)) if row], boards, perspective)} if include_mate_replies else {}),
         '注意': '境界値と探索上の詰みは未確定。宣言可能は宣言済みではない。読み筋は冒頭のみで実戦とは別。投了・宣言の記録は入力にない。',

@@ -293,6 +293,11 @@ describe('精密の2段目', () => {
     set(60, score(-1000)); set(61, score(0)); // 9局面になるため入らない
     expect(deepPositions('4k4/9/9/9/9/9/9/9/4K4 w - 1', exceptional)).toEqual([32, 33, 34, 40, 41, 42, 50, 51]);
   });
+  it('着手側の+600→0と0→−600は同じ低下として早い手を選ぶ', () => {
+    const scores = new Map([[30, 600], [31, 0], [32, 0], [33, -600]]);
+    const rows = Array.from({length: 37}, (_, ply) => ({ply, score: scores.has(ply) ? score(scores.get(ply)!) : null, mate: null}));
+    expect(deepPositions('startpos', rows)).toEqual([30, 31]);
+  });
   it('再起動して続きから探索し、完了時は全件を返して深読みを含む署名と1局を確定する', async () => {
     const called: number[] = [];
     const {stub, path} = await start(ply => { called.push(ply); return Response.json(result(ply, true)); });
