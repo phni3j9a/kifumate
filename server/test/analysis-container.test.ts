@@ -70,8 +70,40 @@ it('診断は固定フィールドのみ。例外名や本文・ヘッダーを�
     container.running = false; container.start.mockImplementationOnce(() => { throw bad; });
     await expect(job.fetch(request)).rejects.toBe(bad);
     expect(warn.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
-      ['readiness',503,null], ['forward',502,null], ['forward',null,'TypeError'], ['start',null,'TypeError'],
+      ['forward',502,null], ['forward',null,'TypeError'], ['start',null,'TypeError'],
     ].map(([phase,status,kind]) => ({event:'container_failure', phase,status,kind,elapsedMs:expect.any(Number)})));
     expect(send).toHaveBeenCalledTimes(4);
+  } finally { warn.mockRestore(); }
+});
+
+it('準備期限切れは一度だけ記録する', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const limit = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.abort(new DOMException('', 'TimeoutError')));
+  try {
+    const container = {running: true, getTcpPort: vi.fn(), setInactivityTimeout: vi.fn()};
+    const job = new PreciseJob({container, waitUntil: vi.fn()} as unknown as DurableObjectState, {});
+    expect((await job.fetch(new Request('http://container/analyze'))).status).toBe(503);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(JSON.parse(warn.mock.calls[0][0])).toMatchObject({phase:'readiness_end', status:503, kind:'TimeoutError'});
+  } finally { warn.mockRestore(); limit.mockRestore(); }
+});
+
+it('realtimeの局面差し替え・明示停止による転送中断と遅着は障害にしない', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const data = new Map();
+  let interrupt!: (reason: Error) => void;
+  const send = vi.fn().mockResolvedValueOnce(new Response()).mockResolvedValueOnce(new Response(null, {status:409}))
+    .mockImplementationOnce(() => new Promise((_resolve,reject) => { interrupt = reject; }));
+  const container = {running:true, monitor: () => new Promise(() => {}), setInactivityTimeout: vi.fn(),
+    destroy: () => interrupt(new Error('stopped')), getTcpPort: () => ({fetch:send})};
+  const ctx = {storage:{kv:{get:(k:string) => data.get(k), put:(k:string,v:unknown) => data.set(k,v)}}, container, waitUntil:vi.fn()};
+  const engine = new RealtimeEngine(ctx as unknown as DurableObjectState, {} as any);
+  const request = new Request('http://container/realtime', {headers:{'X-Generation':'1','X-Session':'s','X-Account':'a'}});
+  try {
+    expect((await engine.fetch(request)).status).toBe(409);
+    const stopped = expect(engine.fetch(request)).rejects.toThrow('stopped');
+    await engine.stop(1); await stopped;
+    expect((await engine.fetch(request)).status).toBe(410);
+    expect(warn).not.toHaveBeenCalled();
   } finally { warn.mockRestore(); }
 });

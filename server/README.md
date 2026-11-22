@@ -157,7 +157,7 @@ node scripts/invitations.mjs revoke --env staging --hash "$HASH"
 
 公式bindingは**拠点ごとの近似カウンター**で、同期前のバーストや複数拠点では設定値を超え得ます。請求の厳密な上限ではありません。招待の追加制限は単一DOのトランザクションで全拠点共有、形式不正や成功も数えます。窓は最初の試行から15分、古い試行行は次の試行時に削除。端末とIPはハッシュだけを保持します。IP共有のモバイル回線では他人の試行も含むので、正当な入力が拒否された場合も連打せず待ってください。端末の実在性検証は別課題です。
 
-**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`container_failure`（固定の発生箇所・HTTPステータス・例外分類・起動からの経過msだけ。不明はnull。準備中の途中失敗は照会ループの初回のみ、打ち切りは別に記録）、`coach_completed / coach_failed / coach_provider_failed / coach_responses_tools`（公開エラー・固定の発生箇所・例外種別・固定の回答検査コード・提供元HTTPステータス・所要時間・道具呼び出し数・ターン数）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`container_failure`（固定の発生箇所・HTTPステータス・例外分類・起動からの経過msだけ。不明はnull。準備確認は最終失敗のみ。realtimeの古い要求と意図した停止による中断は記録しない）、`coach_completed / coach_failed / coach_provider_failed / coach_responses_tools`（公開エラー・固定の発生箇所・例外種別・固定の回答検査コード・提供元HTTPステータス・所要時間・道具呼び出し数・ターン数）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
 
 診断は`npx wrangler tail --env staging`（本番は`production`）で構造化consoleログを確認します。**tailの出力を共有・記録しないでください。** 自動メタデータにはリクエスト情報が含まれるため、報告には上記の固定診断フィールドだけを必要最小限で転記します。secretが表示された場合は閲覧だけでも漏えいとして扱い、原因の修正後に該当secretを差し替え、提供元キーは旧キーも失効させます（後述）。旧版の`X-Coach-Config`はsecretを内部ヘッダーに含めていたため撤去しました。現在はDO自身のenvから読み、設定一式をヘッダー・本文・ログへシリアライズしません。独自診断も例外のmessage・stack・任意のname、提供元本文・入力・キーを出しません。処理完了時に期限タイマーを解除し、ログや処理終了を期限まで引き延ばしません。
 
