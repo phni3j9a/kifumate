@@ -11,6 +11,7 @@ export class StandardJob extends DurableObject<unknown> {
     console.warn(JSON.stringify({event: 'container_failure', phase, status, kind,
       elapsedMs: this.started === undefined ? null : Math.max(0, Date.now() - this.started)}));
   }
+  protected expectedInterruption(_request: Request, _status?: number) { return false; }
   protected vcpu = 1;
   protected get idleMs() { return 10_000; }
   constructor(ctx: DurableObjectState, env: unknown) {
@@ -31,30 +32,37 @@ export class StandardJob extends DurableObject<unknown> {
       const port = c.getTcpPort(8080);
       if (!this.ready) {
         const signal = AbortSignal.any([request.signal, AbortSignal.timeout(40_000)]);
-        let reported = false;
         while (!signal.aborted && c.running) {
           try {
             const health = await port.fetch('http://container/health', {signal});
             await health.arrayBuffer();
             if (health.ok) { this.ready = true; break; }
-            if (!reported) this.failure(phase, health.status);
-          } catch (error) { if (!reported) this.failure(phase, null, error); }
-          reported = true; // 起動中の同じ待機ループでは毎回記録しない。
+          } catch { /* 起動途中の接続失敗は期限まで待つ。 */ }
           await new Promise(resolve => setTimeout(resolve, 200));
         }
-        if (!this.ready) { this.failure('readiness_end', 503, signal.reason); return new Response(null, {status: 503}); }
+        if (!this.ready) {
+          if (!this.expectedInterruption(request)) this.failure('readiness_end', 503, signal.reason);
+          return new Response(null, {status: 503});
+        }
       }
       phase = 'forward';
       const reply = await port.fetch(request);
-      if (!reply.ok) this.failure(phase, reply.status);
+      if (!reply.ok && !this.expectedInterruption(request, reply.status)) this.failure(phase, reply.status);
       return reply;
-    } catch (error) { this.failure(phase, null, error); throw error; }
+    } catch (error) {
+      if (!this.expectedInterruption(request)) this.failure(phase, null, error);
+      throw error;
+    }
   }
 }
 export class PreciseJob extends StandardJob { protected vcpu = 2; }
 interface EngineRun { generation: number; account: string; session: string; lastAlive: number; ended?: number; stopping?: boolean }
 export class RealtimeEngine extends StandardJob {
   protected get idleMs() { return 310_000; }
+  protected expectedInterruption(request: Request, status?: number) {
+    const run = this.run;
+    return status === 409 || !!run && (run.stopping === true || run.generation !== Number(request.headers.get('X-Generation')));
+  }
   private watching?: number;
   private get run() { return this.ctx.storage.kv.get<EngineRun>('run'); }
   constructor(ctx: DurableObjectState, env: Env) {
@@ -69,7 +77,7 @@ export class RealtimeEngine extends StandardJob {
     if (this.watching === run.generation) return;
     this.watching = run.generation;
     this.ctx.waitUntil(this.ctx.container!.monitor().then(() => this.exited(run, Date.now()), error => {
-      if (!this.run?.stopping) this.failure('monitor', null, error);
+      if (this.run?.generation === run.generation && !this.run.stopping) this.failure('monitor', null, error);
       return this.exited(run, Date.now());
     }));
   }
@@ -94,7 +102,7 @@ export class RealtimeEngine extends StandardJob {
     }
     if (previous) {
       const closed = previous.stopping || previous.ended !== undefined || (this.watching === generation && !this.ctx.container?.running);
-      if (generation < previous.generation || (generation === previous.generation && closed)) { this.failure('admission', 410); return new Response(null, {status: 410}); }
+      if (generation < previous.generation || (generation === previous.generation && closed)) return new Response(null, {status: 410});
     }
     const run = {generation, account, session, lastAlive: Date.now()};
     this.ctx.storage.kv.put('run', run);
