@@ -8,14 +8,10 @@ import { coachTags, readCoachResponse } from './coach-tools';
 import { DurableObject } from 'cloudflare:workers';
 import { RealtimeSessions, fetchRealtimeAnalysis } from './realtime';
 import { deepPositions, type PositionResult } from './deep';
-import { Container } from '@cloudflare/containers';
 import { ApiError, RETENTION_MS, json, parseInput, readJson, sha256, weekStart, type Input, type Mode } from './model';
 
 export interface Env extends CoachEnv {
   DEVICES: DurableObjectNamespace<Device>;
-  STD: DurableObjectNamespace<StandardContainer>;
-  PRECISE: DurableObjectNamespace<PreciseContainer>;
-  REALTIME: DurableObjectNamespace<RealtimeContainer>;
   STD_JOB: DurableObjectNamespace<StandardJob>;
   PRECISE_JOB: DurableObjectNamespace<PreciseJob>;
   RT_ENGINE: DurableObjectNamespace<RealtimeEngine>;
@@ -34,51 +30,6 @@ export interface Env extends CoachEnv {
   ALLOW_DEV_PAID: string;
   DEV_PAID_HASHES?: string;
 }
-export class StandardContainer extends Container<Env> {
-  defaultPort = 8080;
-  sleepAfter = '10s';
-  enableInternet = false;
-}
-export class PreciseContainer extends StandardContainer {}
-
-export class RealtimeContainer extends StandardContainer {
-  sleepAfter = '60s';
-  private sessions: RealtimeSessions;
-  private boot?: Promise<void>;
-  private lifetime = new AbortController();
-  constructor(ctx: DurableObjectState<{}>, env: Env) {
-    super(ctx, env);
-    this.sessions = new RealtimeSessions(ctx.storage, {
-      analyze: async (input, sessionId, sequence, round, movetimeMs, signal) => {
-        if (this.boot || !ctx.container?.running) {
-          // 局面変更では共通の初回起動まで中断しない。明示停止・休止だけが起動を打ち切る。
-          const boot = this.boot ??= this.startAndWaitForPorts(8080, {abort: this.lifetime.signal});
-          try { await boot; } finally { if (this.boot === boot) this.boot = undefined; }
-        }
-        if (signal.aborted) return new Response(null, {status: 409});
-        return fetchRealtimeAnalysis(this.containerFetch.bind(this), input, sessionId, sequence, round, movetimeMs, signal);
-      },
-      stop: async () => {
-        this.lifetime.abort();
-        await this.boot?.catch(() => {});
-        await this.destroy();
-        await this.stop();
-        this.lifetime = new AbortController();
-      },
-      schedule: async when => {
-        this.deleteSchedules('expireRealtime');
-        await this.schedule(new Date(when), 'expireRealtime');
-      },
-    }, idleTime(env.REALTIME_IDLE_MS, 30_000), idleTime(env.REALTIME_HOLD_IDLE_MS, 300_000));
-  }
-  async expireRealtime() { await this.sessions.expire(); }
-  async onActivityExpired() { await this.sessions.expire(); }
-  onStop() { if (!this.boot) this.sessions.disconnected(); }
-  async fetch(request: Request): Promise<Response> {
-    return realtimeRequest(this.ctx, this.env, this.sessions, request);
-  }
-}
-
 function idleTime(value: string | undefined, fallback: number) {
   const ms = Number(value);
   return Number.isSafeInteger(ms) && ms >= 1000 && ms <= 300_000 ? ms : fallback;
