@@ -29,3 +29,12 @@ it('Worker→DOのヘッダー・本文へsecretや外部の内部ヘッダー�
     for (const value of [...Object.values(secrets), token]) expect(forwarded).not.toContain(value);
   }
 });
+
+it('drain中はコーチを含む新規・局面更新だけを入口で止め、照会と中止は転送する', async () => {
+  const bindings = {...env, ANALYSIS_DRAIN: 'true', DEVICES: {getByName: () => ({fetch: () => Response.json({ok: true})})}} as unknown as Env;
+  for (const [method, path, status] of [['POST','jobs',503], ['POST','coach',503], ['POST','realtime',503],
+    ['PUT',`realtime/${crypto.randomUUID()}`,503], ['DELETE',`coach/${crypto.randomUUID()}`,200], ['GET','jobs',200]] as const) {
+    const response = await worker.fetch(new Request('https://api/v1/' + path, {method, headers: {Authorization: 'Bearer ' + 'a'.repeat(64)}}), bindings);
+    expect(response.status).toBe(status);
+  }
+});

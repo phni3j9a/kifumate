@@ -3,8 +3,8 @@ import { ApiError, RETENTION_MS, json, monthStart, nextMonth, parseInput, readJs
 export const MONTHLY_MS = 300 * 60_000;
 export const MAX_REALTIME_SEARCH_MS = 60_000;
 export interface RealtimeBackend {
-  analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal): Promise<Response>;
-  stop(session: string): Promise<void>;
+  analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal, generation: number): Promise<Response>;
+  stop(session: string, generation: number): Promise<number | void>;
   schedule(when: number): Promise<void>;
 }
 export async function fetchRealtimeAnalysis(fetch: (url: string, init: RequestInit) => Promise<Response>,
@@ -69,8 +69,10 @@ export class RealtimeSessions {
     });
   }
   quota(owner: string) {
-    this.account(this.now());
-    const now = this.now(), month = monthStart(now), usedMs = this.used(owner, month);
+    const now = this.now(), month = monthStart(now), session = this.session(owner);
+    // 通知が遅れても停止時刻で確定できるよう、GETは現在の区間を永続加算しない。
+    const pending = session?.charged == null ? 0 : Math.max(0, now - Math.max(month, session.charged));
+    const usedMs = Math.min(MONTHLY_MS, this.used(owner, month) + pending);
     return {monthStart: month, resetsAt: nextMonth(now), limitMs: MONTHLY_MS, usedMs,
       remainingMs: Math.max(0, MONTHLY_MS - usedMs), low: MONTHLY_MS - usedMs < MONTHLY_MS / 10};
   }
@@ -97,8 +99,8 @@ export class RealtimeSessions {
     this.sql.exec('UPDATE rt_sessions SET status=?,error=? WHERE owner=?', status, error, session.owner);
     this.stopping = (async () => {
       // SIGKILL/destroy の完了まで課金。停止に失敗した場合は貸与も集計も解除しない。
-      await this.backend.stop(session.id);
-      this.account(this.now());
+      const ended = await this.backend.stop(session.id, this.generation());
+      this.account(ended ?? this.now());
       this.sql.exec('UPDATE rt_sessions SET charged=NULL WHERE owner=?', session.owner);
     })();
     try { await this.stopping; }
@@ -112,6 +114,8 @@ export class RealtimeSessions {
     if (!session) return !!stopping;
     const quota = this.quota(session.owner), current = this.session(session.owner)!;
     if (['off', 'failed'].includes(current.status)) await this.halt(current.status, current.error);
+    else if (session.charged !== null && monthStart(session.charged) < quota.monthStart &&
+      this.used(session.owner, monthStart(session.charged)) + nextMonth(session.charged) - session.charged >= MONTHLY_MS) await this.halt('limit');
     else if (!quota.remainingMs || current.status === 'limit') await this.halt('limit');
     else if (current.status === 'paused' || this.now() >= session.activity + this.idleFor(session)) await this.halt('paused');
     else {
@@ -120,11 +124,12 @@ export class RealtimeSessions {
     }
     return true;
   }
-  disconnected() {
+  private generation() { return this.storage.kv.get<number>('rt_generation') ?? 0; }
+  disconnected(id?: string, generation?: number, ended = this.now()) {
     if (this.stopping) return;
     const session = this.active();
-    if (!session) return;
-    this.abort?.abort(); this.account(this.now());
+    if (!session || (id !== undefined && (session.id !== id || generation !== this.generation()))) return;
+    this.abort?.abort(); this.account(ended);
     this.sql.exec("UPDATE rt_sessions SET charged=NULL,status='paused',error='analysis_unavailable' WHERE owner=?", session.owner);
   }
   async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void, checkPaid?: () => Promise<boolean>): Promise<Response> {
@@ -185,6 +190,7 @@ export class RealtimeSessions {
           ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
           result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
           owner, id, seq, now, now);
+        if (!active) this.storage.kv.put('rt_generation', seq);
         if (hold) this.sql.exec('INSERT OR REPLACE INTO rt_holds VALUES (?,?,?)', owner, id, seq);
         else this.sql.exec('DELETE FROM rt_holds WHERE owner=?', owner);
       });
@@ -203,7 +209,7 @@ export class RealtimeSessions {
     try {
       await this.expire(false);
       for (let round = 0, ms = 250; !signal.aborted; round++, ms = Math.min(ms * 2, MAX_REALTIME_SEARCH_MS)) {
-        const response = await this.backend.analyze(input, id, sequence, round, ms, signal).catch(error => {
+        const response = await this.backend.analyze(input, id, sequence, round, ms, signal, this.generation()).catch(error => {
           if (resuming && round === 0) return new Response(null, {status: 503});
           throw error;
         });

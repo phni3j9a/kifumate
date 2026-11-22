@@ -21,6 +21,7 @@ export interface Env extends CoachEnv {
   RT_ENGINE?: DurableObjectNamespace<RealtimeEngine>;
   RT_ACCOUNTS?: DurableObjectNamespace<RealtimeAccount>;
   USE_LEGACY_ANALYSIS?: string;
+  ANALYSIS_DRAIN?: string;
   PAUSE_FREE_ANALYSIS?: string;
   INVITATIONS: DurableObjectNamespace<Invitations>;
   INVITE_ADMIN_KEY?: string;
@@ -96,14 +97,16 @@ export class RealtimeAccount extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sessions = new RealtimeSessions(ctx.storage, {
-      analyze: (input, id, sequence, round, ms, signal) => {
+      analyze: (input, id, sequence, round, ms, signal, generation) => {
         const engine = env.RT_ENGINE!.getByName(id);
-        return fetchRealtimeAnalysis((url, init) => engine.fetch(url, init), input, id, sequence, round, ms, signal);
+        return fetchRealtimeAnalysis((url, init) => engine.fetch(url, {...init, headers: {...init.headers,
+          'X-Account': ctx.id.toString(), 'X-Session': id, 'X-Generation': String(generation)}}), input, id, sequence, round, ms, signal);
       },
-      stop: id => env.RT_ENGINE!.getByName(id).stop(),
+      stop: (id, generation) => env.RT_ENGINE!.getByName(id).stop(generation),
       schedule: when => ctx.storage.setAlarm(when),
     }, idleTime(env.REALTIME_IDLE_MS, 30_000), idleTime(env.REALTIME_HOLD_IDLE_MS, 300_000));
   }
+  engineExited(id: string, generation: number, ended: number) { this.sessions.disconnected(id, generation, ended); }
   async alarm() { await this.sessions.expire(); }
   async fetch(request: Request) { return realtimeRequest(this.ctx, this.env, this.sessions, request); }
 }
@@ -472,6 +475,7 @@ export default {
       await limit(env.API_LIMITER, hash, env.ENVIRONMENT);
       const family = url.pathname.split('/')[2];
       if (!['GET', 'DELETE'].includes(request.method)) await limit(env.WRITE_LIMITER, hash + ':' + family, env.ENVIRONMENT);
+      if (env.ANALYSIS_DRAIN === 'true' && ['jobs', 'realtime', 'coach'].includes(family) && ['POST', 'PUT'].includes(request.method)) throw new ApiError(503, 'analysis_unavailable');
       if (url.pathname === '/v1/invitations/redeem') {
         await limit(env.INVITE_LIMITER, 'device:' + hash, env.ENVIRONMENT);
         await limit(env.INVITE_LIMITER, 'ip:' + ip, env.ENVIRONMENT);

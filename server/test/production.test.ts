@@ -20,6 +20,9 @@ it('productionは専用Worker・ドメイン・DO・有限Container枠を持ち�
   expect(production.vars).not.toHaveProperty('COACH_SIGNING_KEY');
   expect(production.durable_objects.bindings.map((x: any) => x.class_name).sort()).toEqual(['Device', 'Invitations', 'PreciseContainer', 'RealtimeContainer', 'StandardContainer']);
   expect(production.containers.map((x: any) => x.max_instances)).toEqual([2, 2, 2]);
+  expect(production.migrations).toEqual(config.migrations.slice(0, 3));
+  expect((production.migrations ?? config.migrations).at(-1).tag).toBe('v3');
+  expect((config.env.staging.migrations ?? config.migrations).at(-1).tag).toBe('v4');
   expect(config.migrations.at(-1)).toEqual({tag: 'v4', new_sqlite_classes: ['StandardJob', 'PreciseJob', 'RealtimeEngine', 'RealtimeAccount']});
   expect(config.env.staging.containers.slice(3).every((c: any) => c.scheduling_policy === 'durable_object' && !('max_instances' in c))).toBe(true);
   expect(new Set([...production.ratelimits, ...config.env.staging.ratelimits].map((x: any) => x.namespace_id)).size).toBe(8);

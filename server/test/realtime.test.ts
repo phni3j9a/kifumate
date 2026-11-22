@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { Device } from '../src/index';
+import { Device, RealtimeAccount } from '../src/index';
 import { monthStart, nextMonth, sha256 } from '../src/model';
 import { fetchRealtimeAnalysis, MONTHLY_MS, RealtimeSessions, type RealtimeBackend } from '../src/realtime';
 
@@ -33,11 +33,33 @@ async function fixture(check: (f: any) => Promise<void>, idleMs = 30_000, holdId
     await check({request, send, backend, calls, sql: state.storage.sql,
       advance: (ms: number) => { now += ms; }, time: (value: number) => { now = value; },
       drain: async () => { await Promise.all(tasks.splice(0)); }, expire: () => rt.expire(),
-      stops: () => stops, due: () => due, disconnected: () => rt.disconnected(),
+      stops: () => stops, due: () => due, disconnected: (id?: string, gen?: number, ended?: number) => rt.disconnected(id, gen, ended),
       restart: () => { rt = new RealtimeSessions(state.storage, backend, idleMs, holdIdleMs, () => now); },
     });
   });
 }
+
+it('コールド起動時のAccount→Engineは初回・旧bridgeへのフォールバック双方へ内部世代を渡す', async () => {
+  await runInDurableObject(devices.getByName(crypto.randomUUID()), async (_instance, state) => {
+    const seen: Request[] = [];
+    let done!: () => void;
+    const finished = new Promise<void>(resolve => { done = resolve; });
+    const account = new RealtimeAccount(state, {ENVIRONMENT: 'staging', ALLOW_DEV_PAID: 'true', RT_ENGINE: {getByName: () => ({
+      fetch: async (url: string, init: RequestInit) => {
+        seen.push(new Request(url, init));
+        if (url.endsWith('/deepen')) return new Response(null, {status: 404});
+        done(); return Response.json({ply: 0, score: null});
+      },
+    })}} as any);
+    const accepted = await account.fetch(new Request('https://device/v1/realtime', {method: 'POST',
+      headers: {'content-type':'application/json', 'X-Dev-Paid':'1', 'X-Dev-Entitlement':'1', 'X-Realtime-Owner':'a'.repeat(64)}, body: JSON.stringify(position)}));
+    const {sessionId} = await accepted.json() as any;
+    expect(accepted.status).toBe(202); await finished;
+    expect(seen.map(r => [new URL(r.url).pathname, r.headers.get('X-Account'), r.headers.get('X-Session'), r.headers.get('X-Generation')])).toEqual([
+      ['/realtime/deepen', state.id.toString(), sessionId, '0'], ['/realtime', state.id.toString(), sessionId, '0'],
+    ]);
+  });
+});
 
 describe('リアルタイム解析', () => {
   it('新DOは旧bridgeの404で旧形式に戻し、局面ごとに単発の結果を返す', async () => fixture(async f => {
@@ -348,9 +370,9 @@ describe('リアルタイム解析', () => {
     const first = await f.request('POST', position); await f.drain();
     f.time(boundary + 1000); f.restart();
     expect((await f.request()).quota.usedMs).toBe(1000);
-    expect(f.sql.exec('SELECT ms FROM rt_usage WHERE month=?', monthStart(origin)).toArray()[0].ms).toBe(1000);
     expect((await f.request()).quota.usedMs).toBe(1000);
     await f.request('DELETE', undefined, 'a', true, first.sessionId);
+    expect(f.sql.exec('SELECT ms FROM rt_usage WHERE month=?', monthStart(origin)).toArray()[0].ms).toBe(1000);
   }));
   it('停止後の遅延結果を破棄し、失敗でも稼働済み時間は返却しない', async () => fixture(async f => {
     let release!: (response: Response) => void;
@@ -403,6 +425,17 @@ describe('リアルタイム解析', () => {
     expect(f.stops()).toBe(1); expect(f.calls.length).toBe(1);
     expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).httpStatus).toBe(202);
     await f.drain();
+  }));
+  it('終局後にエンジンが落ちても通知時刻ではなく終了時刻で確定し、古い世代の通知を無視する', async () => fixture(async f => {
+    const first = await f.request('POST', {...position, hold: true}); await f.drain();
+    f.advance(5000); expect((await f.request()).quota.usedMs).toBe(5000);
+    f.disconnected(first.sessionId, 0, origin + 500);
+    expect(await f.request()).toMatchObject({status: 'paused', quota: {usedMs: 500}});
+    await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId); await f.drain();
+    f.disconnected(first.sessionId, 0, origin + 500); f.advance(1000);
+    await f.request('DELETE', undefined, 'a', true, first.sessionId);
+    f.disconnected(first.sessionId, 1, origin + 6000); f.advance(2000);
+    expect(await f.request()).toMatchObject({status: 'off', quota: {usedMs: 1505}});
   }));
   it('休止時間を設定でき、予期せぬ停止でも時間を確定する', async () => fixture(async f => {
     const first = await f.request('POST', position); await f.drain();

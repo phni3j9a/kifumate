@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-vi.mock("cloudflare:workers", () => ({DurableObject: class { constructor(protected ctx: unknown) {} }}));
+vi.mock("cloudflare:workers", () => ({DurableObject: class { constructor(protected ctx: unknown, protected env: unknown) {} }}));
 import { PreciseJob, RealtimeEngine } from '../src/analysis-container';
 
 it('準備完了後だけ探索を1回転送し、次の局面では同じエンジンを使う', async () => {
@@ -20,10 +20,23 @@ it('準備完了後だけ探索を1回転送し、次の局面では同じエン
   expect(container.setInactivityTimeout).toHaveBeenCalledWith(10_000);
 });
 
-it('停止済みセッションを再起動せず停止処理を繰り返せる', async () => {
-  const container = {running: false, destroy: vi.fn(() => { container.running = false; })};
-  const worker = new RealtimeEngine({container} as unknown as DurableObjectState, {});
-  container.running = true;
-  await worker.stop(); await worker.stop();
-  expect(container.destroy).toHaveBeenCalledOnce();
+it('停止RPCが先着しても遅着した探索は再生成後も起動しない。再開世代の終了だけを台帳へ通知する', async () => {
+  const data = new Map(), kv = {get: (k: string) => data.get(k), put: (k: string, v: unknown) => data.set(k, v)};
+  let exit!: () => void;
+  const tasks: Promise<unknown>[] = [], setAlarm = vi.fn(), engineExited = vi.fn();
+  const container = {running: false, images: {base: 'image'}, monitor: () => new Promise<void>(r => { exit = r; }),
+    destroy: vi.fn(), setInactivityTimeout: vi.fn(), start: vi.fn(() => {container.running = true;}),
+    getTcpPort: () => ({fetch: () => Response.json({})})};
+  const ctx = {storage: {kv, setAlarm}, container, waitUntil: (work: Promise<unknown>) => tasks.push(work)} as unknown as DurableObjectState;
+  const env = {RT_ACCOUNTS: {idFromString: (s: string) => s, get: () => ({engineExited})}} as any;
+  await new RealtimeEngine(ctx, env).stop(0);
+  const engine = new RealtimeEngine(ctx, env);
+  const fetch = (generation: number) => engine.fetch(new Request('http://container/realtime', {headers: {'X-Session': 'session', 'X-Account': 'account', 'X-Generation': String(generation)}}));
+  expect((await fetch(0)).status).toBe(409); expect(container.start).not.toHaveBeenCalled();
+  expect((await fetch(1)).ok).toBe(true);
+  container.running = false; exit(); await Promise.all(tasks);
+  expect(setAlarm).toHaveBeenCalledOnce(); await engine.alarm();
+  expect(engineExited).toHaveBeenCalledWith('session', 1, expect.any(Number));
+  expect((await fetch(1)).status).toBe(409);
+  await engine.stop(1); await engine.alarm(); expect(engineExited).toHaveBeenCalledOnce();
 });
