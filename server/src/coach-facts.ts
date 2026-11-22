@@ -197,12 +197,13 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
   }
   if (name === 'play_line' && result.参照) (facts.仮の手順 ??= []).push(result.参照);
   if (name === 'book') {
-    const saveMoves = (id: unknown, moves: unknown[]) => {
+    const saveMoves = (id: unknown, moves: ({表記?: unknown; 移動?: unknown} | null | undefined)[]) => {
       const origin = typeof id === 'string' && /^(\d+):position$/.exec(id);
       if (!origin || !hasFactReference(origin[0], facts)) return;
       // 本の選択肢は連続した手順ではなく、起点が同じ別々の候補。
-      for (const 表記 of moves) if (typeof 表記 === 'string') {
-        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), [PV]: [{表記}]});
+      for (const move of moves) {
+        if (typeof move?.表記 !== 'string' || typeof move.移動 !== 'string' || !['前進', '後退', '横移動', '打つ'].includes(move.移動)) continue;
+        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), [PV]: [{表記: move.表記, 移動: move.移動}]});
       }
     };
     const first = result.最初に外れた手;

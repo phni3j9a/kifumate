@@ -2,7 +2,7 @@
 
 ## 任意の知識DB（Issue [#69](https://github.com/phni3j9a/kifumate/issues/69)）
 
-Responsesの道具方式に `book` を追加し、`knowledge` で戦型の方針と手筋も検索できます。配置と出力は [サーバーREADME](../README.md#任意の知識db) を参照。ローカル検証は架空のDBだけを使用しました。Vitest 226件、Python 93件、比較スクリプト自己検査10件、TypeScript型検査、DBなしでのDockerのコピー工程が成功。実モデルを使ったDBあり／なしの比較とデプロイは未実施です。
+Responsesの道具方式に `book` を追加し、`knowledge` で戦型の方針と手筋も検索できます。配置と出力は [サーバーREADME](../README.md#任意の知識db) を参照。自動テストには架空のDBだけを使いました。反転時の文章と符号の整合、移動方向の矛盾、定跡表への再合流を検査しています。Vitest 227件、Python 94件、比較スクリプト自己検査10件、TypeScript型検査が成功。DBなしでのDockerのコピー工程も確認済みです。実モデルを使ったDBあり／なしの比較とデプロイは未実施です。
 
 Issue [#12](https://github.com/phni3j9a/kifumate/issues/12)。API契約・安全策は [README](../README.md) を参照してください。
 

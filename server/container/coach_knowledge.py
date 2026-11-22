@@ -10,7 +10,7 @@ import unicodedata
 
 import cshogi as sh
 
-from coach_facts import move_fact
+from coach_facts import RANKS, move_fact
 from shogi_input import MOVE, validate_sfen
 
 
@@ -51,6 +51,10 @@ MAX_DB_BYTES = 16 * 1024 * 1024
 INVALID_DB = 'coach_knowledge: invalid knowledge database; ignored'
 NO_MATCH = {'状態': '一致なし'}
 ROTATE_MOVE = str.maketrans('123456789abcdefghi', '987654321ihgfedcba')
+FILES = '123456789１２３４５６７８９'
+ROTATE_SQUARE = str.maketrans(FILES + RANKS, '987654321９８７６５４３２１' + RANKS[::-1])
+SWAP_WORD = {'先手': '後手', '後手': '先手', '右辺': '左辺', '左辺': '右辺', '右側': '左側', '左側': '右側'}
+ORIENTED_TEXT = re.compile(rf'(?<![0-9０-９])[{FILES}][{RANKS}筋]|' + '|'.join(SWAP_WORD))
 
 
 def require(condition):
@@ -168,8 +172,19 @@ def short(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + '…'
 
 
-def description(row):
-    return {'題': short(row['title'], 80), '説明': short(row['text'], 400)}
+def oriented_text(text, limit, turned):
+    # shortcut: 明示された升・筋・先後・左右だけを置換。文脈に依存する説明は別途確認する。
+    if turned:
+        text = ORIENTED_TEXT.sub(lambda m: SWAP_WORD.get(m[0], m[0].translate(ROTATE_SQUARE)), text)
+    return short(text, limit)
+
+
+def description(row, turned=False):
+    return {'題': oriented_text(row['title'], 80, turned), '説明': oriented_text(row['text'], 400, turned)}
+
+
+def book_move(fact):
+    return {'表記': fact['表記'], '移動': fact['移動']}
 
 
 def lookup(query):
@@ -194,7 +209,7 @@ def book(game):
         return NO_MATCH.copy()
     view, moves, initial = game['perspective'], game['moves'], game['initial']
     b = sh.Board() if initial == 'startpos' else sh.Board(initial)
-    prev = last = first_out = None
+    prev = last = last_departure = None
     tactics, notes, topics = [], [], []
     for ply in range(len(moves) + 1):
         actual = moves[ply] if ply < len(moves) else None
@@ -203,33 +218,43 @@ def book(game):
         book_moves = {}
         for key_, turned in ((key, False), (rotated_key(key), True)):
             if row := joseki.get(key_):
-                last = ref
-                topics.append((ply, row['strategy']))
+                topics.append((ply, row['strategy'], turned))
                 if note := row.get('note'):
-                    notes.append((ply, {**ref, '説明': short(note['text'], 240)}))
+                    notes.append((ply, {**ref, '説明': oriented_text(note['text'], 240, turned), '先後反転': turned}))
                 for move in row['moves']:
-                    book_moves[move.translate(ROTATE_MOVE) if turned else move] = None
+                    book_moves.setdefault(move.translate(ROTATE_MOVE) if turned else move, turned)
             for row in tesuji.get(key_, ()):
                 if strategy := row.get('strategy'):
-                    topics.append((ply, strategy))
+                    topics.append((ply, strategy, turned))
                 if len(tactics) < 3:
                     answer = row['answer'][0]
                     if turned:
                         answer = answer.translate(ROTATE_MOVE)
                     fact, _ = move_fact(b.copy(), answer, prev, view)
-                    tactics.append({**ref, **description(row), '正解': fact['表記'],
+                    tactics.append({**ref, **description(row, turned), '正解': book_move(fact), '先後反転': turned,
                                     '実戦で正解': None if actual is None else actual == answer})
+        if book_moves:
+            # 再合流したら、それ以前に一時的に外れた着手は取り消す。
+            last = {**ref, '先後反転': key not in joseki}
+            last_departure = (b.copy(), prev, book_moves) if actual is not None else None
         if actual is not None:
-            if first_out is None and book_moves and actual not in book_moves:
-                fact, _ = move_fact(b.copy(), actual, prev, view)
-                first_out = {**ref, '手数': ply + 1, '指した側': fact['指した側'], '実戦手': fact['表記'],
-                             '本の手': [move_fact(b.copy(), m, prev, view)[0]['表記'] for m in list(book_moves)[:8]]}
             _, prev = move_fact(b, actual, prev, view)
     if last is None and not tactics:
         return NO_MATCH.copy()
-    near = first_out['手数'] - 1 if first_out else last['手数'] if last else tactics[0]['手数']
+    departure = None
+    if last_departure is not None:
+        board, previous, book_moves = last_departure
+        ply = last['手数']
+        fact, _ = move_fact(board.copy(), moves[ply], previous, view)
+        departure = {'参照': last['参照'], '手数': ply + 1, '指した側': fact['指した側'], '実戦手': fact['表記'],
+                     '本の手': [{**book_move(move_fact(board.copy(), move, previous, view)[0]), '先後反転': turned}
+                               for move, turned in list(book_moves.items())[:8]]}
+    near = last['手数'] if last else tactics[0]['手数']
     closest = lambda item: (abs(item[0] - near), item[0])
-    topic_ids = list(dict.fromkeys(id_ for _, id_ in sorted(topics, key=closest)))
-    return {'状態': '一致あり', '最後の一致': last, '最初に外れた手': first_out,
-            '方針': [description(strategies[id_]) for id_ in topic_ids[:2]],
+    topic_turns = {}
+    for _, id_, turned in sorted(topics, key=closest):
+        topic_turns.setdefault(id_, turned)
+    return {'状態': '一致あり', '最後の一致': last, '最初に外れた手': departure,
+            '方針': [{**description(strategies[id_], turned), '先後反転': turned}
+                   for id_, turned in list(topic_turns.items())[:2]],
             '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]], '手筋': tactics}
