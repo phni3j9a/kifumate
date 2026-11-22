@@ -42,13 +42,19 @@ export async function readJson(request: Request, maxBytes = 16_384): Promise<unk
   const reader = request.body?.getReader();
   if (!reader) throw new ApiError(400, 'invalid_json');
   let bytes = 0; const chunks: Uint8Array[] = [];
-  while (true) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    if (bytes > maxBytes) { await reader.cancel(); throw new ApiError(413, 'input_too_large'); }
-    chunks.push(value);
-  }
+  let timedOut = false;
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  const timer = setTimeout(() => { timedOut = true; cancel(); }, 30_000);
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+      if (timedOut) throw new ApiError(408, 'request_timeout');
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) { cancel(); throw new ApiError(413, 'input_too_large'); }
+      chunks.push(value);
+    }
+  } finally { clearTimeout(timer); }
   const body = new Uint8Array(bytes); let offset = 0;
   for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.length; }
   try { return JSON.parse(new TextDecoder().decode(body)); } catch { throw new ApiError(400, 'invalid_json'); }

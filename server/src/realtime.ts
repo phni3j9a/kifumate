@@ -3,8 +3,8 @@ import { ApiError, RETENTION_MS, json, monthStart, nextMonth, parseInput, readJs
 export const MONTHLY_MS = 300 * 60_000;
 export const MAX_REALTIME_SEARCH_MS = 60_000;
 export interface RealtimeBackend {
-  analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal): Promise<Response>;
-  stop(): Promise<void>;
+  analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal, generation: number): Promise<Response>;
+  stop(session: string, generation: number): Promise<number | void>;
   schedule(when: number): Promise<void>;
 }
 export async function fetchRealtimeAnalysis(fetch: (url: string, init: RequestInit) => Promise<Response>,
@@ -51,26 +51,26 @@ export class RealtimeSessions {
   private used(owner: string, month: number): number {
     return this.sql.exec<{ms: number}>('SELECT ms FROM rt_usage WHERE owner=? AND month=?', owner, month).toArray()[0]?.ms ?? 0;
   }
-  private account(now: number) {
-    const session = this.active();
-    if (!session || session.charged === null) return;
-    if (now <= session.charged) return;
+  // 停止要求と終了通知は同じ確定処理を使う。暫定残量で選んだlimitは実終了時刻で判定し直す。
+  private settle(session: Session, ended: number, reason: string, error: string | null) {
     this.storage.transactionSync(() => {
+      let status = reason === 'limit' ? 'paused' : reason;
       let cursor = session.charged!;
-      while (cursor < now) {
-        const month = monthStart(cursor), end = Math.min(now, nextMonth(cursor));
-        const exhausted = this.used(session.owner, month) + end - cursor >= MONTHLY_MS;
+      while (cursor < ended) {
+        const month = monthStart(cursor), end = Math.min(ended, nextMonth(cursor));
+        if (status === 'paused' && this.used(session.owner, month) + end - cursor >= MONTHLY_MS) status = 'limit';
         this.sql.exec('INSERT INTO rt_usage VALUES (?,?,?) ON CONFLICT(owner,month) DO UPDATE SET ms=MIN(?,ms+excluded.ms)',
           session.owner, month, Math.min(MONTHLY_MS, end - cursor), MONTHLY_MS);
-        if (exhausted) this.sql.exec("UPDATE rt_sessions SET status='limit' WHERE owner=? AND status NOT IN ('off','failed')", session.owner);
         cursor = end;
       }
-      this.sql.exec('UPDATE rt_sessions SET charged=? WHERE owner=?', now, session.owner);
+      this.sql.exec('UPDATE rt_sessions SET charged=NULL,status=?,error=? WHERE owner=?', status, status === 'limit' ? null : error, session.owner);
     });
   }
   quota(owner: string) {
-    this.account(this.now());
-    const now = this.now(), month = monthStart(now), usedMs = this.used(owner, month);
+    const now = this.now(), month = monthStart(now), session = this.session(owner);
+    // 通知が遅れても停止時刻で確定できるよう、GETは現在の区間を永続加算しない。
+    const pending = session?.charged == null ? 0 : Math.max(0, now - Math.max(month, session.charged));
+    const usedMs = Math.min(MONTHLY_MS, this.used(owner, month) + pending);
     return {monthStart: month, resetsAt: nextMonth(now), limitMs: MONTHLY_MS, usedMs,
       remainingMs: Math.max(0, MONTHLY_MS - usedMs), low: MONTHLY_MS - usedMs < MONTHLY_MS / 10};
   }
@@ -97,9 +97,8 @@ export class RealtimeSessions {
     this.sql.exec('UPDATE rt_sessions SET status=?,error=? WHERE owner=?', status, error, session.owner);
     this.stopping = (async () => {
       // SIGKILL/destroy の完了まで課金。停止に失敗した場合は貸与も集計も解除しない。
-      await this.backend.stop();
-      this.account(this.now());
-      this.sql.exec('UPDATE rt_sessions SET charged=NULL WHERE owner=?', session.owner);
+      const ended = await this.backend.stop(session.id, this.generation());
+      this.settle(session, ended ?? this.now(), status, error);
     })();
     try { await this.stopping; }
     catch (error) { await this.backend.schedule(this.now() + 1000); throw error; }
@@ -112,6 +111,8 @@ export class RealtimeSessions {
     if (!session) return !!stopping;
     const quota = this.quota(session.owner), current = this.session(session.owner)!;
     if (['off', 'failed'].includes(current.status)) await this.halt(current.status, current.error);
+    else if (session.charged !== null && monthStart(session.charged) < quota.monthStart &&
+      this.used(session.owner, monthStart(session.charged)) + nextMonth(session.charged) - session.charged >= MONTHLY_MS) await this.halt('limit');
     else if (!quota.remainingMs || current.status === 'limit') await this.halt('limit');
     else if (current.status === 'paused' || this.now() >= session.activity + this.idleFor(session)) await this.halt('paused');
     else {
@@ -120,12 +121,12 @@ export class RealtimeSessions {
     }
     return true;
   }
-  disconnected() {
+  private generation() { return this.storage.kv.get<number>('rt_generation') ?? 0; }
+  disconnected(id?: string, generation?: number, ended = this.now()) {
     if (this.stopping) return;
     const session = this.active();
-    if (!session) return;
-    this.abort?.abort(); this.account(this.now());
-    this.sql.exec("UPDATE rt_sessions SET charged=NULL,status='paused',error='analysis_unavailable' WHERE owner=?", session.owner);
+    if (!session || (id !== undefined && (session.id !== id || generation !== this.generation()))) return;
+    this.abort?.abort(); this.settle(session, ended, 'paused', 'analysis_unavailable');
   }
   async fetch(request: Request, owner: string, paid: boolean, waitUntil: (work: Promise<void>) => void, checkPaid?: () => Promise<boolean>): Promise<Response> {
     // 本文待機中も同じ端末の最新権利を参照し、完了した端末の情報は保持しない。
@@ -185,11 +186,12 @@ export class RealtimeSessions {
           ON CONFLICT(owner) DO UPDATE SET id=excluded.id,sequence=excluded.sequence,status=CASE WHEN rt_sessions.charged IS NULL THEN 'preparing' ELSE 'analyzing' END,
           result=NULL,error=NULL,charged=COALESCE(rt_sessions.charged,excluded.charged),activity=excluded.activity`,
           owner, id, seq, now, now);
+        if (!active) this.storage.kv.put('rt_generation', seq);
         if (hold) this.sql.exec('INSERT OR REPLACE INTO rt_holds VALUES (?,?,?)', owner, id, seq);
         else this.sql.exec('DELETE FROM rt_holds WHERE owner=?', owner);
       });
       await this.schedule();
-      waitUntil(this.run(owner, id, seq, input, controller));
+      waitUntil(this.run(owner, id, seq, input, controller, !creating && current?.charged === null));
       return json(this.view(owner), 202);
     } catch (error) {
       if (error instanceof ApiError) return json({...this.view(owner), error: error.code}, error.status);
@@ -198,12 +200,15 @@ export class RealtimeSessions {
       if (--entitlement.pending === 0) this.entitlements.delete(owner);
     }
   }
-  private async run(owner: string, id: string, sequence: number, input: Input, controller: AbortController) {
+  private async run(owner: string, id: string, sequence: number, input: Input, controller: AbortController, resuming: boolean) {
     const {signal} = controller;
     try {
       await this.expire(false);
       for (let round = 0, ms = 250; !signal.aborted; round++, ms = Math.min(ms * 2, MAX_REALTIME_SEARCH_MS)) {
-        const response = await this.backend.analyze(input, id, sequence, round, ms, signal);
+        const response = await this.backend.analyze(input, id, sequence, round, ms, signal, this.generation()).catch(error => {
+          if (resuming && round === 0) return new Response(null, {status: 503});
+          throw error;
+        });
         if (signal.aborted) return;
         const {terminal, ...result} = response.ok ? await response.json() as {terminal?: boolean; ply?: number; score?: {kind: string} | null} : {};
         if (signal.aborted) return;
@@ -213,7 +218,9 @@ export class RealtimeSessions {
         if (signal.aborted || current?.id !== id || current.sequence !== sequence || current.charged === null
           || ['limit', 'paused', 'off', 'failed'].includes(current.status)) return;
         if (!response.ok) {
-          await this.halt('failed', response.status === 422 ? 'invalid_position_or_move' : 'analysis_unavailable');
+          // destroy後の再開で最初の転送が一時失敗しても、同じ局面を新しいroundで一度だけ探索する。
+          if (resuming && round === 0 && response.status >= 500) continue;
+          await this.halt(response.status === 410 ? 'paused' : 'failed', response.status === 422 ? 'invalid_position_or_move' : 'analysis_unavailable');
           return;
         }
         if (result.ply !== input.moves.length || typeof terminal !== 'boolean') throw new Error('invalid_result');

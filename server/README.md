@@ -7,13 +7,13 @@
 - TypeScript Worker：匿名端末トークンを発行し、SHA-256から利用者別DOを特定。トークン原文・対局者名は保存しません。
 - `Device`：SQLite-backed DO。`jobs`・`results`・`usage`・`meta`を保存し、alarmが1局面ずつ進めます。クライアントの接続維持は不要です。
 - `Invitations`：環境ごとに一つのSQLite DO。招待コードのハッシュ・期限・取消・端末枠と、短期の入力試行数を一元管理します。
-- モード別Container：各2枠の固定プール。端末DOのIDで振り分け、中継のロックがUSI操作を直列化します。別端末の棋譜・結果は混ぜません。局面ごとに開始局面と指し手列を再設定します。
+- モード別Container：stagingは `durable_object` policy。全局はジョブID、realtimeはセッションIDで専用の中継を起動します。本番は承認まで旧方式（各モード2枠）です。別端末の棋譜・結果は混ぜません。局面ごとに開始局面と指し手列を再設定します。
 - Python + cshogi中継：棋譜全体の合法手検証、USI、先手視点の評価値、1手・3手詰めの確認。詰み候補は全応手を再検証し、証明できた手順だけを返します。
 
-| モード | 1局面の探索 | Threads | MultiPV | インスタンス |
+| モード | 1局面の探索 | Threads | MultiPV | stagingのインスタンス |
 | --- | --- | --- | --- | --- |
-| `std` | 250ms | 1 | 1 | `standard-2`（1 vCPU、6 GiB、12 GB） |
-| `precise` | 全局面1000ms＋勝負所5000ms | 両段2 | 両段3 | `standard-3`（2 vCPU、8 GiB、16 GB） |
+| `std` | 250ms | 1 | 1 | 1 vCPU、1536 MiB、2000 MB |
+| `precise` | 全局面1000ms＋勝負所5000ms | 両段2 | 両段3 | 2 vCPU、1536 MiB、2000 MB |
 
 入力上限は512手、JSONは16 KiB。開始局面（0手目）と全着手後を解析するため、結果は「手数+1」局面です。
 
@@ -32,7 +32,14 @@
 - 失敗・中止は予約を返却します。再依頼は新しいIDでやり直せます。完了ジョブの重複依頼は再集計しません。
 - 通信断でもalarmで継続。コンテナ障害時は保存済み`cursor`から最大5回まで再試行します。watchdogは60秒、1回のコンテナ呼び出しは45秒で打ち切ります。結果と使用数の確定はSQLiteの同一トランザクションです。
 - 完了7日後にジョブ・結果・指し手列を削除します。失敗・中止も終了7日後に削除。使用数は別テーブルなので結果削除では戻りません。端末には結果を永続保存してください。
-- `sleepAfter = '10s'`。PythonはPID 1でもSIGTERMを処理して終了します。staging・productionの`max_instances`は各モード2です。
+- 新方式は `ctx.container.start` で外向き通信なし・上表のサイズを指定し、8080番の `/health` 成功後に中継。全局はDOの無操作10秒で停止します。旧方式と異なり `max_instances` は設定できません。無料・有料とも全体の同時実行数の上限は設けません。端末ごとの回数・時間の上限とレート制限は維持し、有料の乱用は該当招待の取り消しで止めます。
+
+### 受付停止と本番切り替え（#77）
+
+- 乱用時は対象環境の `vars.PAUSE_FREE_ANALYSIS` に文字列 `"true"` を設定してデプロイ。無料の新規全局解析だけを503で拒否します。進行中の局・既存結果・有料機能は止まりません。解除は `"false"` に戻して再デプロイ。本番操作には承認が必要です。
+- 本番の新規公開は #74 が条件。切り替え日時・停止時間・課金枠・ロールバック方針を承認後、JST月末に旧ルートのまま `vars.ANALYSIS_DRAIN="true"` を入口Workerに100%反映し（初回の移行前は本番ドメインのメンテナンスルールでも可）、 `/v1/jobs`・`/v1/realtime`・`/v1/coach` とその配下のPOST/PUTを遮断します。GET・DELETEは通します。**受付遮断を100%反映してから最低330秒（JSON本文の受信期限30秒＋旧Device DOの更新猶予300秒）待って**、遮断直前に本文を受信中だった要求も受理または408で失効してからdrain状態を確認します。全局の待機・実行中とコーチのpending（提供元の応答待ちも含む）を完了または中止させます。realtimeは明示停止または最大5分の休止を待ち、最後に旧3アプリのactive=0を確認します。無料だけを止める `PAUSE_FREE_ANALYSIS` はこの手順の代用になりません。
+- **上記のdrainを前月内に完了し、JST月初をまたいでから** stagingと同じ4 bindings・3つの `durable_object` application を `env.production` に追加し、`env.production.migrations` のv3固定を解除してv4 migration込みで一括デプロイ（段階配信しない）。旧エントリ・クラス・bindingは温存。realtimeは端末ID別の `RealtimeAccount` SQLiteへ新しい月の0から記録し、旧月はコピーしません。切替前からのセッションは新規作成します。`USE_LEGACY_ANALYSIS` は未指定または `"false"` で新bindingを使います。旧Device DOは最大300秒旧ルートを使いうるため、Workerの100%切替から最低300秒は上記の受付遮断を維持します。旧アプリのactive=0を再確認してから `ANALYSIS_DRAIN` を解除（ルール使用時は解除）して受付を再開し、端末別月枠、各モード完了・停止を確認します。
+- 新イメージは**次回起動時**に反映され、動作中の局を置換しません。緊急のイメージ更新も停止・drain後に実施。旧方式へ戻す場合も同じ3経路を遮断し、100%反映後330秒待って、コーチを含めてdrain完了を確認し、binding・クラス・applicationを残したまま対象環境の `vars.USE_LEGACY_ANALYSIS="true"` でデプロイして一括切替。v4適用後にv3の旧コミットはデプロイしません。切り戻しも100%切替後300秒を経過し、新アプリのactive=0を確認するまで受付を再開しません。月途中に利用があれば二重枠になるので、利用量を照合移行する別作業の承認を得るか、次のJST月初まで戻しません。観察期間後の旧application削除は別承認。SQLite namespaceの削除は含みません。
 
 ## API
 
@@ -150,7 +157,7 @@ node scripts/invitations.mjs revoke --env staging --hash "$HASH"
 
 公式bindingは**拠点ごとの近似カウンター**で、同期前のバーストや複数拠点では設定値を超え得ます。請求の厳密な上限ではありません。招待の追加制限は単一DOのトランザクションで全拠点共有、形式不正や成功も数えます。窓は最初の試行から15分、古い試行行は次の試行時に削除。端末とIPはハッシュだけを保持します。IP共有のモバイル回線では他人の試行も含むので、正当な入力が拒否された場合も連打せず待ってください。端末の実在性検証は別課題です。
 
-**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`coach_completed / coach_failed / coach_provider_failed / coach_responses_tools`（公開エラー・固定の発生箇所・例外種別・固定の回答検査コード・提供元HTTPステータス・所要時間・道具呼び出し数・ターン数）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
+**今回作った見張り**：Workers Logsを全件有効化し、`api`（種別・method・status）、`api_rejected`（status・公開エラー）、`device_created`、`analysis_completed`（mode）、`container_failure`（固定の発生箇所・HTTPステータス・例外分類・起動からの経過msだけ。不明はnull。準備中の途中失敗は照会ループの初回のみ、打ち切りは別に記録）、`coach_completed / coach_failed / coach_provider_failed / coach_responses_tools`（公開エラー・固定の発生箇所・例外種別・固定の回答検査コード・提供元HTTPステータス・所要時間・道具呼び出し数・ターン数）だけの構造化ログを残します。自動のinvocationログは無効にし、ヘッダー・本文・コード・キー・IP・トークン・人名を記録しません。完了イベントはクライアントが画面を離れていてもDOから出るため、利用回数の異常を追えます。
 
 診断は`npx wrangler tail --env staging`（本番は`production`）で構造化consoleログを確認します。**tailの出力を共有・記録しないでください。** 自動メタデータにはリクエスト情報が含まれるため、報告には上記の固定診断フィールドだけを必要最小限で転記します。secretが表示された場合は閲覧だけでも漏えいとして扱い、原因の修正後に該当secretを差し替え、提供元キーは旧キーも失効させます（後述）。旧版の`X-Coach-Config`はsecretを内部ヘッダーに含めていたため撤去しました。現在はDO自身のenvから読み、設定一式をヘッダー・本文・ログへシリアライズしません。独自診断も例外のmessage・stack・任意のname、提供元本文・入力・キーを出しません。処理完了時に期限タイマーを解除し、ログや処理終了を期限まで引き延ばしません。
 
@@ -209,11 +216,11 @@ POST/PUTとも`hold`は任意の真偽値です。分岐での自動解析は省
 
 ### 探索・休止・時間の数え方
 
-- **250ms → 500ms → 1秒 → 2秒 → 4秒 → …**と倍にして同じ局面を探索し、各回の結果で更新します。1回の探索は最大60秒で、上限に達したら60秒を繰り返します。終局（千日手を含む）・宣言勝ち・詰み評価の結果は繰り返さず、`searching: false`になります。コンテナの段階更新中に旧中継へ接続した場合も、従来どおり局面ごとに1回の結果を返します。同じエンジンプロセスとハッシュを再利用しますが、報告される深さが毎回増える保証はありません。Threads 1・MultiPV 1・standard-2（1 vCPU、6 GiB、12 GB）は変更しません。全局解析の設定も変わりません。
-- 読み続けると待機中もCPUを使うため、稼働1分の実費は保守的な見積もりの**約$0.00215**に近づきます。見積もりの内訳は[measurement.md](docs/measurement.md)を参照。
-- リアルタイム解析専用の`RealtimeContainer`は2枠。全局解析のコンテナとは共有しません。端末DOのIDから固定枠を選び、その枠を一端末へ排他的に貸与します。別端末が使用中なら409 `realtime_busy`で即時拒否し、その端末の時間は減りません。別枠への待ち行列・移動はありません。`shortcut:` 同時利用2枠・ハッシュ衝突で空き枠があっても拒否する構成です。少人数配布でも混雑を観測し、枠数・振り分けを更新してください。
+- **250ms → 500ms → 1秒 → 2秒 → 4秒 → …**と倍にして同じ局面を探索し、各回の結果で更新します。1回の探索は最大60秒で、上限に達したら60秒を繰り返します。終局（千日手を含む）・宣言勝ち・詰み評価の結果は繰り返さず、`searching: false`になります。コンテナの段階更新中に旧中継へ接続した場合も、従来どおり局面ごとに1回の結果を返します。同じエンジンプロセスとハッシュを再利用しますが、報告される深さが毎回増える保証はありません。Threads 1・MultiPV 1は変更せず、stagingのサイズはstdと同じです。全局解析の設定も変わりません。
+- 読み続けると待機中もCPUを使うため、稼働1分の実費は保守的な見積もりの**約$0.00143**（新サイズ。旧は約$0.00215）に近づきます。見積もりの内訳は[measurement.md](docs/measurement.md)を参照。
+- 新方式ではセッションごとの `RealtimeEngine` が探索し、別端末との固定枠衝突はありません。端末ごとの `RealtimeAccount` が休止・明示停止・月間利用時間を管理し、エンジンを破棄しても月枠は継続します。旧本番のみ2枠で衝突時409です。
 - 局面更新は旧HTTP要求を破棄し、中継は新しい要求を**USIロック取得前**に登録して旧探索に`stop`を送ります。旧bestmoveを読み切ってから新局面へ移り、中継では`sessionId / sequence / round`で順序を判定し、遅れた古い要求で新しい探索を止めません。遅延結果も破棄します。初回の共通起動は局面変更ではやり直しません。
-- `REALTIME_IDLE_MS`の既定は`30000`、`hold: true`用の`REALTIME_HOLD_IDLE_MS`の既定は`300000`（どちらも許容1000〜300000ms、不正値は既定へ）。応答の`idleMs`にはそのセッションに適用した設定値を返し、期限は**最後に受理したPOST/PUT**から測ります。再探索・探索完了・ポーリングは期限を延長しません。永続alarmで休止・上限停止を行い、明示停止はコンテナをdestroyします。停止失敗時は枠と集計を保持し1秒後に再試行します。
+- `REALTIME_IDLE_MS`の既定は`30000`、`hold: true`用の`REALTIME_HOLD_IDLE_MS`の既定は`300000`（どちらも許容1000〜300000ms、不正値は既定へ）。応答の`idleMs`にはそのセッションに適用した設定値を返し、期限は**最後に受理したPOST/PUT**から測ります。再探索・探索完了・ポーリングは期限を延長しません。永続alarmで休止・上限停止を行い、明示停止はコンテナをdestroyします。停止失敗時は枠と集計を保持し1秒後に再試行します。新方式では停止済みの起動世代への遅着要求はコンテナを起動せず拒否します。予期しない終了もエンジンのmonitorで検知し、台帳へ通知。GET中の経過時間は暫定値で、終了通知が遅れても停止観測時刻までで確定します。
 - 数えるのは**コンテナ起動要求から停止完了までの壁時計時間**。準備・探索・結果が出た後の待機・停止処理を含み、局面数やCPU使用時間では数えません。初回要求／手動起動から料金が始まる[公式の説明](https://developers.cloudflare.com/containers/platform/pricing/)に合わせたサーバー時計による集計で、Cloudflare請求メーターとの完全一致を保証するものではありません。
 - 月300分（18,000,000ms）、**JST月初0時**で区切ります。月をまたぐ稼働は両月へ分割。残り時間までのalarmを設定し、使い切ると停止します。利用上限値で集計を丸めるため、alarmの遅延や停止処理の端数を超過請求しません。翌月に勝手に再起動はせず、次の局面更新で再開します。
 - `quota.low`がtrue（残り10%未満）のときだけ残りを知らせ、それ以外では上限・残りを画面に出さないでください。停止・失敗したセッションも実際の稼働時間は返却しません。全局解析の失敗時の回数返却とは別です。
@@ -438,10 +445,10 @@ python3 scripts/measure_realtime.py \
 
 精密の2段階は、新規の招待済み端末で `python3 scripts/measure.py --url <staging URL> --token-file <端末ファイル> --modes precise --expect-deep` を実行して確認します。提供元が設定され、コーチも1回だけ確認する場合は `--coach-once` を追加します。終わったら計測用の招待を取り消してください。
 
-計測後は全三つのContainer applicationで次を確認します（対象IDは`npx wrangler containers list --env staging`で確認）。`healthy / starting`は準備済み容量で、利用者の実行中とは区別してください。
+計測後は新旧全6個のContainer applicationで次を確認します（対象IDは`npx wrangler containers list --env staging`で確認）。`healthy / starting`は準備済み容量で、利用者の実行中とは区別してください。
 
 ```sh
-for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca73d a03b91a4-eb91-461d-ad69-219e5f5139e6; do
+for ID in $(npx wrangler containers list --env staging --json | jq -r '.[] | select(.name | startswith("kifumate-analysis-staging-")) | .id'); do
   npx wrangler containers instances "$ID" --env staging --json  # 使用slotはinactive
   npx wrangler containers info "$ID" --env staging             # active=0 / assigned=0
  done
@@ -456,7 +463,7 @@ for ID in a03ecee6-a1f4-495c-ad64-4546064e7741 a03e09ba-f20f-4f24-848d-02b62c4ca
 - Worker名：`kifumate-analysis-production`。DO namespace・レート制限・Containerはstagingとは別。
 - 本番URL：**`https://kifumate-api.quarterlambda.com`**。同じアカウントのactiveなzone `quarterlambda.com` を確認済みです。第1階層のサブドメインで、[Workers Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)としてWranglerがDNSと証明書を構成します。workers.dev・preview URLは無効。既存DNSとの競合は勝手に置換せず停止して確認します。
 - ネイティブアプリ専用。CORSヘッダーを付けず、productionで`Origin`付き要求とOPTIONSは403 `browser_forbidden`。これは端末認証の代わりではなく、HTTPクライアントによる偽装を防ぐものではありません。
-- **数十人の初期配布でもstd 2・precise 2・realtime 2（合計最大6）を維持**します。全局解析は端末別キューで吸収でき、過去の85手実測はstd52秒／precise96秒程度。2枠ずつなら理想条件で毎分約2.3局／1.3局の目安となり、数十人が一斉に全局解析する前提は置きません。リアルタイム解析は同時2人まで、ハッシュ衝突では空き枠があっても409です。AIコーチの日本語化は精密枠を共有。最大8 vCPU・40 GiBメモリ・80 GBディスクまでに抑え、常時その数を起動しません。混雑の409・再試行・実測を見て、コードの`% 2`と`max_instances`を必ず一緒に変更します。
+- 本番は切替承認までstd・precise・realtime各2枠の旧方式。移行手順は上記「受付停止と本番切り替え」。
 - このブランチのvarsは GPT-6.1 Terra / Responses道具方式、推論high・期限240秒です。既存環境からの切り替えは「通常の更新・再デプロイ」を参照してください。偽提供元、`ALLOW_DEV_PAID`・`DEV_PAID_HASHES`による有料化は本番で無効（テストあり）。
 
 必要な**本番専用secret**：
@@ -593,6 +600,5 @@ curl --silent --show-error -i -X OPTIONS https://kifumate-api.quarterlambda.com/
 
 - `shortcut:` App Attest / Play Integrityは未実装。匿名トークンの再発行・IP変更による無料枠の回避を完全には防げません。今回は知人向けの少人数配布で、一般公開の安全性を保証しません。
 - ストア購入権利検証と端末移行・購入復元の設計。招待はRevenueCatの購入状態とは別です。
-- 多利用者の負荷試験とプール枠／`max_instances`の調整。混雑時の45秒タイムアウト・最大5回再試行は最終的に失敗となり、枠を返却します。
-- Cloudflareの`default` scheduling policyは現在非推奨ですが、既存の固定プールを維持しました。将来の`durable_object` policy移行は別作業です。
+- 新方式の大規模負荷試験・本番切替・旧applicationの削除は未実施。
 - アプリ本体、RevenueCat連携、能動的な失効通知、全体予算の自動停止、請求メーターとの突合は範囲外です。

@@ -1,5 +1,169 @@
 # staging実測と費用見積もり
 
+## 解析ごとの専用コンテナ（Issue #77、2026-11-22）
+
+### 本文受信中のdrainとrealtimeの終了競合（現行staging）
+
+Version `e27686ac-69ed-43e2-97e2-749d26599ed9`（実装 `10f2735`）でrealtimeとstdを各1回検証。realtimeは初回3.752秒・depth 17→19→23、30秒の休止、hold再開3.610秒・depth 19、35.174秒時点で36。明示停止後に使用時間は増えず、今回の合計は73.630秒。stdは12手・13/13局面、DO 8.328秒／観測8.613秒で完了した。
+
+停止済み世代を示す内部410は休止として扱い、停止RPCと終了通知のどちらが先でも端末別台帳で実終了時刻までの月枠・停止理由を同時確定する。再生成中に終了した場合は最後に確認した生存時刻（成功応答も含む）まで。各競合と分割本文の30秒タイムアウトはVitestで再現し、stagingで障害注入はしていない。型検査・Vitest 245件・pytest 123件成功。招待は取消済み、検証端末は `paid:false`。14:29 UTC、新旧6 applicationすべて `active=0`、全履歴inactiveを確認した。
+
+### コールド起動反復：HTTP接続終了の明示（14:19 UTC）
+
+**コールド反復試験時のstaging：`52bb0e1f-f67c-4887-b0b9-c94cf4daa6db`**。当時の実装は `029e04d`。新規realtimeセッションは1手目の初回結果を観測したらすぐDELETE。stdはサンプル10〜14手の異なる5局を1局ずつ完了まで待った。全試行を直列に行い、各ジョブ／セッションIDをContainer applicationのinstance名と照合。前後合わせて40個すべて別の名前で、初回結果を得られなかった2件にも専用instanceが割り当てられていた。
+
+| bridge応答 | realtime 成功／失敗 | 初回観測秒（成功分の中央値、範囲） | std 成功／失敗 | std完了観測秒（中央値、範囲） |
+| --- | ---: | --- | ---: | --- |
+| 修正前 `8a01b9a6…` | 8／2 | 3.963（3.613–6.331） | 5／0 | 8.875（7.773–11.066） |
+| `Connection: close` 明示後 | **20／0** | 4.021（3.667–11.178） | **5／0** | 9.441（8.181–9.633） |
+
+**観測できた失敗：** 修正前の第7・9セッションはいずれも初回結果前に `analysis_unavailable`。恒久イベント `container_failure` の固定フィールドだけを抽出：`phase=forward, status=null, kind=Error, elapsedMs=969 / 1538`。`/health` は成功済みで、解析POSTのHTTP応答を受け取れずに例外が出た。起動中の `/health` 接続エラーは成功試行でも起きる。初回結果取得後のDELETEでも継続探索の転送が中断され得るため、forwardログの総数をセッション失敗数とはしない。stdはジョブの既存再試行込みの結果で、内部失敗ゼロを意味しない。生のtail・本文・ヘッダー値は保存していない。
+
+**原因と修正の確度：** PythonのHTTP/1.0 bridgeはレスポンスごとに接続を閉じるが、healthの200にもエラー応答にも閉じることを明示していなかった。公開されている[KJのHTTPクライアント](https://github.com/capnproto/capnproto/blob/d10fc880af2a5899d83a34afddea195b2ce8525c/c%2B%2B/src/kj/compat/http.c%2B%2B#L5151-L5172)では `Connection: close` がなければ非同期に切断を監視する。health直後のPOSTが閉鎖中の接続を再利用する競合が有力と判断し、bridgeの応答に `Connection: close` を追加。health→POSTの実HTTPテストは修正前にヘッダー欠落で失敗し修正後に成功した。ローカルworkerdの外部HTTP bindingでは同じ切断エラーを再現できず、Cloudflare側のTCP接続履歴も取得していない。**転送段階は特定できたが、接続再利用を根本原因と断定はしない。** d8552471の過去の1件にも当時の固定診断はない。
+
+独立で一定の失敗率20%なら20回全勝の確率は約1.15%。ただし日を分けた無作為化比較ではない。失敗0/20からの片側95%二項上限は約13.9%（stdは0/5で約45.1%）。低い障害率を保証しない。新規起動の再試行・待機時間は追加しなかった。既存のhold再開時の1回だけの再試行は、destroy後の再割当を今回の**新規**起動試験では検証していないため残した。
+
+期限付き招待は取消し、`paid:false` を確認。14:19 UTCに新旧6 applicationすべて `active=0`、履歴すべてinactive（新std 27／precise 8／realtime 42、旧は各2）。型検査・Vitest 241件・pytest 123件成功。production、共有secret、探索条件は変更していない。
+
+### レビュー修正直後の経緯（14:07 UTC時点。現行stagingは上記）
+
+- 遅着要求と予期しない終了を扱う版 `d15ea347-0996-4e0a-9e8e-2a751f25a92c` では、初回3.922秒／depth 16 → 通常休止 → hold再開3.740秒 → 35秒でdepth 33 → DELETE後加算なし（計73.820秒）。
+- 次の版 `d8552471-a266-4e72-b610-25903e5e2962` では入口のdrainと内部必須ヘッダー検査を追加。1セッションの初回結果前に `failed / analysis_unavailable` が発生。初回・旧bridgeフォールバックともAccountからセッション・世代ヘッダーが届く実経路をVitestで確認した。準備確認はエンジン側の直接 `/health` で、このヘッダー検査を通らない。再試行・hold再開も同じ送信関数を使う。
+- 固定フィールドだけの一時診断版 `01f1eff8-2217-4dda-ac23-4ea8f308bb07` では初回4.990秒／depth 16、休止・hold再開・明示停止まで成功（73.878秒）。局面更新・停止を含む転送では409とErrorを観測したが、失敗したセッションでの記録ではない。**コールド起動失敗の原因は特定できず、再試行は追加していない。** 本文・生のtail出力は保存せず、診断コードは除去した。
+- stagingのdrainありでjobs・realtime・coachのPOSTは3件とも503、解除すると3件とも個別の入力検証（400）に戻った。解析は起動していない。検証用招待は2件とも取消し、対象端末の `paid:false` を確認。
+- **14:07 UTCにstagingは `d15ea347-0996-4e0a-9e8e-2a751f25a92c` 100%へ切り戻し**。新旧6 applicationのactive=0、全履歴inactive。復元版には入口のdrainはないため検証済みと取り違えない。productionはWranglerのローカルdry-runのみ（実効migrationはproduction v3／staging v4）。型検査・Vitest 240件・pytest 122件成功。Vitestでは無変更のコーチ期限テストが一度失敗し、全件再実行で成功した。
+
+### サイズと代表測定
+
+stagingのみ。新3クラス・applicationで [durable_object policy](https://developers.cloudflare.com/containers/configuration/scheduling-policy/) を使用。下表は起動時指定で、全モード **1536 MiB・2000 MB**、std/realtime **1 vCPU**、precise **2 vCPU**。#75の冷間最大891 MiBに645 MiB以上の余裕があり、743 MBのイメージも最小ディスクに収まる。探索条件は不変。
+
+| モード | 初回結果観測 | 所要秒（DO／クライアント） | depth | 計算資源の概算 |
+| --- | ---: | ---: | --- | ---: |
+| std・85手 | 4.411秒 | 34.623／35.879 | 1位中央値15 | $0.001544/局 |
+| precise・85手 | 4.435秒 | 137.902／148.816 | 1段目16・深読み16（各中央値） | $0.007369/局 |
+| realtime | 3.832秒 | 課金対象75.378秒（通常休止・hold再開・明示停止） | 初回16 → 20 → 21、hold 35.065秒で36 | $0.001433/分 |
+
+`measure.py`（preciseは `--expect-deep`）と `measure_realtime.py`。全局は86/86局面、精密は深読み8/8・全件再送・署名・回数更新を確認。初回は全局がDO作成時刻から先頭結果を別途ポーリングするまで、realtimeが要求送信から観測まで。いずれもVMだけの起動時間ではない。#75の旧サイズ同時間帯の1回はstd 38.358秒／depth 15、precise 144.338秒／16・深読み16、#75のrealtime初回4.210秒／16。今回は各1回、配置・通信・負荷を固定しておらず、短縮や性能同等を保証しない。
+
+[公式単価](https://developers.cloudflare.com/containers/platform/pricing/)で CPU 上限×$0.000020＋1.5 GiB×$0.0000025＋2 GB×$0.00000007＝std/realtime **$0.00002389/秒**、precise **$0.00004389/秒**。全局は下の既存モデルどおりDO秒＋30秒（64.623／167.902秒）。realtimeは実行時間だけで見積もり、今回の75.378秒は約$0.001801。無料枠控除前、DO・Worker・ログ等は別、請求実績ではない。
+
+**並列・再検証の経緯：** 新規9端末からstd 5局＋precise 2局＋realtime 2セッションを同時送信。各全局モードの1局だけ85手、他は12手。全局7局とも専用IDで完走（旧2枠超え）、realtimeも両方初回結果を取得し枠衝突はなかった。ただし初版では全局85手が86.691／197.790秒、realtimeは両方とも継続探索で `analysis_unavailable` に終わり、9件すべての成功ではない。毎局面のhealth照会をやめ、起動完了をインスタンス内で再利用した。初版realtimeの障害原因自体は特定できていない。
+
+修正後（Version `396f171e-40d4-4c3a-a3d6-92b00f1a46b2`）は上表の85手2局と別々の2セッションを並列実行。4件すべて成功。第2セッションは6.469秒でdepth 15を確認してDELETE。長い方は局面更新5回0.520〜0.699秒、連続更新で古い結果を破棄、30秒休止、hold再開3.719秒、最後の停止後は使用時間が増えなかった。同じ端末の別セッションで月間利用時間が減らないことも確認。この時点では9件の全シナリオは繰り返していない。
+
+**非常停止とCPU：** `PAUSE_FREE_ANALYSIS=true` のstagingで無料の新規局が503、有料はstd・precise・realtimeが完走。診断時だけ同一の `engine_start` の固定フィールドを内部中継→Worker tailへ転送（外部APIやsecretを追加せず、トークン・棋譜は記録しない）。3モードとも `/app/engine-avx2`、affinity/processor は1/1・2/2・1/1。これは短い別実行での実測で、表の全局のホストを直接照合したものではない。診断転送を外し、無料受付を戻した後の値が上表。
+
+**後片付け：** 期限付き招待を取消し、使用4端末がすべて `paid:false`。診断なし・新方式有効の当時のstaging Version `6eae0050-1bf0-4629-9d0f-cb64bbaa619f`（最後の変更は旧ルート選択用varのみ、未指定）。13:44 UTC、新3アプリは `active=starting=0`、std 7・precise 4・realtime 5件の履歴がすべてinactive。旧3アプリも `active=assigned=0`、各2枠inactive。旧applicationは削除せず、production・共有secretは未変更。JST月初の切替とロールバックは [運用手順](../README.md#受付停止と本番切り替え77) を参照。
+
+### 最終コードでの9端末一斉試験（2026-11-22、staging）
+
+`156d024` の配信版は既録の `6eae0050-1bf0-4629-9d0f-cb64bbaa619f` と一致。再試験では全局7局とrealtime両方の通常休止まで成功したが、一方のhold再開で `analysis_unavailable`。もう一方は明示停止まで成功した。失敗箇所は再開直後の探索であり、基盤側の具体的な失敗理由は確認できなかった。再開時の初回転送が例外または5xxなら、現行のセッション・局面・期限を確認した上で新しいroundで一度だけ再試行するようにした。連続失敗は従来どおり停止する。
+
+修正 `0da7af8` をstagingのみにデプロイ（Version `ed901bf9-ac37-47b6-b34c-423a9a291c17`、配信100%）。新規9端末、同じ手数・モードで計測プロセスを10ms以内に起動。**9件すべて成功**した。
+
+| 端末 | 試験内容 | 結果（全局：DO秒／クライアント秒） |
+| --- | --- | --- |
+| std 1 | 85手 | 86/86局面、34.054／35.949秒 |
+| std 2 | 12手 | 13/13局面、10.375／10.899秒 |
+| std 3 | 12手 | 13/13局面、8.457／8.749秒 |
+| std 4 | 12手 | 13/13局面、8.452／8.742秒 |
+| std 5 | 12手 | 13/13局面、8.530／8.723秒 |
+| precise 1 | 85手 | 86/86局面、深読み8/8・署名あり、137.820／139.479秒 |
+| precise 2 | 12手 | 13/13局面、18.026／19.261秒 |
+| realtime 1 | 継続探索 | 初回4.137秒、深さ16→19→22。休止後holdで19→37、停止（合計使用74.068秒） |
+| realtime 2 | 継続探索 | 初回4.249秒、深さ16→19→24。休止後holdで19→33、停止（合計使用74.401秒） |
+
+両セッションは連続5回の局面更新と素早い切替、30秒休止、hold再開後35秒の継続、DELETE後に利用時間が増えないことを確認。stagingの2回の試験で使った期限付き招待はそれぞれ取消済み、各4有料端末が `paid:false`。型検査とVitest 237件が成功した。1回の成功は可用性保証ではなく、実測中の再試行の有無は観測していない。
+
+13:55 UTCに新旧6 applicationすべて `active=0` を確認。新3アプリの履歴はstd 17件・precise 8件・realtime 9件すべてinactive、旧3アプリも各2枠inactive・`assigned=0`。production・共有secretは変更していない。
+
+## 予約メモリ・ディスクの縮小（Issue #75、2026-11-22）
+
+**`default` policyの下限の検証結果**：固定2枠・同じvCPUでstd／realtimeは 1 vCPU・3 GiB・2 GB、preciseは 2 vCPU・6 GiB・2 GB で完走した。このサイズ変更は採用せず、stagingはmainのコード・standard-2／standard-3へ復元。本番は未変更。本線は [`durable_object` policyと解析単位の並列化（#77）](https://github.com/phni3j9a/kifumate/issues/77) に移す。
+
+### 85手1局・稼働1分の費用
+
+[公式料金](https://developers.cloudflare.com/containers/platform/pricing/)で予約量だけを変えた比較。stdは従来のAVX2実測33.034秒、preciseは#56の深読み込み142.614秒にそれぞれ待機30秒を加えた。全時間でCPU上限を使う保守モデル（実請求ではなく、無料枠・Workers・DO・通信は含まない）。
+
+| モード | 比較時間 | 旧 → 新（USD） | 削減幅 |
+| --- | ---: | ---: | ---: |
+| std（85手） | 63.034秒 | 0.002259 → 0.001742 | **0.000517/局（22.9%）** |
+| precise（85手＋深読み8局面） | 172.614秒 | 0.010550 → 0.009518 | **0.001032/局（9.8%）** |
+| realtime | 60秒 | 0.0021504 → 0.0016584 | **0.000492/分（22.9%）** |
+
+### ローカル実測
+
+`886e586` の `server/container/Dockerfile`（linux/amd64、manifest `sha256:3f3dd8e18df6788a5f6dbd450e317280d170b00c5e21a7b61ec58533ca945924`、stagingと同じ）をビルド。i5-8500B、Docker/cgroup v2、`--cpus 1/2/1`（std/precise/realtime）、swapなし、モードごとに旧上限6/8/6 GiBと **1 GiB** を比較。実HTTP中継とAVX2エンジンを使用し、ローカル限定の観測でUSIのnodes/depthを収集（探索条件・ハッシュ128 MBは未変更）。85手と、cshogiで既出局面を除き合法手を `random.Random(1).shuffle` 順に選んだ人工512手を順に使用。全局解析は開始局面を含む86＋513局面。preciseは `deepPositions` が選ぶ勝負所を各5秒追加。realtimeは詰んだ85手目の終局確認後、中盤35手目と人工512手目で各2回 `movetimeMs=60000`、同じプロセス・ハッシュを再利用（詰み読み等で早期終了あり）。
+
+| モード | 1 GiB全局／継続 `memory.peak` | 1 GiB冷間 `memory.peak` | 冷間RSS / anon / file（各最大） |
+| --- | ---: | ---: | ---: |
+| std | 654.4 MiB | **783.4 MiB** | 659.6 / 634.9 / 129.2 MiB |
+| precise | 762.8 MiB | **890.7 MiB** | 771.7 / 746.9 / 129.2 MiB |
+| realtime | 654.4 MiB | **784.1 MiB** | 623.7 / 596.9 / 129.2 MiB |
+
+全局・継続探索の `memory.peak` はホストの共有ページキャッシュが温かい状態。`memory.stat:file` は当該cgroupに課金されたキャッシュだけで、`nn.bin` を全く読まなかった意味ではない。別に同じ評価ファイルの専用コピーだけを `fsync`＋`POSIX_FADV_DONTNEED` して読み込ませた（ホスト全体のcacheは操作していない）。表の冷間はこの初回探索（std 250ms／precise 5000ms／realtime 60秒）。RSSはPython＋エンジンの合計で共有分の重複があり、RSSとfileを足してpeakとはしない。RSS/anon/fileはサンプリング最大（冷間20ms、全局250ms）、`memory.peak` はカーネルの記録。1 GiBはこの条件での実験値で、メモリに余裕の少ない本番推奨値ではない。
+
+ディスクは3モードとも共通。`docker image inspect .Size` **743,330,011 B**（イメージ格納量）、起動中の `docker inspect --size` はrootfs **537,456,640 B**、書込層 **159,744 B**（各棋譜の区切りでも同値）。`du -sx -B1 /` は約389 MB。レイヤーの累計と展開後の可視ファイルは別で、ホスト全体の `df` は比較対象にしない。2 GBに収まり、棋譜長に比例した書込みは観測せず。一時書込みの瞬間最大やCloudflareの内部FSは未計測。
+
+旧上限 → 1 GiBでの **nodes / depth の中央値**（探索結果のある局面、1条件1回）。両上限で全局完走し、`memory.events` の `max/oom/oom_kill` はすべて0。固定時間探索のため同じnodes・depthを保証する比較ではない。
+
+| モード | 85手 | 512手 |
+| --- | --- | --- |
+| std | 121,572 / 15 → 124,149 / 15 | 88,416 / 14 → 89,828 / 14 |
+| precise 1段目 | 756,960 / 15 → 755,347 / 15 | 809,776 / 15 → 796,121 / 15 |
+| precise 深読み | 2,903,090 / 15.5 → 3,193,606 / 15（8局面） | 4,332,487 / 18 → 4,294,497 / 18（51局面） |
+
+realtimeの中盤35手目は旧約27.90M／25.89M nodes（深さ31／33）、1 GiBで28.08M／26.04M（31／32）。人工512手目は深さ36で早期終了しnodesが大きくばらついたため、別の512手（不成・非捕獲・王手なしで生成）でも確認。実時間61.2秒／60.0秒の2探索で旧23.96M／22.96M（深さ23／21）、1 GiBで24.03M／22.93M（23／20）。メモリ制限による系統的な劣化は見えないが、ホスト負荷・探索自体の揺れを含む。
+
+### staging：初回（過去実測との比較）
+
+Worker `ee108ddc-93ca-4bef-9072-115a9e115a53`。全3アプリのrollout完了・実効 `vcpu / memory_mib / disk.size_mb` 確認後、期限付き招待の新規1端末で `measure.py --modes std precise --expect-deep` と `measure_realtime.py` を各1回実行。
+
+| モード | 旧 → 今回（85手） | 完了・探索の比較 |
+| --- | --- | --- |
+| std | DO 33.034 → **43.514秒**（+10.480秒）、今回クライアント44.497秒 | 86/86、詰み3局面。候補1位depth中央値15 → **14** |
+| precise | DO 142.614 → **141.272秒**、クライアント144.503 → **143.325秒** | 1段目101.219秒＋深読み42.106秒、86/86・深読み8/8、署名あり。旧AVX2の1段目中央値16 → **14**、今回の深読み中央値15 |
+| realtime | 初回3.619 → **4.210秒**、同局面の次2更新5.034／5.803秒 | 深さ16→20→24 が今回16→18→21。以後5局面0.639〜0.735秒。30秒休止、hold再開後35.194秒で深さ32（旧35）、DELETE後停止、計75,478ms |
+
+今回のDO秒＋30秒に新単価を掛けるとstd **$0.002032/局**、precise **$0.009444/局**。起動・ポーリング・配置のばらつきを含む各1回で、stdは遅く、depthも同値ではない。旧depthは保存済みのAVX2版サンプル（候補のある局面）の値で、#56の深読み結果と同一回ではない。APIはnodesを返さず、stagingで探索量が不変とは断定できない。ローカルの実プロセスは `/app/engine-avx2`。stagingの稼働中preciseへのWrangler SSHはWebSocket 400で、初回のCPU選択は未確認。以下の追加比較では実際のプロセスを確認した。
+
+招待を取り消して `paid: false` を確認。12:49 UTC、std/precise/realtime各2枠とも `inactive`、全アプリ `active=0 / assigned=0`。共有secret・本番は変更していない。
+
+### staging：同時間帯の新 → 旧 → 新
+
+2026-11-22 13時台（UTC）。各回、新規の招待済み端末で同じ85手をstd→preciseの順に1回ずつ解析（合計6局）。同じ診断付きWorkerコード・イメージ `sha256:cb20e7ac194bc3dc40b04b663db199bf4fdae32227e197c1c0fcdf877ae1fb91`・探索設定で、対象アプリのrollout完了と実効サイズを確認してから開始。各モード86/86局面、preciseは全回同じ8局面の深読みと完了署名を確認。realtimeは追加計測していない。
+
+| モード・指標 | 新①（A） | 旧（B） | 新②（C） |
+| --- | ---: | ---: | ---: |
+| std DO所要秒 | 39.442 | 38.358 | 37.920 |
+| std depth中央値［第1–第3四分位］ | 15［13–17］ | 15［14–17］ | 14［13–15］ |
+| precise DO所要秒（深読み込み） | 139.969 | 144.338 | 146.096 |
+| precise 1段目depth中央値［第1–第3四分位］ | 14［12–17］ | 16［14–19］ | 16［14–20］ |
+| precise 深読みdepth中央値（8局面） | 15 | 16 | 16.5 |
+| 実行拠点（std / precise） | hkg12 / kix03 | hkg12 / hkg12 | kix03 / hkg12 |
+
+候補1位のある同じ85局面（終端1局面は候補なし）で `新 − 旧` を対にして集計した。各セルは **差の中央値；浅い／同じ／深い局面数**。
+
+| 対象 | 新① − 旧 | 新② − 旧 |
+| --- | ---: | ---: |
+| std | 0；22／40／23 | −1；58／19／8 |
+| precise 1段目 | −1；66／15／4 | 0；21／31／33 |
+| precise 深読み | −1；7／0／1 | +0.5；1／3／4 |
+
+**エンジンとCPU：** 6局すべて実プロセスは `/app/engine-avx2`、`avx2Usable=true`、モデル表示は `AMD EPYC`。CPU affinity数（nproc相当）／`/proc/cpuinfo` のprocessor数は全回std 1/1、precise 2/2。[公式FAQ](https://developers.cloudflare.com/containers/faq/#how-do-container-logs-work)のとおりObservabilityは有効だが、既存OAuthでの[ログ検索](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/)は403。権限は広げず、staging限定・専用secret保護の固定診断を使い、各局の完了直後・停止前に使用枠の `/proc/*/exe` とCPUを読んだ。起動時の診断ログはエンジンの自動選択とCPU情報だけを1行にし、棋譜・トークンは出力しない。
+
+**判断：** 旧サイズ比でstdは+1.084／−0.438秒、preciseは−4.369／+1.758秒。初回のstd約+10秒は再現せず、互換版へのフォールバック・可視CPU数減少もなかった。各モードとも新の一方が浅いが、もう一方は旧と同程度。今回浅い回はいずれもkix03で、サイズだけでの一貫した低下ではない。旧は1回・1拠点のみで、サイズと配置の効果を分離できず、CPU世代・クロック・ホスト負荷・実効CPU時間も不明。#77で異なるpolicy・並列度に、この結果をそのまま外挿しない。
+
+**復元：** 専用招待を取消し、3端末すべて `paid: false`。最終stagingは `origin/main`（`886e586`）のコードとstandard-2／standard-3／standard-2。復元デプロイ `3c98eea9-bf8e-42f8-8b3c-14a9c5adb1ba`、専用secret削除後の稼働Worker Version **`de78a041-6a10-4ac6-9a61-3b4b07a6a4a8`（100%）**。入口・RPC・起動ログを含まないmainに戻し、旧診断入口は全4パス404。13:25 UTCに3アプリの旧サイズ・mainイメージ（上記ローカル実測のdigest）・rollout完了・`active=0 / assigned=0`・全6枠 `inactive` を確認。共有secret・本番は未変更。
+
+### 制約と、固定プールをやめる場合（調査のみ）
+
+- [Wrangler設定](https://developers.cloudflare.com/workers/wrangler/configuration/#custom-instance-types)の `vcpu` / `memory_mib` / `disk_mb` は `default` 用。省略時の値と、受理される最小構成は別。[現行Limits](https://developers.cloudflare.com/containers/platform/limits/#custom-instance-types)の **1/16 vCPU・256 MiB・2000 MBは `durable_object` 用**。[公式の旧Limits表](https://github.com/cloudflare/cloudflare-docs/blob/4a3816d25087/src/content/docs/containers/platform/limits.mdx#custom-instance-types)と[書換理由](https://github.com/cloudflare/cloudflare-docs/pull/35101)によると、legacyのカスタムは1〜4 vCPU、**最低3 GiB/vCPU**（上限12 GiB・20 GB）。[旧ディスク対メモリ比は撤廃](https://github.com/cloudflare/cloudflare-docs/pull/33713)。stagingで今回の2 GBを受理し、実行できた。これより小さいディスクの可否は試していない。
+- [`default` は非推奨、`durable_object` はpublic beta](https://developers.cloudflare.com/containers/configuration/scheduling-policy/)。policyは変更不可。[移行](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-scheduling-policy/)には新しいContainerアプリ／DOクラスを並行作成・切替・旧アプリを排出する必要がある。既存 `Container` ヘルパーをそのまま使えず、`ctx.container.start({image,instance:{vcpu,memoryMib,diskMb}})`、ポート準備・プロキシ・停止・画像更新を自前で管理。利用者DOの棋譜は残し、固定プールのままでも移行できる。
+- [1つの名前付きDOに1インスタンス](https://developers.cloudflare.com/containers/configuration/scaling-and-routing/)。ジョブID／realtimeセッションID単位で起動は可能で、1手ごとに作り直す必要はない。[#2](https://github.com/phni3j9a/kifumate/issues/2)／[PR #3の修正](https://github.com/phni3j9a/kifumate/commit/afa68743b1762accac85f685486ffde78e1dbb61)前は端末DOのIDをContainer名にし、端末を増やすたび別の割当が必要だった。`max_instances=2` と割当要求数が連動していない設計を固定名2つに変更。割当失敗と修正は記録があるが、当時の同時実行数やCloudflare内部のエラー原因までは確定できない。`max_instances` は待ち行列ではない。
+- 新規IDは毎回コールドスタート。[FAQ](https://developers.cloudflare.com/containers/faq/#what-are-cold-starts-how-fast-are-they)は多くの場合1〜3秒、当地の過去の初回**応答**は通常約4〜5秒・初配置19.187秒（通信・探索込み）。起動要求からsleepまで課金、例えば起動3秒は新単価でstd約$0.000083、precise約$0.000165（CPU上限）。全局の `sleepAfter=10s` の待機だけでもメモリ＋ディスクで各$0.0000764／$0.0001514、実使用CPUは別。realtimeは `sleepAfter=60s` のほか通常30秒／hold 5分の休止と明示停止があり、継続探索はCPUも使う。新規起動・終了の反復で固定枠の温まったプロセス・ハッシュ共有の利点を失う。
+- defaultなら現行のアプリ別 `max_instances=2` を維持し、満杯時はアプリ側で待機・取消。`durable_object` では **`max_instances` 非対応**。アカウントの公称同時上限（15,000 vCPU・60 TiB・300 TB、他アプリと共有）は予算管理に使えない。ジョブ単位方式なら、起動前にモード横断または各モードの枠を原子的に確保し、再試行の二重起動を避け、停止確認・期限付き貸与・障害回収を設計する。並列上限だけでは月額上限にはならず、現行の回数・時間制限も必要。移行・多端末負荷試験は今回行っていない。
+
 ## 精密全局解析＋勝負所の深読み（Issue #56、2026-11-21 JST）
 
 stagingのWorker `04e1626e-a921-43e4-9e6e-19d7900501d5`（`38e73ee`、共通イメージ `sha256:e9cab030f72da8c864bca387389c78b15c464da738299c2a578509d7336bd018`）で、期限付き招待の新規端末を使い、[measure.py](../scripts/measure.py) の `--modes precise --expect-deep` でサンプル棋譜85手を1回計測しました。
