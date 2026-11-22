@@ -246,6 +246,8 @@ def build_facts(data, *, include_mate_replies=False):
 
     from coach_knowledge import formation  # move_fact は知識DBでも共用する。
     fork = formation(data, boards)
+    if fork and not fork['定跡の手']:
+        fork = None  # 比較できる合法な本の手がない場合は要所にしない。
     if fork and fork['手数'] not in key_plies:
         key_plies.append(fork['手数'])
 

@@ -138,6 +138,8 @@ def formation_index(table):
             if child in table:
                 parents[child].add(key)
                 children[key][move] = child
+            else:
+                membership.setdefault(child, set()).add(row['strategy'])
     queue = deque(table)
     while queue:
         child = queue.popleft()
@@ -146,11 +148,12 @@ def formation_index(table):
                 membership[parent].update(membership[child])
                 queue.append(parent)
     index = defaultdict(list)
-    for key in table:
+    for key in membership:
         for oriented, turned in ((key, False), (rotated_key(key), True)):
             b = sh.Board(oriented + ' 1')
             for side in (sh.BLACK, sh.WHITE):
-                index[side, layout(b, side)].append((key, turned, [key] if b.turn == side else children[key].values()))
+                sources = [key] if b.turn == side and key in table else children[key].values()
+                index[side, layout(b, side)].append((key, turned, sources))
     return index, membership, children
 
 
@@ -187,8 +190,9 @@ def formation(game, boards):
             continue
         if ply and b.turn != side:
             run += 1
-        last = (ply if b.turn == side else ply + 1, run, rows)
-    if not last or last[1] < MIN_FORMATION_MOVES or last[0] >= len(moves):
+        if run >= MIN_FORMATION_MOVES:
+            last = (ply if b.turn == side else ply + 1, run, rows)
+    if not last or last[0] >= len(moves):
         return None
     ply, run, rows = last
     sfen, prev = boards[ply]
@@ -203,12 +207,15 @@ def formation(game, boards):
                 if selected is not None and not selected & belongs:
                     continue
                 usi = move.translate(ROTATE_MOVE) if turned else move
+                if usi == moves[ply]:
+                    return None  # 実戦手も本の手なら逸脱ではない。表示上限より先に調べる。
                 if usi in legal and usi not in choices and len(choices) < 8:
                     choices[usi] = {**book_move(move_fact(b.copy(), usi, prev, view)[0]), '先後反転': turned}
-        for id_ in (table[key]['strategy'], *sorted(membership[key])):
-            if len(plans) < 2 and id_ not in plans and (selected is None or id_ in selected):
+        row = table.get(key, {})  # 末端には着手や注記の行がない。
+        for id_ in (row.get('strategy'), *sorted(membership[key])):
+            if id_ and len(plans) < 2 and id_ not in plans and (selected is None or id_ in selected):
                 plans[id_] = {**description(strategies[id_], turned), '先後反転': turned}
-        if (note := table[key].get('note')) and len(notes) < 2 and (selected is None or table[key]['strategy'] in selected):
+        if (note := row.get('note')) and len(notes) < 2 and (selected is None or row['strategy'] in selected):
             text = oriented_text(note['text'], 240, turned)
             notes[text] = {'説明': text, '先後反転': turned}
     return {'一致した自分の手数': run, '手数': ply + 1, '参照': f'{ply}:position',

@@ -229,3 +229,33 @@ def test_opponent_turn_uses_child_even_when_capture_changes_layout(db_file, monk
     fork = call(data(prefix + ['1c1d', '5g5f']), 'book', {})['駒組みの分岐点']
     assert fork['手数'] == 5 and fork['定跡の手'] == [move('▲2五歩(26)', turned=False)]
     assert '駒組みの分岐点' not in call(data(prefix + ['1c1d']), 'book', {})
+
+    # 表の相手は角交換したが、実戦の相手は端歩。そこで同じ本の手を選んでも
+    # 到達陣形は一致しない。実戦手そのものを逸脱として報告しない。
+    assert '駒組みの分岐点' not in call(data(prefix + ['1c1d', '2f2e']), 'book', {})
+
+
+def test_last_book_move_reaches_terminal_layout_without_keypoint(db_file):
+    write(db_file, opening_table())
+    line = [*OPENING, '2f2e']
+    assert '駒組みの分岐点' not in call(data(line), 'book', {})
+    game = data(line + ['9c9d', '9g9f'])
+    fork = call(game, 'book', {})['駒組みの分岐点']
+    assert (fork['手数'], fork['一致した自分の手数'], fork['定跡の手']) == (13, 6, [])
+    assert call(game, 'keypoints', {})['要所'] == []
+    # 別の理由で同じ手数が要所になっても「駒組みの分岐点」とは呼ばない。
+    [asked] = call({**game, 'question': '13手目'}, 'keypoints', {})['要所']
+    assert '駒組みの分岐点' not in asked
+
+
+@pytest.mark.parametrize('later_count,expected', [(2, 11), (5, 23)])
+def test_last_qualifying_match_survives_short_rejoin(db_file, later_count, expected):
+    table = opening_table()
+    # 11手目で外れ、13手目から別の掲載局面へ再合流する。
+    moves = OPENING + ['9g9f', '9c9d', '1g1f', '1c1d', '3g3f', '3d3e', '4g4f', '4c4d',
+                       '5g5f', '5c5d', '6g6f', '6c6d', '9f9e']
+    for ply in range(13, 13 + 2 * later_count, 2):
+        table[key(moves[:ply + 1])] = joseki('2f2e')
+    write(db_file, table)
+    fork = call(data(moves), 'book', {})['駒組みの分岐点']
+    assert fork['手数'] == expected and fork['一致した自分の手数'] == 5
