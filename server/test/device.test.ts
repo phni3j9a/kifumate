@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { SELF, runInDurableObject } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
-import { parseInput, sha256, weekStart, RETENTION_MS } from '../src/model';
+import { describe, it, expect, vi } from 'vitest';
+import { parseInput, readJson, sha256, weekStart, RETENTION_MS } from '../src/model';
 import { Device } from '../src/index';
 import { deepPositions } from '../src/deep';
 import { verifyAnalysis } from '../src/coach';
@@ -61,6 +61,19 @@ it('停止中は無料の新規局だけを拒み、重複・有料は維持す�
     expect((await request(stub, '/v1/jobs', 'POST', base)).status).toBe(200);
     expect((await request(stub, '/v1/jobs', 'POST', {...base, moves: []})).status).toBe(paid ? 202 : 503);
   }
+});
+
+it('本文が分割されても受信開始から30秒で中止し、キャンセル完了を待たず408にする', async () => {
+  vi.useFakeTimers();
+  const cancel = vi.fn(() => new Promise<void>(() => {}));
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  try {
+    const body = new ReadableStream<Uint8Array>({start(c) { controller = c; }, cancel});
+    const request = new Request('https://device/v1/jobs', {method: 'POST', body, headers: {'content-type':'application/json'}});
+    const result = expect(readJson(request)).rejects.toMatchObject({status: 408, code: 'request_timeout'});
+    await vi.advanceTimersByTimeAsync(29_000); controller.enqueue(new TextEncoder().encode('{}'));
+    await vi.advanceTimersByTimeAsync(1000); await result; expect(cancel).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); }
 });
 
 describe('JST と入力境界', () => {

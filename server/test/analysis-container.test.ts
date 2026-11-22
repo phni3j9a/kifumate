@@ -32,13 +32,29 @@ it('停止RPCが先着しても遅着した探索は再生成後も起動しな�
   await new RealtimeEngine(ctx, env).stop(0);
   const engine = new RealtimeEngine(ctx, env);
   const fetch = (generation: number) => engine.fetch(new Request('http://container/realtime', {headers: {'X-Session': 'session', 'X-Account': 'account', 'X-Generation': String(generation)}}));
-  expect((await fetch(0)).status).toBe(409); expect(container.start).not.toHaveBeenCalled();
+  expect((await fetch(0)).status).toBe(410); expect(container.start).not.toHaveBeenCalled();
   expect((await fetch(1)).ok).toBe(true);
   container.running = false; exit(); await Promise.all(tasks);
   expect(setAlarm).toHaveBeenCalledOnce(); await engine.alarm();
   expect(engineExited).toHaveBeenCalledWith('session', 1, expect.any(Number));
-  expect((await fetch(1)).status).toBe(409);
+  expect((await fetch(1)).status).toBe(410);
   await engine.stop(1); await engine.alarm(); expect(engineExited).toHaveBeenCalledOnce();
+});
+
+it('長い探索の応答後、再生成中に終了した場合は最後の応答時刻で精算する', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+  const data = new Map(), engineExited = vi.fn();
+  const container = {running: false, images: {base: 'image'}, start() { this.running = true; },
+    setInactivityTimeout: vi.fn(), monitor: () => new Promise(() => {}),
+    getTcpPort: () => ({fetch: (req: string | Request) => { if (typeof req !== 'string') now.mockReturnValue(8000); return Response.json({}); }})};
+  const ctx = {storage: {kv: {get: (k: string) => data.get(k), put: (k: string,v: unknown) => data.set(k,v)}, setAlarm: vi.fn()}, container, waitUntil: vi.fn()} as unknown as DurableObjectState;
+  const env = {RT_ACCOUNTS: {idFromString: (s: string) => s, get: () => ({engineExited})}} as any;
+  try {
+    await new RealtimeEngine(ctx, env).fetch(new Request('http://container/realtime', {headers: {'X-Session':'s', 'X-Account':'a', 'X-Generation':'1'}}));
+    container.running = false; now.mockReturnValue(12000);
+    await new RealtimeEngine(ctx, env).alarm();
+    expect(engineExited).toHaveBeenCalledWith('s', 1, 8000);
+  } finally { now.mockRestore(); }
 });
 
 it('診断は固定フィールドのみ。例外名や本文・ヘッダーを含めず、失敗した呼び出しも繰り返さない', async () => {

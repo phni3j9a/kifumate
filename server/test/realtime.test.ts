@@ -426,6 +426,26 @@ describe('リアルタイム解析', () => {
     expect((await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId)).httpStatus).toBe(202);
     await f.drain();
   }));
+  it('終了通知前のPUTが終了世代の応答を受けても、休止として確定し次のPUTで再開する', async () => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    const analyze = f.backend.analyze;
+    f.backend.analyze = async () => new Response(null, {status: 410});
+    f.backend.stop = async () => origin + 500;
+    f.advance(1000);
+    await f.request('PUT', {...position, sequence: 1}, 'a', true, first.sessionId); await f.drain();
+    expect(await f.request()).toMatchObject({status: 'paused', quota: {usedMs: 500}});
+    f.backend.analyze = analyze;
+    expect((await f.request('PUT', {...position, sequence: 2}, 'a', true, first.sessionId)).httpStatus).toBe(202);
+    await f.drain(); f.disconnected(first.sessionId, 0, origin + 500);
+    expect(await f.request()).toMatchObject({status: 'ready', quota: {usedMs: 500}});
+  }));
+  it('月枠のalarmが終了通知より先でも、確定後に残時間があればlimitにしない', async () => fixture(async f => {
+    f.sql.exec('INSERT INTO rt_usage VALUES (?,?,?)', 'a', monthStart(origin), MONTHLY_MS - 1000);
+    const first = await f.request('POST', position); await f.drain();
+    f.backend.stop = async () => origin + 500;
+    f.advance(1000); await f.expire(); f.disconnected(first.sessionId, 0, origin + 500);
+    expect(await f.request()).toMatchObject({status: 'paused', quota: {remainingMs: 500}});
+  }));
   it('終局後にエンジンが落ちても通知時刻ではなく終了時刻で確定し、古い世代の通知を無視する', async () => fixture(async f => {
     const first = await f.request('POST', {...position, hold: true}); await f.drain();
     f.advance(5000); expect((await f.request()).quota.usedMs).toBe(5000);

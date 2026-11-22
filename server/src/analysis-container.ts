@@ -94,21 +94,27 @@ export class RealtimeEngine extends StandardJob {
     }
     if (previous) {
       const closed = previous.stopping || previous.ended !== undefined || (this.watching === generation && !this.ctx.container?.running);
-      if (generation < previous.generation || (generation === previous.generation && closed)) { this.failure('admission', 409); return new Response(null, {status: 409}); }
+      if (generation < previous.generation || (generation === previous.generation && closed)) { this.failure('admission', 410); return new Response(null, {status: 410}); }
     }
     const run = {generation, account, session, lastAlive: Date.now()};
     this.ctx.storage.kv.put('run', run);
     const response = super.fetch(request); // 世代照合とstartの間にawaitを挟まない。
     if (this.ctx.container?.running) this.watch(run);
-    return response;
+    const reply = await response;
+    const current = this.run;
+    if (reply.ok && this.ctx.container?.running && current?.generation === generation && !current.stopping && current.ended === undefined) {
+      this.ctx.storage.kv.put('run', {...current, lastAlive: Date.now()});
+    }
+    return reply;
   }
   async stop(generation: number) {
     const previous = this.run;
     if (previous && previous.generation > generation) return Date.now();
     const run = previous?.generation === generation ? previous : {generation, account: '', session: '', lastAlive: Date.now()};
     this.ctx.storage.kv.put('run', {...run, stopping: true}); // 未起動でも遅着要求を封じる。
-    if (this.ctx.container?.running) await this.ctx.container.destroy();
-    const ended = this.run?.ended ?? Date.now();
+    const wasRunning = this.ctx.container?.running;
+    if (wasRunning) await this.ctx.container!.destroy();
+    const ended = this.run?.ended ?? (wasRunning ? Date.now() : run.lastAlive);
     this.ctx.storage.kv.put('run', {...run, stopping: true, ended});
     return ended;
   }
