@@ -1,5 +1,7 @@
 import json
+from pathlib import Path
 
+from cshogi import KIF
 import cshogi as sh
 import pytest
 
@@ -66,7 +68,7 @@ def test_book_and_knowledge(db_file, monkeypatch):
         '状態': '一致あり', '最後の一致': {'手数': 2, '参照': '2:position', '先後反転': False},
         '最初に外れた手': {'手数': 3, '参照': '2:position', '指した側': 'あなた', '実戦手': '▲5六歩(57)',
                        '本の手': [move('▲2六歩(27)', turned=False), move('▲7八金(69)', turned=False)]},
-        '方針': [{'題': STRATEGY['title'], '説明': STRATEGY['text'], '先後反転': False}],
+        '方針': [{'題': STRATEGY['title'], '説明': STRATEGY['text'], '先後反転': None}],
         '近くの注記': [{'手数': 2, '参照': '2:position', '説明': NOTE['text'], '先後反転': False}],
         '手筋': [{'手数': 2, '参照': '2:position', '題': '架空の手筋', '説明': '光輪の歩を使う練習。',
                 '正解': move('▲2六歩(27)'), '先後反転': False, '実戦で正解': False}],
@@ -122,7 +124,10 @@ def test_rotated_prose_keeps_width_and_matches_answer(db_file):
                                    'joseki': {pos: joseki('3g2e', note=note)},
                                    'tesuji': [{**tesuji(pos, '3g2e'), 'title': title, 'text': text}]}), encoding='utf-8')
     initial = 'k8/9/2n6/9/9/9/2B6/9/8K w - 1'
-    out = call(data(initial=initial), 'book', {})
+    game = data(initial=initial)
+    assert call(game, 'book', {})['方針'] == []
+    game['tags'] = {'対局側': {'後手': {'戦法': [{'名前': '試験戦法'}]}}}
+    out = call(game, 'book', {})
     [tactic] = out['手筋']
     [strategy] = out['方針']
     [nearby] = out['近くの注記']
@@ -294,3 +299,17 @@ def test_tesuji_accept_correct_alternative_both_orientations(db_file):
 def test_invalid_tesuji_accept(db_file, bad):
     write(db_file, {}, [{**tesuji(key(), '7g7f'), 'accept': bad}])
     assert call(data(), 'book', {}) == {'状態': '一致なし'}
+
+
+def test_game10_observer_strategy_owner_overrides_shared_opening(db_file):
+    game10 = Path(__file__).resolve().parents[2] / 'scripts/games/game10.kif'
+    moves = [sh.move_to_usi(m) for m in KIF.Parser.parse_str(game10.read_text()).moves]
+    row = {**STRATEGY, 'tags': ['右四間飛車', '四間飛車'], 'text': '先手の２筋に注目。'}
+    write(db_file, {key(): joseki(moves[0])}, strategies=[row, {**row, 'id': 'another'}])
+    game = tagged(data(moves, perspective='observer'), '四間飛車')
+    game['tags']['対局側']['後手'] = {'戦法': [{'名前': '右四間飛車'}]}
+    out = call(game, 'book', {})
+    assert out['最後の一致']['先後反転'] is False
+    assert [(p['先後反転'], p['説明']) for p in out['方針']] == [(True, '後手の８筋に注目。')] * 2
+    game['tags']['対局側']['先手'] = game['tags']['対局側']['後手']
+    assert call(game, 'book', {})['方針'] == []

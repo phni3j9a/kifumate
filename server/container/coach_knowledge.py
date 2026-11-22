@@ -167,8 +167,24 @@ def strategy_tags_by_side(game):
             for name, side in sides.items() if name in ('先手', '後手') and isinstance(side, dict) and isinstance(side.get('戦法'), list)}
 
 
-def selected_strategies(game, strategies):
-    tags = set().union(*strategy_tags_by_side(game).values())
+def strategy_plans(ids, strategies, by_side, selected):
+    plans = []
+    for id_ in dict.fromkeys(ids):
+        if not id_ or (selected is not None and id_ not in selected):
+            continue
+        row = strategies[id_]
+        owners = [side for side, tags in by_side.items() if row['tags'] and row['tags'][0] in tags]
+        turned = owners[0] == '後手' if len(owners) == 1 else None
+        if turned is None and ORIENTED_TEXT.search(row['title'] + ' ' + row['text']):
+            continue
+        plans.append({**description(row, turned), '先後反転': turned})
+        if len(plans) == 2:
+            break
+    return plans
+
+
+def selected_strategies(by_side, strategies):
+    tags = set().union(*by_side.values())
     if not tags:
         return None
     scores = {id_: len(tags.intersection(row['tags'])) for id_, row in strategies.items()}
@@ -182,7 +198,8 @@ def formation(game, boards):
     if view == 'observer' or not table:
         return None
     index, membership, children = indexed
-    selected = selected_strategies(game, strategies)
+    by_side = strategy_tags_by_side(game)
+    selected = selected_strategies(by_side, strategies)
     side = sh.BLACK if view == 'sente' else sh.WHITE
     run, last = 0, None
     moves = game['moves']
@@ -203,7 +220,7 @@ def formation(game, boards):
     sfen, prev = boards[ply]
     b = sh.Board(sfen)
     legal = {sh.move_to_usi(m) for m in b.legal_moves}
-    choices, plans, notes = {}, {}, {}
+    choices, topics, notes = {}, {}, {}
     for key, turned, sources in rows:
         for source in sources:
             for move in table[source]['moves']:
@@ -217,15 +234,13 @@ def formation(game, boards):
                 if usi in legal and usi not in choices and len(choices) < 8:
                     choices[usi] = {**book_move(move_fact(b.copy(), usi, prev, view)[0]), '先後反転': turned}
         row = table.get(key, {})  # 末端には着手や注記の行がない。
-        for id_ in (row.get('strategy'), *sorted(membership[key])):
-            if id_ and len(plans) < 2 and id_ not in plans and (selected is None or id_ in selected):
-                plans[id_] = {**description(strategies[id_], turned), '先後反転': turned}
+        topics.update(dict.fromkeys((row.get('strategy'), *sorted(membership[key]))))
         if (note := row.get('note')) and len(notes) < 2 and (selected is None or row['strategy'] in selected):
             text = oriented_text(note['text'], 240, turned)
             notes[text] = {'説明': text, '先後反転': turned}
     return {'一致した自分の手数': run, '手数': ply + 1, '参照': f'{ply}:position',
             '実戦手': move_fact(b, moves[ply], prev, view)[0]['表記'], '定跡の手': list(choices.values()),
-            '方針': list(plans.values()), '注記': list(notes.values())}
+            '方針': strategy_plans(topics, strategies, by_side, selected), '注記': list(notes.values())}
 
 
 def parse_database(raw):
@@ -324,7 +339,8 @@ def book(game):
     b = sh.Board() if initial == 'startpos' else sh.Board(initial)
     prev = last = last_departure = None
     tactics, notes, topics, boards = [], [], [], []
-    selected = selected_strategies(game, strategies)
+    by_side = strategy_tags_by_side(game)
+    selected = selected_strategies(by_side, strategies)
     matched_plies = 0
     for ply in range(len(moves) + 1):
         boards.append((b.sfen(), prev))
@@ -334,14 +350,14 @@ def book(game):
         book_moves = {}
         for key_, turned in ((key, False), (rotated_key(key), True)):
             if row := joseki.get(key_):
-                topics.append((ply, row['strategy'], turned))
+                topics.append((ply, row['strategy']))
                 if note := row.get('note'):
                     notes.append((ply, {**ref, '説明': oriented_text(note['text'], 240, turned), '先後反転': turned}))
                 for move in row['moves']:
                     book_moves.setdefault(move.translate(ROTATE_MOVE) if turned else move, turned)
             for row in tesuji.get(key_, ()):
                 if strategy := row.get('strategy'):
-                    topics.append((ply, strategy, turned))
+                    topics.append((ply, strategy))
                 if len(tactics) < 3:
                     answers = [row['answer'][0], *row.get('accept', [])]
                     if turned:
@@ -368,24 +384,13 @@ def book(game):
                                for move, turned in list(book_moves.items())[:8]]}
     near = last['手数'] if last else tactics[0]['手数'] if tactics else 0
     closest = lambda item: (abs(item[0] - near), item[0])
-    topic_turns = {}
-    for _, id_, turned in sorted(topics, key=closest):
-        topic_turns.setdefault(id_, turned)
-    if selected is not None:
-        by_side = strategy_tags_by_side(game)
-        for id_, row in strategies.items():
-            if id_ not in selected or id_ in topic_turns:
-                continue
-            owners = [side for side, tags in by_side.items() if row['tags'][0] in tags]
-            if len(owners) == 1:
-                topic_turns[id_] = owners[0] == '後手'
-            elif not ORIENTED_TEXT.search(row['title'] + ' ' + row['text']):
-                topic_turns[id_] = None
-        topic_turns = {id_: t for id_, t in topic_turns.items() if id_ in selected}
-    if not (last or tactics or fork or topic_turns):
+    topic_ids = [id_ for _, id_ in sorted(topics, key=closest)]
+    if selected:
+        topic_ids.extend(id_ for id_ in strategies if id_ in selected)
+    plans = fork['方針'] if fork else strategy_plans(topic_ids, strategies, by_side, selected)
+    if not (last or tactics or fork or plans):
         return NO_MATCH.copy()
     return {'状態': '一致あり' if last or tactics or fork else '方針のみ', '最後の一致': last, '最初に外れた手': departure,
             **({'駒組みの分岐点': fork} if fork else {}),
-            '方針': fork['方針'] if fork else [{**description(strategies[id_], turned), '先後反転': turned}
-                                          for id_, turned in list(topic_turns.items())[:2]],
+            '方針': plans,
             '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]], '手筋': tactics}

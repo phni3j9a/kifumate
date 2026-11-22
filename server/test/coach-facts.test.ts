@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { Coach, messages, parseCoach, references, signAnalysis, validateOutput } from '../src/coach';
-import { contradicts, type CoachFacts } from '../src/coach-facts';
+import { contradicts, notationIssue, type CoachFacts } from '../src/coach-facts';
 import { Device } from '../src/index';
 
 const analysis = {initial: 'startpos', moves: ['7g7f'], mode: 'precise' as const,
@@ -39,6 +39,28 @@ describe('日本語事実の矛盾検査', () => {
     expect(() => validateOutput(quote('▲2六歩が定跡の手です。', '1:position'), refs, evidence)).toThrow();
     expect(() => validateOutput(quote('定跡では▲2六歩(37)です。', '0:position'), refs, evidence)).toThrow();
     expect(() => validateOutput(quote('実戦では▲2六歩です。', '1:position'), refs, evidence)).not.toThrow();
+  });
+  it('定跡への帰属は同じ節の次の一手か、符号直後の断定だけ（game03）', () => {
+    const evidence: CoachFacts = {...facts, 実戦手: [
+      [15, '▲9六歩(97)', '判定なし', '互角', '前進'], [19, '▲6八玉(59)', '判定なし', '互角', '前進'],
+      [21, '▲4五歩(46)', '判定なし', '互角', '前進'],
+    ], 要所: [{手数: 15, 実戦手: {表記: '▲9六歩(97)'}, 定跡の手: [{表記: '▲6八玉(59)', 移動: '前進'}]}]};
+    const check = (text: string, ply: number) => notationIssue(text, evidence, 'facts', [`${ply}:position`]);
+    for (const text of ['定跡では▲6八玉ですが、あなたは▲9六歩を選びました。', '定跡では▲6八玉、実戦は▲9六歩でした。',
+      '定跡では▲6八玉や▲4五歩が候補です。']) { // 2つ目は定跡候補になくても通常の実戦手として照合。
+      expect(check(text, 14)).toBeUndefined();
+      expect(check(text, 0)).toBe('unknown_book_move');
+    }
+    for (const text of ['▲6八玉が定跡です。', '▲6八玉が本の手です。', '▲6八玉も本の手順に当たります。']) {
+      expect(check(text, 14)).toBeUndefined();
+      expect(check(text, 0)).toBe('unknown_book_move');
+    }
+    for (const boundary of ['。', '、', 'が、', 'ですが', 'けれど', '一方', 'しかし']) {
+      expect(check(`定跡の手は別${boundary}実戦は▲9六歩でした。`, 0)).toBeUndefined();
+    }
+    expect(check('▲6八玉が定跡の手とは限りません。', 0)).toBeUndefined();
+    expect(check('▲6八玉が定跡ですか？', 0)).toBeUndefined();
+    expect(check('定跡では▲6八玉や▲5六歩が候補です。', 14)).toBe('unknown_move');
   });
   const correct = ['相手が有利です。', 'あなたは金を動かしました。', '相手が勝ちました。', 'あなたは負けました。', '相手は宣言可能です。', 'あなたは詰まされる側です。', 'あなたは先手です。', '第一歩は、次の一手を盤上で確認することです。', '一段と玉を安全にする練習をしましょう。', '相手が金を取った飛車を桂で取り返す形を検討しましょう。', 'あなたが金を動かした局面では相手が有利です。'];
   const wrong = ['あなたが有利です。', '相手は金を動かしました。', 'あなたは玉を動かしました。', 'あなたが勝ちました。', '相手は負けました。', 'あなたは宣言可能です。', '相手は詰まされる側です。', 'あなたは後手です。'];
