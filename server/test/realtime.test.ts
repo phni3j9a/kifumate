@@ -65,6 +65,18 @@ describe('リアルタイム解析', () => {
     expect(paths).toEqual(['/realtime/deepen', '/realtime', '/realtime/deepen', '/realtime']);
     expect(f.stops()).toBe(0);
   }));
+  it.each(['例外', '503', '連続503'])('休止後の初回転送失敗（%s）は別roundで一度だけ再試行する', async failure => fixture(async f => {
+    const first = await f.request('POST', position); await f.drain();
+    f.advance(30_001); await f.expire();
+    const rounds: number[] = [];
+    f.backend.analyze = async (_: unknown, id: string, sequence: number, round: number) => {
+      expect([id, sequence]).toEqual([first.sessionId, 1]); rounds.push(round);
+      if (!round && failure === '例外') throw new Error();
+      return !round || failure === '連続503' ? new Response(null, {status: 503}) : Response.json({ply: 0, terminal: true});
+    };
+    await f.request('PUT', {...position, sequence: 1, hold: true}, 'a', true, first.sessionId); await f.drain();
+    expect(rounds).toEqual([0, 1]); expect((await f.request()).status).toBe(failure === '連続503' ? 'failed' : 'ready');
+  }));
   it('詰み評価を保存して即座に深読みを終える', async () => fixture(async f => {
     const score = {kind: 'mate', value: 3, winner: 'sente'};
     f.backend.analyze = async (_input: unknown, _id: string, _seq: number, round: number) => {

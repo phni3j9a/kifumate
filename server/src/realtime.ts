@@ -189,7 +189,7 @@ export class RealtimeSessions {
         else this.sql.exec('DELETE FROM rt_holds WHERE owner=?', owner);
       });
       await this.schedule();
-      waitUntil(this.run(owner, id, seq, input, controller));
+      waitUntil(this.run(owner, id, seq, input, controller, !creating && current?.charged === null));
       return json(this.view(owner), 202);
     } catch (error) {
       if (error instanceof ApiError) return json({...this.view(owner), error: error.code}, error.status);
@@ -198,12 +198,15 @@ export class RealtimeSessions {
       if (--entitlement.pending === 0) this.entitlements.delete(owner);
     }
   }
-  private async run(owner: string, id: string, sequence: number, input: Input, controller: AbortController) {
+  private async run(owner: string, id: string, sequence: number, input: Input, controller: AbortController, resuming: boolean) {
     const {signal} = controller;
     try {
       await this.expire(false);
       for (let round = 0, ms = 250; !signal.aborted; round++, ms = Math.min(ms * 2, MAX_REALTIME_SEARCH_MS)) {
-        const response = await this.backend.analyze(input, id, sequence, round, ms, signal);
+        const response = await this.backend.analyze(input, id, sequence, round, ms, signal).catch(error => {
+          if (resuming && round === 0) return new Response(null, {status: 503});
+          throw error;
+        });
         if (signal.aborted) return;
         const {terminal, ...result} = response.ok ? await response.json() as {terminal?: boolean; ply?: number; score?: {kind: string} | null} : {};
         if (signal.aborted) return;
@@ -213,6 +216,8 @@ export class RealtimeSessions {
         if (signal.aborted || current?.id !== id || current.sequence !== sequence || current.charged === null
           || ['limit', 'paused', 'off', 'failed'].includes(current.status)) return;
         if (!response.ok) {
+          // destroy後の再開で最初の転送が一時失敗しても、同じ局面を新しいroundで一度だけ探索する。
+          if (resuming && round === 0 && response.status >= 500) continue;
           await this.halt('failed', response.status === 422 ? 'invalid_position_or_move' : 'analysis_unavailable');
           return;
         }
