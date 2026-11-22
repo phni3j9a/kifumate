@@ -40,3 +40,22 @@ it('停止RPCが先着しても遅着した探索は再生成後も起動しな�
   expect((await fetch(1)).status).toBe(409);
   await engine.stop(1); await engine.alarm(); expect(engineExited).toHaveBeenCalledOnce();
 });
+
+it('診断は固定フィールドのみ。例外名や本文・ヘッダーを含めず、失敗した呼び出しも繰り返さない', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const request = new Request('http://container/private-path', {headers: {Authorization: 'private-token'}});
+  const bad = new TypeError('private-message'); bad.name = 'private-name';
+  const send = vi.fn().mockResolvedValueOnce(new Response('private-health', {status: 503})).mockResolvedValueOnce(new Response())
+    .mockResolvedValueOnce(new Response('private-body', {status: 502})).mockRejectedValueOnce(bad);
+  const container = {running: false, images: {base: ''}, start: vi.fn(() => {container.running = true;}), setInactivityTimeout: vi.fn(), getTcpPort: () => ({fetch: send})};
+  const job = new PreciseJob({container} as unknown as DurableObjectState, {});
+  try {
+    expect((await job.fetch(request)).status).toBe(502); await expect(job.fetch(request)).rejects.toBe(bad);
+    container.running = false; container.start.mockImplementationOnce(() => { throw bad; });
+    await expect(job.fetch(request)).rejects.toBe(bad);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
+      ['readiness',503,null], ['forward',502,null], ['forward',null,'TypeError'], ['start',null,'TypeError'],
+    ].map(([phase,status,kind]) => ({event:'container_failure', phase,status,kind,elapsedMs:expect.any(Number)})));
+    expect(send).toHaveBeenCalledTimes(4);
+  } finally { warn.mockRestore(); }
+});
