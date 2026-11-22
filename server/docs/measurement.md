@@ -2,6 +2,16 @@
 
 ## 解析ごとの専用コンテナ（Issue #77、2026-11-22）
 
+### レビュー修正後の確認（14:07 UTC、現行stagingとPR先端は異なる）
+
+- 遅着要求と予期しない終了を扱う版 `d15ea347-0996-4e0a-9e8e-2a751f25a92c` では、初回3.922秒／depth 16 → 通常休止 → hold再開3.740秒 → 35秒でdepth 33 → DELETE後加算なし（計73.820秒）。
+- 次の版 `d8552471-a266-4e72-b610-25903e5e2962` では入口のdrainと内部必須ヘッダー検査を追加。1セッションの初回結果前に `failed / analysis_unavailable` が発生。初回・旧bridgeフォールバックともAccountからセッション・世代ヘッダーが届く実経路をVitestで確認した。準備確認はエンジン側の直接 `/health` で、このヘッダー検査を通らない。再試行・hold再開も同じ送信関数を使う。
+- 固定フィールドだけの一時診断版 `01f1eff8-2217-4dda-ac23-4ea8f308bb07` では初回4.990秒／depth 16、休止・hold再開・明示停止まで成功（73.878秒）。局面更新・停止を含む転送では409とErrorを観測したが、失敗したセッションでの記録ではない。**コールド起動失敗の原因は特定できず、再試行は追加していない。** 本文・生のtail出力は保存せず、診断コードは除去した。
+- stagingのdrainありでjobs・realtime・coachのPOSTは3件とも503、解除すると3件とも個別の入力検証（400）に戻った。解析は起動していない。検証用招待は2件とも取消し、対象端末の `paid:false` を確認。
+- **14:07 UTCにstagingは `d15ea347-0996-4e0a-9e8e-2a751f25a92c` 100%へ切り戻し**。新旧6 applicationのactive=0、全履歴inactive。復元版には入口のdrainはないため検証済みと取り違えない。productionはWranglerのローカルdry-runのみ（実効migrationはproduction v3／staging v4）。型検査・Vitest 240件・pytest 122件成功。Vitestでは無変更のコーチ期限テストが一度失敗し、全件再実行で成功した。
+
+### サイズと代表測定
+
 stagingのみ。新3クラス・applicationで [durable_object policy](https://developers.cloudflare.com/containers/configuration/scheduling-policy/) を使用。下表は起動時指定で、全モード **1536 MiB・2000 MB**、std/realtime **1 vCPU**、precise **2 vCPU**。#75の冷間最大891 MiBに645 MiB以上の余裕があり、743 MBのイメージも最小ディスクに収まる。探索条件は不変。
 
 | モード | 初回結果観測 | 所要秒（DO／クライアント） | depth | 計算資源の概算 |
