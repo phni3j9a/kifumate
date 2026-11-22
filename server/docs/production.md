@@ -2,6 +2,14 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
+## #69・#71：知識DBと駒組みの分岐点の本番反映（2026-11-22）
+
+- `main` の `c275802`（PR #70・#72）と、非公開リポジトリの `main`（`3da763c`）から `npm run build` した知識DB（全7章・定跡1839局面・方針34件・手筋100問、SHA-256 `c47df8b2…`）を `server/container/knowledge/knowledge.json` に置いて反映。DBはGit管理外で、コンテナイメージにだけ同梱。反映前にVitest 230件・型検査・pytest 111件が通過。アプリとのAPI契約は変更なし。
+- staging：Version `9f3b63b2-78e4-47e1-855a-0f45dc2d1d06`。開発者の実戦 `server/scripts/games/game03.kif`（88手）を署名付き精密解析（158.6秒、89局面）し、AIコーチを1回（53.1秒）。回答は15手目 ▲9六歩 を駒組みの分岐点とし、定跡の手 ▲6八玉・▲4五歩 を保存解析の候補と区別して示した。計測後、3コンテナとも `active=0 / assigned=0`。
+- production：Cloudflare APIでDNSを確認した。`kifumate-api.quarterlambda.com` はWorkerのCustom Domainが管理する読み取り専用のAAAA `100::`（proxied）1件のみで、Workers Domains で `kifumate-analysis-production` に紐付き、競合なし。`--secrets-file` なしで通常更新し、secretは名前3件のまま。Version `f09747f5-f529-410f-9e0e-585a30f2e098`。09:59 UTCにstd・precise・realtimeの3コンテナがv5へのロールアウト完了。端末発行201、OPTIONS 403・CORS許可ヘッダーなし。ロールアウト中の約2分は新Workerが旧コンテナに当たり得た（利用者が少ないため許容）。
+- 本番でも game03 を精密解析（154.1秒）し、AIコーチを1回（34.3秒、再試行なし）。stagingと同じ分岐点と定跡の手を示した。費用は未計測（#71の比較では1回答あたり平均約$0.056）。両環境とも確認用の1端末・翌日期限の招待を取り消し、招待原文・取消用メタデータ・確認端末のトークンは削除。確認後、3コンテナとも `active=0 / assigned=0`。
+- 未実施：実機アプリからの表示確認、将棋の有識者によるDBの監修。
+
 ## #56：本番反映と配布APK 0.1.3（2026-11-21）
 
 - `main` の `659fbe9`（PR #57・#60・#61・#63・#64・#65）を本番に反映。Mainが08:30台 UTCにCloudflare APIで確認したDNSレコードは、WorkerのCustom Domainが管理する読み取り専用のAAAA `100::`（proxied）1件のみ。同ホスト `kifumate-api.quarterlambda.com` はWorkers Domainsで `kifumate-analysis-production`（production）に紐付いており、競合なし。事前のWrangler相当のchangesetでも競合・追加・削除なし。`--secrets-file` なしで通常更新し、既存secretは変更せず、反映後も名前3件を確認。
