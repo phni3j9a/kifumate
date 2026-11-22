@@ -47,9 +47,9 @@ Web の本番用バンドル：`npx expo export --platform web`。配信時は S
 
 ## Androidの配布APKビルド
 
-**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.3-1003-arm64-latest.apk`（表示版0.1.3、`versionCode=1003`、arm64-v8a専用、42,433,887バイト）。勝負所の深読み・リアルタイム解析・勝負所の一覧（#56）に対応します。隣の `.sha256` で照合できます。署名証明書（SHA-256 `3960c238…69a9`）は0.1.2と同一で、権限はINTERNETと同一署名のアプリ内権限のみです。0.1.3の実機での上書き更新は、Play プロテクトの送信確認に対する利用者の判断待ちで未確認です。
+**現在の配布の正本**：`~/kifumate-releases/kifumate-0.1.4-1004-arm64-latest.apk`（表示版0.1.4、`versionCode=1004`、arm64-v8a専用、42,434,103バイト）。形勢グラフの相手の印を白抜きにし、自分の対局では控えめにしました（#78）。隣の `.sha256` で照合できます。署名証明書（SHA-256 `3960c238…69a9`）と権限（INTERNETと同一署名のアプリ内権限のみ）は0.1.3と同一です。0.1.4の実機での上書き更新は未確認です。
 
-旧版は同じフォルダーで `old` と明記しています（0.1.2は `kifumate-0.1.2-1002-old-before-deep-reading.apk`、0.1.1は `kifumate-0.1.1-1001-old-before-coach-tools.apk`、版19は `kifumate-0.1.0-19-old-before-text-clip-fix.apk`、版18は `kifumate-0.1.0-18-old-before-quota-cleanup.apk`、版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版1000から1001への実機上書きとデータ保持は確認済みです。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
+旧版は同じフォルダーで `old` と明記しています（0.1.3は `kifumate-0.1.3-1003-old-before-graph-mark-sides.apk`、0.1.2は `kifumate-0.1.2-1002-old-before-deep-reading.apk`、0.1.1は `kifumate-0.1.1-1001-old-before-coach-tools.apk`、版19は `kifumate-0.1.0-19-old-before-text-clip-fix.apk`、版18は `kifumate-0.1.0-18-old-before-quota-cleanup.apk`、版17は `kifumate-0.1.0-17-old-before-mock-alignment.apk`）。版1000から1001への実機上書きとデータ保持は確認済みです。版17のビルド・署名・上書き確認は[依存ライブラリの脆弱性精査](docs/dependency-audit.md#検証)を参照してください。
 
 配布APKは **EASを使わず、このマシンのスクリプトでビルドします**（PiMateと同じ方式、#47）。`expo prebuild --clean` → Gradle `:app:assembleRelease` を実行し、外部の署名情報を `scripts/release-signing.gradle` が読み込みます。`android/`・`ios/`は生成物でコミットせず、生成後の手編集もしません。表示名はモックと同じ **kifumate**。
 
