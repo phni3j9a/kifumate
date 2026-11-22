@@ -36,6 +36,19 @@ async function sql(stub: any, query: string, ...params: any[]) {
   return runInDurableObject(stub, (_instance, state) => state.storage.sql.exec(query, ...params).toArray());
 }
 
+it('全局の新bindingは端末IDでなく受理したジョブIDを選ぶ', async () => {
+  const stub = await setup();
+  const {data: job} = await request(stub, '/v1/jobs', 'POST', base);
+  await runInDurableObject(stub, async (instance: any) => {
+    const names: string[] = [];
+    instance.env.STD_JOB = {getByName: (name: string) => {
+      names.push(name); return instance.env.STD.getByName(name);
+    }};
+    try { await instance.alarm(); expect(names).toEqual([job.id]); }
+    finally { delete instance.env.STD_JOB; }
+  });
+});
+
 it('停止中は無料の新規局だけを拒み、重複・有料は維持する', async () => {
   for (const paid of [false, true]) {
     const stub = await setup(paid);
