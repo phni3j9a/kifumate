@@ -272,16 +272,22 @@ def cpu_details(text=None):
         if "processor" in fields:
             processors.append(set(fields.get("flags", "").split()))
     flags = set.intersection(*processors) if processors else set()
-    return {"models": sorted(models), "flags": sorted(flags), "avx2Usable": AVX2_FLAGS <= flags}
+    return {"models": sorted(models), "processors": len(processors), "flags": sorted(flags), "avx2Usable": AVX2_FLAGS <= flags}
 
 
-def selected_engine(cpuinfo=None):
-    return "/app/engine-avx2" if cpu_details(cpuinfo)["avx2Usable"] else "/app/engine-compatible"
+def selected_engine(cpuinfo=None, *, log=False):
+    cpu = cpu_details(cpuinfo)
+    path = "/app/engine-avx2" if cpu["avx2Usable"] else "/app/engine-compatible"
+    if log:
+        print(json.dumps({"event": "engine_start", "engine": path, "models": cpu["models"],
+                          "processors": cpu["processors"], "nproc": len(os.sched_getaffinity(0)),
+                          "avx2Usable": cpu["avx2Usable"]}), flush=True)
+    return path
 
 
 class Engine:
     def __init__(self, command=None):
-        self.process = subprocess.Popen(command or [os.environ.get("ENGINE_PATH") or selected_engine()],
+        self.process = subprocess.Popen(command or [os.environ.get("ENGINE_PATH") or selected_engine(log=True)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, bufsize=1)
         self.lines = queue.Queue()
