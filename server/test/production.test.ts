@@ -6,11 +6,11 @@ import { complete } from '../src/coach';
 import { sha256 } from '../src/model';
 
 const config = JSON.parse(configuration), production = config.env.production;
-it('productionは専用Worker・ドメイン・DO・有限Container枠を持ち、stagingと同じTerra道具方式を使う', () => {
+it('productionは専用Worker・ドメイン・DO・新旧の解析Containerを持ち、stagingと同じTerra道具方式を使う', () => {
   expect(production.name).not.toBe(config.env.staging.name);
   expect(production.workers_dev).toBe(false); expect(production.preview_urls).toBe(false);
   expect(production.routes).toEqual([{pattern: 'kifumate-api.quarterlambda.com', custom_domain: true}]);
-  expect(production.vars).toMatchObject({ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false'});
+  expect(production.vars).toMatchObject({ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false', ANALYSIS_DRAIN: 'false', PAUSE_FREE_ANALYSIS: 'false'});
   for (const vars of [production.vars, config.env.staging.vars]) {
     expect(vars).toMatchObject({COACH_PROVIDER: 'openai-responses-tools', COACH_BASE_URL: 'https://api.openai.com/v1',
       COACH_MODEL: 'gpt-6.1-terra', COACH_REASONING_EFFORT: 'high', COACH_MAX_TOKENS: '5400', COACH_TIMEOUT_MS: '240000'});
@@ -18,10 +18,9 @@ it('productionは専用Worker・ドメイン・DO・有限Container枠を持ち�
   }
   expect(production.vars).not.toHaveProperty('DEV_PAID_HASHES');
   expect(production.vars).not.toHaveProperty('COACH_SIGNING_KEY');
-  expect(production.durable_objects.bindings.map((x: any) => x.class_name).sort()).toEqual(['Device', 'Invitations', 'PreciseContainer', 'RealtimeContainer', 'StandardContainer']);
-  expect(production.containers.map((x: any) => x.max_instances)).toEqual([2, 2, 2]);
-  expect(production.migrations).toEqual(config.migrations.slice(0, 3));
-  expect((production.migrations ?? config.migrations).at(-1).tag).toBe('v3');
+  expect(production.durable_objects.bindings).toEqual(config.env.staging.durable_objects.bindings);
+  expect(production.containers).toEqual(config.env.staging.containers);
+  expect((production.migrations ?? config.migrations).at(-1).tag).toBe('v4');
   expect((config.env.staging.migrations ?? config.migrations).at(-1).tag).toBe('v4');
   expect(config.migrations.at(-1)).toEqual({tag: 'v4', new_sqlite_classes: ['StandardJob', 'PreciseJob', 'RealtimeEngine', 'RealtimeAccount']});
   expect(config.env.staging.containers.slice(3).every((c: any) => c.scheduling_policy === 'durable_object' && !('max_instances' in c))).toBe(true);
@@ -58,7 +57,7 @@ it('productionでも有効な招待は使え、期限・取消が開発フラグ
   await registry.create(codeHash, 1, null); await registry.redeem(hash, codeHash);
   await bindings.DEVICES.getByName(hash).fetch('https://device/register?hash=' + hash, {method: 'POST'});
   const request = () => new Request('https://api/v1/entitlements', {headers: {Authorization: 'Bearer ' + token}});
-  const configuration = {...bindings, ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false'};
+  const configuration = {...bindings, ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false', ANALYSIS_DRAIN: 'false', PAUSE_FREE_ANALYSIS: 'false'};
   expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(true);
   await registry.revoke(codeHash);
   expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(false);
