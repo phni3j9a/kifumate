@@ -112,8 +112,9 @@ def test_rotated_board_turn_hands_and_moves(db_file):
 def test_rotated_prose_keeps_width_and_matches_answer(db_file):
     pos = 'k8/9/6b2/9/9/9/6N2/9/8K b -'
     title = '３三角に狙いをつける2五桂'
-    text = '先手は９筋の右辺から、後手は2筋の左側から。右銀・右桂・右四間はそのまま。'
-    note = {**NOTE, 'text': '1一と９九、左辺と右側。12筋は対象外。'}
+    text = ('先手は９筋の右辺から、後手は2筋の左側から。右辺と右端、右側と玉の右にも注目。'
+            '右銀・右桂・右金・左香・左飛・右角・右玉・右四間・左美濃はそのまま。')
+    note = {**NOTE, 'text': '▲1一と☗９九、△1一と☖９九。左辺と右側。12筋は対象外。'}
     db_file.write_text(json.dumps({'version': 1, 'strategies': [{**STRATEGY, 'title': title, 'text': text}],
                                    'joseki': {pos: joseki('3g2e', note=note)},
                                    'tesuji': [{**tesuji(pos, '3g2e'), 'title': title, 'text': text}]}), encoding='utf-8')
@@ -124,10 +125,11 @@ def test_rotated_prose_keeps_width_and_matches_answer(db_file):
     [nearby] = out['近くの注記']
     for item in (tactic, strategy):
         assert item['題'] == '７七角に狙いをつける8五桂'
-        assert item['説明'] == '後手は１筋の左辺から、先手は8筋の右側から。右銀・右桂・右四間はそのまま。'
+        assert item['説明'] == ('後手は１筋の左辺から、先手は8筋の右側から。左辺と左端、左側と玉の左にも注目。'
+                              '右銀・右桂・右金・左香・左飛・右角・右玉・右四間・左美濃はそのまま。')
         assert item['先後反転'] is True
     assert tactic['正解'] == move('△8五桂(73)') and tactic['正解']['表記'][1:4] in tactic['題']
-    assert nearby['説明'] == '9九と１一、右辺と左側。12筋は対象外。' and nearby['先後反転'] is True
+    assert nearby['説明'] == '△9九と☖１一、▲9九と☗１一。右辺と左側。12筋は対象外。' and nearby['先後反転'] is True
     [direct] = call(data(initial=pos + ' 1'), 'book', {})['手筋']
     assert direct['題'] == title and direct['説明'] == text and direct['先後反転'] is False
 

@@ -347,6 +347,20 @@ describe('Responsesの道具ループ', () => {
     expect(() => validateOutput(bad, signed, evidence)).toThrow('invalid_output');
     const good = {sections: [{...safe.sections[0], text: '▲7六歩と前進します。'}]};
     expect(() => validateOutput(good, signed, evidence)).not.toThrow();
+    const comparison = {sections: [{...safe.sections[0], text: '▲7六歩と引いた金の手を比較します。'}]};
+    expect(() => validateOutput(comparison, signed, evidence)).not.toThrow();
+  });
+
+  it('反転手筋の符号と別の駒・手を比較しても方向の矛盾としない', async () => {
+    const evidence = facts();
+    const section = (text: string) => ({sections: [{...safe.sections[0], text}]});
+    const wanted = section('△8五桂と後退する銀の手を比較します。');
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done(wanted));
+    const book = async () => [{状態: '一致あり', 手筋: [{手数: 0, 参照: '0:position', 先後反転: true,
+      正解: {表記: '△8五桂(73)', 移動: '前進'}}]}];
+    await expect(completeWith(send, book, undefined, evidence)).resolves.toEqual(wanted);
+    expect(() => validateOutput(section('△8五桂と引いた手を比較します。'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('△8五桂と後退します。'), refs, evidence)).toThrow('invalid_output');
   });
 
   it('mateが証明した手順を起点局面で照合し、公開mate参照は増やさない', async () => {

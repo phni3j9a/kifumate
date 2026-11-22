@@ -52,9 +52,9 @@ INVALID_DB = 'coach_knowledge: invalid knowledge database; ignored'
 NO_MATCH = {'状態': '一致なし'}
 ROTATE_MOVE = str.maketrans('123456789abcdefghi', '987654321ihgfedcba')
 FILES = '123456789１２３４５６７８９'
-ROTATE_SQUARE = str.maketrans(FILES + RANKS, '987654321９８７６５４３２１' + RANKS[::-1])
-SWAP_WORD = {'先手': '後手', '後手': '先手', '右辺': '左辺', '左辺': '右辺', '右側': '左側', '左側': '右側'}
-ORIENTED_TEXT = re.compile(rf'(?<![0-9０-９])[{FILES}][{RANKS}筋]|' + '|'.join(SWAP_WORD))
+ROTATE_TEXT = str.maketrans(FILES + RANKS + '右左▲☗△☖', '987654321９８７６５４３２１' + RANKS[::-1] + '左右△☖▲☗')
+SWAP_SIDE = {'先手': '後手', '後手': '先手'}
+ORIENTED_TEXT = re.compile(rf'(?<![0-9０-９])[{FILES}][{RANKS}筋]|先手|後手|[右左](?![銀桂金香飛角玉四美])|[▲☗△☖]')
 
 
 def require(condition):
@@ -173,9 +173,9 @@ def short(text, limit):
 
 
 def oriented_text(text, limit, turned):
-    # shortcut: 明示された升・筋・先後・左右だけを置換。文脈に依存する説明は別途確認する。
+    # shortcut: 明示された座標・左右・先後・符号だけを置換。文脈に依存する説明は別途確認する。
     if turned:
-        text = ORIENTED_TEXT.sub(lambda m: SWAP_WORD.get(m[0], m[0].translate(ROTATE_SQUARE)), text)
+        text = ORIENTED_TEXT.sub(lambda m: SWAP_SIDE.get(m[0], m[0].translate(ROTATE_TEXT)), text)
     return short(text, limit)
 
 

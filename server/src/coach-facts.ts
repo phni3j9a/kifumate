@@ -133,8 +133,12 @@ function contradictsPosition(clause: string, refs: Record<string, any>[], facts:
   });
 }
 
+const DIRECTION_STEM = '引[いきく]|上が|上げ|前進|後退|横移動';
+// shortcut: 代表的な連体形だけを除外。係り受け全体は解析しない。
+const DIRECTION_MODIFIER = `(?:引(?:く|いた|いて(?:いる|いた)|きたい)|上が(?:る|った|って(?:いる|いた))|上げ(?:る|た|て(?:いる|いた))|(?:前進|後退|横移動)(?:する|した|して(?:いる|いた)|したい))\\s*(?:${PIECES}|手)`;
+
 function contradictsDirection(clause: string, refs: Record<string, any>[], facts: CoachFacts) {
-  const withVerb = new RegExp(`${KIF}\\s*と\\s*(引[いきく]|上が|上げ|前進|後退|横移動)`, 'g');
+  const withVerb = new RegExp(`${KIF}\\s*と\\s*(?!\\s*${DIRECTION_MODIFIER})(${DIRECTION_STEM})`, 'g');
   if (!withVerb.test(clause)) return false;
   withVerb.lastIndex = 0;
   const moves: (readonly [string, Direction | undefined])[] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
