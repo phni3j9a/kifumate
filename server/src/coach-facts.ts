@@ -134,17 +134,19 @@ function contradictsPosition(clause: string, refs: Record<string, any>[], facts:
 }
 
 const DIRECTION_STEM = '引[いきく]|上が|上げ|前進|後退|横移動';
-// shortcut: 代表的な連体形だけを除外。係り受け全体は解析しない。
-const DIRECTION_MODIFIER = `(?:引(?:く|いた|いて(?:いる|いた)|きたい)|上が(?:る|った|って(?:いる|いた))|上げ(?:る|た|て(?:いる|いた))|(?:前進|後退|横移動)(?:する|した|して(?:いる|いた)|したい))\\s*(?:${PIECES}|手)`;
+// shortcut: 代表的な連体形と直後の駒名だけを確認。係り受け全体は解析しない。
+const DIRECTION_MODIFIER = new RegExp(`^(?:引(?:く|いた|いて(?:いる|いた)|きたい)|上が(?:る|った|って(?:いる|いた))|上げ(?:る|た|て(?:いる|いた))|(?:前進|後退|横移動)(?:する|した|して(?:いる|いた)|したい))\\s*(${PIECES.replace('|と(?!いう)', '')})`);
 
 function contradictsDirection(clause: string, refs: Record<string, any>[], facts: CoachFacts) {
-  const withVerb = new RegExp(`${KIF}\\s*と\\s*(?!\\s*${DIRECTION_MODIFIER})(${DIRECTION_STEM})`, 'g');
+  const withVerb = new RegExp(`${KIF}\\s*と\\s*(?=(${DIRECTION_STEM}))`, 'g');
   if (!withVerb.test(clause)) return false;
   withVerb.lastIndex = 0;
   const moves: (readonly [string, Direction | undefined])[] = [...facts.実戦手.map(r => [r[1], r[4]] as const),
     ...variations(facts, refs.map(r => r.id)).map((m): [string, Direction | undefined] => [m.表記, m.移動])];
   for (const m of clause.matchAll(withVerb)) {
     if (!m[1]) continue;
+    const described = DIRECTION_MODIFIER.exec(clause.slice(m.index! + m[0].length))?.[1];
+    if (described && piece(described) !== piece(m[3])) continue;
     const expected = /^(引|後退)/.test(m[6]) ? '後退' : m[6] === '横移動' ? '横移動' : '前進';
     const matched = moves.filter(([kif]) => matchesMove(m, kif));
     if (matched.length && matched.every(([, direction]) => direction && direction !== expected)) return true;

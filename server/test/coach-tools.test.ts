@@ -335,8 +335,10 @@ describe('Responsesの道具ループ', () => {
     const signed = references(game.results);
     const evidence = {...facts(), 実戦手: ['▲2六歩(27)', '△3四歩(33)', '▲7六歩(77)'].map((表記, i): CoachFacts['実戦手'][number] =>
       [i + 1, 表記, '判定なし', '不明', '前進'])};
-    const bad = {sections: [{...safe.sections[0], text: '▲7六歩と引きます。'}]};
-    expect(() => validateOutput(bad, signed, evidence)).toThrow('invalid_output');
+    const bad = ['▲7六歩と引きます。', '実戦では▲7六歩と引いた手が敗着でした。',
+      'ここで▲7六歩と引いたと分かります。', '▲7六歩と引いた歩'];
+    const section = (text: string) => ({sections: [{...safe.sections[0], text}]});
+    for (const text of bad) expect(() => validateOutput(section(text), signed, evidence), text).toThrow('invalid_output');
 
     const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done());
     const pawn = {表記: '▲7六歩(77)', 移動: '前進'};
@@ -344,14 +346,13 @@ describe('Responsesの道具ループ', () => {
       手筋: [{手数: 0, 参照: '0:position', 正解: pawn}]}];
     await complete(config, parseCoach({...payload, analysis: game}), signed, new AbortController().signal, send, evidence, runTools);
     expect(evidence.仮の手順).toEqual(Array.from({length: 2}, () => ({手数: 0, '仮の読み筋（実戦とは別）': [pawn]})));
-    expect(() => validateOutput(bad, signed, evidence)).toThrow('invalid_output');
-    const good = {sections: [{...safe.sections[0], text: '▲7六歩と前進します。'}]};
-    expect(() => validateOutput(good, signed, evidence)).not.toThrow();
-    const comparison = {sections: [{...safe.sections[0], text: '▲7六歩と引いた金の手を比較します。'}]};
-    expect(() => validateOutput(comparison, signed, evidence)).not.toThrow();
+    for (const text of bad) expect(() => validateOutput(section(text), signed, evidence), text).toThrow('invalid_output');
+    expect(() => validateOutput(section('▲7六歩と前進します。'), signed, evidence)).not.toThrow();
+    expect(() => validateOutput(section('▲7六歩と引いた金の手を比較します。'), signed, evidence)).not.toThrow();
+    expect(() => validateOutput(section('▲7六歩と引いたと金の手を比較します。'), signed, evidence)).not.toThrow();
   });
 
-  it('反転手筋の符号と別の駒・手を比較しても方向の矛盾としない', async () => {
+  it('反転手筋の符号と別の駒を比較しても方向の矛盾としない', async () => {
     const evidence = facts();
     const section = (text: string) => ({sections: [{...safe.sections[0], text}]});
     const wanted = section('△8五桂と後退する銀の手を比較します。');
@@ -359,7 +360,7 @@ describe('Responsesの道具ループ', () => {
     const book = async () => [{状態: '一致あり', 手筋: [{手数: 0, 参照: '0:position', 先後反転: true,
       正解: {表記: '△8五桂(73)', 移動: '前進'}}]}];
     await expect(completeWith(send, book, undefined, evidence)).resolves.toEqual(wanted);
-    expect(() => validateOutput(section('△8五桂と引いた手を比較します。'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('△8五桂と引いた手を比較します。'), refs, evidence)).toThrow('invalid_output');
     expect(() => validateOutput(section('△8五桂と後退します。'), refs, evidence)).toThrow('invalid_output');
   });
 
