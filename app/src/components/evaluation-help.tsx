@@ -56,7 +56,7 @@ export function EvaluationHelp({
         </View>
       ))}
       <Text style={[font(500, 11.5, 1.5, colors.ink2), { marginTop: 8 }]}>
-        グラフでは、印のふちが黄色なら{you}の手、青なら{opponent}
+        グラフでは、塗りの印が{you}の手、白抜きの印が{opponent}
         の手です。グラフには深く読んだ局面の評価値が優先して出ます。印は、前後の局面を同じ条件で読んだ結果どうしで比べて付けます。
       </Text>
       <Text style={[font(500, 11.5, 1.5, colors.ink2), { marginTop: 8 }]}>

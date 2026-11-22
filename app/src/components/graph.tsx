@@ -304,7 +304,7 @@ export function EvalGraph({
                   >
                     <GraphMark
                       kind={p.mate ? "詰みあり" : p.mark!}
-                      side={p.self ? colors.you : colors.opp}
+                      hollow={!p.self}
                     />
                   </G>
                 </G>,
