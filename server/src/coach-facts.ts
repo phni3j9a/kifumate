@@ -55,14 +55,18 @@ function linesFor(facts: CoachFacts | undefined, ids: string[]) {
   })) ?? [];
 }
 
+function keypointBookMoves(facts: CoachFacts | undefined, ids: string[]) {
+  return (facts?.要所 ?? []).filter(k => ids.includes(`${k.手数 - 1}:position`) || ids.includes(k.指す前の参照))
+    .flatMap(k => k.定跡の手 ?? []);
+}
+
 function variations(facts: CoachFacts | undefined, ids: string[]) {
   if (!facts) return [];
   const shown = facts.参照.filter(r => /^(\d+)(?::deep)?:(?:mate|candidate:\d+)$/.test(r.id) &&
     (ids.includes(r.id) || ids.includes(r.id.replace(/:(?:mate|candidate:\d+)$/, ':position'))));
   return [
     ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
-    ...(facts.要所 ?? []).filter(k => ids.includes(`${k.手数 - 1}:position`) || ids.includes(k.指す前の参照))
-      .flatMap(k => k.定跡の手 ?? []),
+    ...keypointBookMoves(facts, ids),
     ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),
   ];
 }
@@ -72,6 +76,21 @@ export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 
   if (USI.test(text)) return 'usi';
   if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
+  // 定跡を明示した符号には、本譜全体やエンジンの候補ではなく着手前の定跡資料が必要。
+  const bookCue = /定跡(?:では?|なら|は|の(?:手|候補)|上は?)|(?<!基)本(?:では?|の(?:手|候補))/;
+  if (bookCue.test(text)) {
+    const book = [...keypointBookMoves(facts, ids), ...(facts?.仮の手順 ?? []).filter(line => line.定跡 &&
+      ids.some(id => id === `${line.手数}:position` || id === `${line.手数}:deep:position`)).flatMap(line => line[PV])];
+    for (const sentence of text.split(/[。！？;；\n]/)) {
+      for (const mention of sentence.matchAll(new RegExp(KIF, 'g'))) {
+        const before = sentence.slice(0, mention.index).split(/(?:実戦|本譜|保存解析|解析候補)(?:では?|の|は|手)/).pop()!;
+        const after = sentence.slice(mention.index! + mention[0].length);
+        if ((bookCue.test(before) || /^(?:が|は)(?:定跡の手|本の手順)/.test(after)) &&
+          !book.some(source => matchesMove(mention, source.表記) &&
+            (!mention[5] || source.表記.endsWith(`(${mention[5]})`)))) return 'unknown_book_move';
+      }
+    }
+  }
   if (kind === 'facts') {
     const proven = [...played.map(r => r[1]), ...variations(facts, ids).map(m => m.表記)];
     const move = new RegExp(KIF, 'g');
@@ -205,20 +224,20 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
   }
   if (name === 'play_line' && result.参照) (facts.仮の手順 ??= []).push(result.参照);
   if (name === 'book') {
-    const saveMoves = (id: unknown, moves: ({表記?: unknown; 移動?: unknown} | null | undefined)[]) => {
+    const saveMoves = (id: unknown, moves: ({表記?: unknown; 移動?: unknown} | null | undefined)[], joseki = false) => {
       const origin = typeof id === 'string' && /^(\d+):position$/.exec(id);
       if (!origin || !hasFactReference(origin[0], facts)) return;
       // 本の選択肢は連続した手順ではなく、起点が同じ別々の候補。
       for (const move of moves) {
         if (typeof move?.表記 !== 'string' || typeof move.移動 !== 'string' || !['前進', '後退', '横移動', '打つ'].includes(move.移動)) continue;
-        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), [PV]: [{表記: move.表記, 移動: move.移動}]});
+        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), ...(joseki ? {定跡: true} : {}), [PV]: [{表記: move.表記, 移動: move.移動}]});
       }
     };
     const first = result.最初に外れた手;
-    if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手);
+    if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手, true);
     const fork = result.駒組みの分岐点;
-    if (Array.isArray(fork?.定跡の手)) saveMoves(fork.参照, fork.定跡の手);
-    if (Array.isArray(result.手筋)) for (const item of result.手筋) saveMoves(item?.参照, [item?.正解]);
+    if (Array.isArray(fork?.定跡の手)) saveMoves(fork.参照, fork.定跡の手, true);
+    if (Array.isArray(result.手筋)) for (const item of result.手筋) saveMoves(item?.参照, [item?.正解, ...(Array.isArray(item?.別解) ? item.別解 : [])]);
   }
   if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {
     const moves: string[] = [...(result.分岐 ?? []), ...result.手順];

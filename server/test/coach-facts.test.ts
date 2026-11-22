@@ -28,12 +28,17 @@ async function fixture(callback: (state: DurableObjectState) => Promise<void>) {
 
 describe('日本語事実の矛盾検査', () => {
   it('定跡の手は着手前の参照だけで使え、移動方向も検査する', () => {
-    const evidence = {...facts, 要所: [{手数: 1, 実戦手: {表記: '▲7六歩(77)'}, 指す前の参照: '0:position',
+    const evidence: CoachFacts = {...facts, 実戦手: [[1, '▲2六歩(27)', '判定なし', '互角', '前進']], 要所: [{手数: 1, 実戦手: {表記: '▲7六歩(77)'}, 指す前の参照: '0:position',
       定跡の手: [{表記: '▲2六歩(27)', 移動: '前進'}]}], 参照: [{id: '0:position'}, ...facts.参照]};
     const quote = (text: string, id: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
     expect(() => validateOutput(quote('定跡では▲2六歩と前進します。', '0:position'), refs, evidence)).not.toThrow();
     expect(() => validateOutput(quote('定跡では▲2六歩と後退します。', '0:position'), refs, evidence)).toThrow();
-    expect(() => validateOutput(quote('定跡では▲2六歩です。', '1:position'), refs, evidence)).toThrow();
+    for (const claim of ['定跡では▲2六歩です。', '定跡の手は▲2六歩です。', '本の手順は▲2六歩です。']) {
+      expect(() => validateOutput(quote(claim, '1:position'), refs, evidence)).toThrow();
+    }
+    expect(() => validateOutput(quote('▲2六歩が定跡の手です。', '1:position'), refs, evidence)).toThrow();
+    expect(() => validateOutput(quote('定跡では▲2六歩(37)です。', '0:position'), refs, evidence)).toThrow();
+    expect(() => validateOutput(quote('実戦では▲2六歩です。', '1:position'), refs, evidence)).not.toThrow();
   });
   const correct = ['相手が有利です。', 'あなたは金を動かしました。', '相手が勝ちました。', 'あなたは負けました。', '相手は宣言可能です。', 'あなたは詰まされる側です。', 'あなたは先手です。', '第一歩は、次の一手を盤上で確認することです。', '一段と玉を安全にする練習をしましょう。', '相手が金を取った飛車を桂で取り返す形を検討しましょう。', 'あなたが金を動かした局面では相手が有利です。'];
   const wrong = ['あなたが有利です。', '相手は金を動かしました。', 'あなたは玉を動かしました。', 'あなたが勝ちました。', '相手は負けました。', 'あなたは宣言可能です。', '相手は詰まされる側です。', 'あなたは後手です。'];

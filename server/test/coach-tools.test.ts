@@ -319,10 +319,13 @@ describe('Responsesの道具ループ', () => {
       最初に外れた手: {手数: 1, 参照: '0:position', 実戦手: '▲7六歩(77)', 本の手: [
         {表記: '▲2六歩(27)', 移動: '前進'}, {表記: '▲5六歩(57)', 移動: '前進'},
       ]},
-      手筋: [{手数: 1, 参照: '1:position', 正解: {表記: '△3四歩(33)', 移動: '前進'}}]};
+      手筋: [{手数: 1, 参照: '1:position', 正解: {表記: '△3四歩(33)', 移動: '前進'}, 別解: [{表記: '△8四歩(83)', 移動: '前進'}]}]};
     const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done(wanted));
     await expect(completeWith(send, async () => [result], undefined, evidence)).resolves.toEqual(wanted);
     expect(validateOutput(wanted, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput(section('別解は△8四歩です。', '1:position'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('別解は△8四歩です。', '0:position'), refs, evidence)).toThrow();
+    expect(() => validateOutput(section('定跡では△8四歩です。', '1:position'), refs, evidence)).toThrow();
     expect(() => validateOutput(section('手筋の正解は△3四歩です。', '1:position'), refs, evidence)).not.toThrow();
     expect(() => validateOutput(section('手筋の正解は△3四歩です。', '0:position'), refs, evidence)).toThrow('invalid_output');
     expect(() => validateOutput(section('本では▲2六歩が候補です。', '1:position'), refs, evidence)).toThrow('invalid_output');
@@ -345,7 +348,7 @@ describe('Responsesの道具ループ', () => {
     const runTools = async () => [{状態: '一致あり', 最初に外れた手: {手数: 1, 参照: '0:position', 本の手: [pawn]},
       手筋: [{手数: 0, 参照: '0:position', 正解: pawn}]}];
     await complete(config, parseCoach({...payload, analysis: game}), signed, new AbortController().signal, send, evidence, runTools);
-    expect(evidence.仮の手順).toEqual(Array.from({length: 2}, () => ({手数: 0, '仮の読み筋（実戦とは別）': [pawn]})));
+    expect(evidence.仮の手順?.map(line => !!line.定跡)).toEqual([true, false]);
     for (const text of bad) expect(() => validateOutput(section(text), signed, evidence), text).toThrow('invalid_output');
     expect(() => validateOutput(section('▲7六歩と前進します。'), signed, evidence)).not.toThrow();
     expect(() => validateOutput(section('▲7六歩と引いた金の手を比較します。'), signed, evidence)).not.toThrow();

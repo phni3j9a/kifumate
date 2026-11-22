@@ -259,3 +259,38 @@ def test_last_qualifying_match_survives_short_rejoin(db_file, later_count, expec
     write(db_file, table)
     fork = call(data(moves), 'book', {})['駒組みの分岐点']
     assert fork['手数'] == expected and fork['一致した自分の手数'] == 5
+
+
+def test_opponent_capture_ends_match_before_recapture(db_file):
+    write(db_file, opening_table())
+    out = call(data(OPENING[:9] + ['2b8h+', '7h8h']), 'book', {})
+    assert '駒組みの分岐点' not in out
+
+
+def test_tag_only_strategy_turn_comes_from_owner_of_first_tag(db_file):
+    row = {**STRATEGY, 'tags': ['主戦法', '共有戦法'], 'text': '先手の２筋に注目。'}
+    write(db_file, {}, strategies=[row])
+    game = tagged(data(), '共有戦法')
+    sides = game['tags']['対局側']
+    assert call(game, 'book', {}) == {'状態': '一致なし'}
+    sides['後手'] = {'戦法': [{'名前': '主戦法'}]}
+    [plan] = call(game, 'book', {})['方針']
+    assert plan['先後反転'] is True and plan['説明'] == '後手の８筋に注目。'
+    sides['先手'] = sides['後手']
+    assert call(game, 'book', {}) == {'状態': '一致なし'}
+
+
+def test_tesuji_accept_correct_alternative_both_orientations(db_file):
+    pos = 'k8/9/9/4+p4/9/9/9/9/8K b 2pgR'
+    write(db_file, {}, [{**tesuji(pos, 'R*4e'), 'accept': ['1i2i']}])
+    for turned, key_, actual, notation in [(False, pos, '1i2i', '▲2九玉(19)'),
+                                           (True, coach_knowledge.rotated_key(pos), '9a8a', '△8一玉(91)')]:
+        [hit] = call(data([actual], initial=key_ + ' 1'), 'book', {})['手筋']
+        assert hit['実戦で正解'] is True and hit['先後反転'] == turned
+        assert hit['別解'] == [move(notation, '横移動')]
+
+
+@pytest.mark.parametrize('bad', [['7g7f'], ['4a4b'], ['2g2f', '2g2f']])
+def test_invalid_tesuji_accept(db_file, bad):
+    write(db_file, {}, [{**tesuji(key(), '7g7f'), 'accept': bad}])
+    assert call(data(), 'book', {}) == {'状態': '一致なし'}
