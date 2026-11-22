@@ -1,3 +1,5 @@
+import { StandardJob, PreciseJob, RealtimeEngine } from './analysis-container';
+export { StandardJob, PreciseJob, RealtimeEngine };
 import { normalizeInviteCode } from './invite-code.mjs';
 import { Invitations, limit, type Entitlement } from './invitations';
 export { Invitations } from './invitations';
@@ -14,6 +16,11 @@ export interface Env extends CoachEnv {
   STD: DurableObjectNamespace<StandardContainer>;
   PRECISE: DurableObjectNamespace<PreciseContainer>;
   REALTIME: DurableObjectNamespace<RealtimeContainer>;
+  STD_JOB?: DurableObjectNamespace<StandardJob>;
+  PRECISE_JOB?: DurableObjectNamespace<PreciseJob>;
+  RT_ENGINE?: DurableObjectNamespace<RealtimeEngine>;
+  RT_ACCOUNTS?: DurableObjectNamespace<RealtimeAccount>;
+  PAUSE_FREE_ANALYSIS?: string;
   INVITATIONS: DurableObjectNamespace<Invitations>;
   INVITE_ADMIN_KEY?: string;
   REGISTRATION_LIMITER?: RateLimit;
@@ -40,10 +47,6 @@ export class RealtimeContainer extends StandardContainer {
   private lifetime = new AbortController();
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
-    const idleTime = (value: string | undefined, fallback: number) => {
-      const ms = Number(value);
-      return Number.isSafeInteger(ms) && ms >= 1000 && ms <= 300_000 ? ms : fallback;
-    };
     this.sessions = new RealtimeSessions(ctx.storage, {
       analyze: async (input, sessionId, sequence, round, movetimeMs, signal) => {
         if (this.boot || !ctx.container?.running) {
@@ -71,13 +74,37 @@ export class RealtimeContainer extends StandardContainer {
   async onActivityExpired() { await this.sessions.expire(); }
   onStop() { if (!this.boot) this.sessions.disconnected(); }
   async fetch(request: Request): Promise<Response> {
-    const owner = request.headers.get('X-Realtime-Owner');
-    if (!owner || !/^[a-f0-9]{64}$/.test(owner)) return json({error: 'unauthorized'}, 401);
-    const devPaid = request.headers.get('X-Dev-Entitlement') === '1' && ['local', 'staging'].includes(this.env.ENVIRONMENT) && this.env.ALLOW_DEV_PAID === 'true';
-    const hash = request.headers.get('X-Device-Hash');
-    return this.sessions.fetch(request, owner, request.headers.get('X-Dev-Paid') === '1', work => this.ctx.waitUntil(work),
-      async () => devPaid || (!!hash && (await this.env.INVITATIONS.getByName('registry').entitlement(hash)).paid));
+    return realtimeRequest(this.ctx, this.env, this.sessions, request);
   }
+}
+
+function idleTime(value: string | undefined, fallback: number) {
+  const ms = Number(value);
+  return Number.isSafeInteger(ms) && ms >= 1000 && ms <= 300_000 ? ms : fallback;
+}
+function realtimeRequest(ctx: DurableObjectState, env: Env, sessions: RealtimeSessions, request: Request) {
+  const owner = request.headers.get('X-Realtime-Owner');
+  if (!owner || !/^[a-f0-9]{64}$/.test(owner)) return json({error: 'unauthorized'}, 401);
+  const devPaid = request.headers.get('X-Dev-Entitlement') === '1' && ['local', 'staging'].includes(env.ENVIRONMENT) && env.ALLOW_DEV_PAID === 'true';
+  const hash = request.headers.get('X-Device-Hash');
+  return sessions.fetch(request, owner, request.headers.get('X-Dev-Paid') === '1', work => ctx.waitUntil(work),
+    async () => devPaid || (!!hash && (await env.INVITATIONS.getByName('registry').entitlement(hash)).paid));
+}
+export class RealtimeAccount extends DurableObject<Env> {
+  private sessions: RealtimeSessions;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.sessions = new RealtimeSessions(ctx.storage, {
+      analyze: (input, id, sequence, round, ms, signal) => {
+        const engine = env.RT_ENGINE!.getByName(id);
+        return fetchRealtimeAnalysis((url, init) => engine.fetch(url, init), input, id, sequence, round, ms, signal);
+      },
+      stop: id => env.RT_ENGINE!.getByName(id).stop(),
+      schedule: when => ctx.storage.setAlarm(when),
+    }, idleTime(env.REALTIME_IDLE_MS, 30_000), idleTime(env.REALTIME_HOLD_IDLE_MS, 300_000));
+  }
+  async alarm() { await this.sessions.expire(); }
+  async fetch(request: Request) { return realtimeRequest(this.ctx, this.env, this.sessions, request); }
 }
 
 interface Job {
@@ -96,7 +123,7 @@ export class Device extends DurableObject<Env> {
     const coachContainer = (path: 'coach-facts' | 'coach-tools', data: unknown, signal: AbortSignal) => {
       signal.throwIfAborted();
       const slot = parseInt(ctx.id.toString().slice(0, 8), 16) % 2;
-      return env.PRECISE.getByName('slot-' + slot).fetch('http://container/' + path, {
+      return (env.PRECISE_JOB?.getByName('coach-' + ctx.id.toString()) ?? env.PRECISE.getByName('slot-' + slot)).fetch('http://container/' + path, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data), signal,
       });
     };
@@ -229,7 +256,8 @@ export class Device extends DurableObject<Env> {
         headers.set('X-Dev-Paid', this.paid() ? '1' : '0');
         headers.set('X-Dev-Entitlement', this.devPaid() ? '1' : '0');
         headers.set('X-Device-Hash', this.rows<{value: string}>("SELECT value FROM meta WHERE key='hash'")[0].value);
-        // 全局解析と独立した固定2枠。枠内は一端末へ排他的に貸与し、待ち行列を作らない。
+        if (this.env.RT_ACCOUNTS) return await this.env.RT_ACCOUNTS.getByName(this.ctx.id.toString()).fetch(new Request(request, {headers}));
+        // 切り戻し先の旧プール。
         const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
         return await this.env.REALTIME.getByName('slot-' + slot).fetch(new Request(request, {headers}));
       }
@@ -247,6 +275,7 @@ export class Device extends DurableObject<Env> {
           const existing = this.rows<Job & Record<string, SqlStorageValue>>('SELECT * FROM jobs WHERE fingerprint=?', fingerprint)[0];
           if (existing && !['failed', 'cancelled'].includes(existing.status)) return json({...this.view(existing, 0), duplicate: true, quota: this.quota()});
           const quota = this.quota();
+          if (!quota.paid && this.env.PAUSE_FREE_ANALYSIS === 'true') throw new ApiError(503, 'analysis_unavailable');
           if (input.mode === 'precise' && !quota.paid) throw new ApiError(403, 'paid_required');
           if (quota.totalRemaining <= 0 || (input.mode === 'precise' && quota.preciseRemaining <= 0)) throw new ApiError(429, 'weekly_limit');
           if (existing) {
@@ -279,11 +308,11 @@ export class Device extends DurableObject<Env> {
   private stillRunning(job: Job) {
     return this.rows("SELECT id FROM jobs WHERE id=? AND status='running' AND cursor=? AND deep_done=?", job.id, job.cursor, job.deep_done).length > 0;
   }
-  private async analyze(input: Input, ply: number, deep = false): Promise<PositionResult> {
+  private async analyze(id: string, input: Input, ply: number, deep = false): Promise<PositionResult> {
     const namespace = input.mode === 'std' ? this.env.STD : this.env.PRECISE;
-    // shortcut: 中継はモード別2枠。公開時に負荷計測して枠数と max_instances を同時調整する。
+    const jobs = input.mode === 'std' ? this.env.STD_JOB : this.env.PRECISE_JOB;
     const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
-    const response = await namespace.getByName('slot-' + slot).fetch(deep ? 'http://container/analyze/deep' : 'http://container/analyze', {
+    const response = await (jobs?.getByName(id) ?? namespace.getByName('slot-' + slot)).fetch(deep ? 'http://container/analyze/deep' : 'http://container/analyze', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({...input, ply}), signal: AbortSignal.timeout(45_000),
     });
@@ -321,7 +350,7 @@ export class Device extends DurableObject<Env> {
     const ply = targets[job.deep_done];
     let result: PositionResult;
     try {
-      result = await this.analyze(input, ply, true);
+      result = await this.analyze(job.id, input, ply, true);
     } catch (error) {
       const unsupported = error instanceof ApiError && error.status === 404;
       if (!unsupported) this.logRetry(job, ply, error);
@@ -362,7 +391,7 @@ export class Device extends DurableObject<Env> {
         return;
       }
       try {
-        const result = await this.analyze(input, job.cursor);
+        const result = await this.analyze(job.id, input, job.cursor);
         const last = job.cursor === input.moves.length;
         const results = last && job.mode === 'precise' ? [...this.results(job.id), result] : [];
         const targets = results.length ? deepPositions(input.initial, results) : [];

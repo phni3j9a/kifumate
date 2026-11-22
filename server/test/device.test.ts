@@ -16,6 +16,7 @@ async function setup(paid = false) {
   if (paid) paidStubs.add(stub);
   await runInDurableObject(stub, (instance: any) => {
     instance.env.ENVIRONMENT = 'staging';
+    instance.env.PAUSE_FREE_ANALYSIS = 'false';
     const mock = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
       const data = JSON.parse(init.body as string);
       return Response.json({ply: data.ply, score: {kind: 'cp', value: 10}, candidates: [], mate: null});
@@ -34,6 +35,16 @@ async function tick(stub: any) { await runInDurableObject(stub, (instance: any) 
 async function sql(stub: any, query: string, ...params: any[]) {
   return runInDurableObject(stub, (_instance, state) => state.storage.sql.exec(query, ...params).toArray());
 }
+
+it('停止中は無料の新規局だけを拒み、重複・有料は維持する', async () => {
+  for (const paid of [false, true]) {
+    const stub = await setup(paid);
+    expect((await request(stub, '/v1/jobs', 'POST', base)).status).toBe(202);
+    await runInDurableObject(stub, (instance: any) => { instance.env.PAUSE_FREE_ANALYSIS = 'true'; });
+    expect((await request(stub, '/v1/jobs', 'POST', base)).status).toBe(200);
+    expect((await request(stub, '/v1/jobs', 'POST', {...base, moves: []})).status).toBe(paid ? 202 : 503);
+  }
+});
 
 describe('JST と入力境界', () => {
   it('日曜23:59:59 JST と月曜00:00 JST を別週にする', () => {
@@ -224,7 +235,7 @@ it('分岐APIでも認証を通し、所有者・権利の内部ヘッダーを�
     INVITE_ADMIN_KEY: 'realtime-admin-secret', DEV_PAID_HASHES: 'realtime-development-secret'};
   await runInDurableObject(stub, (instance: any) => {
     Object.assign(instance.env, secrets);
-    instance.env.REALTIME = {getByName: (slot: string) => ({fetch: async (request: Request) => Response.json({
+    instance.env.RT_ACCOUNTS = {getByName: (slot: string) => ({fetch: async (request: Request) => Response.json({
       slot, owner: request.headers.get('X-Realtime-Owner'), paid: request.headers.get('X-Dev-Paid'),
       auth: request.headers.get('Authorization'), path: new URL(request.url).pathname,
       hash: request.headers.get('X-Device-Hash'), devEntitlement: request.headers.get('X-Dev-Entitlement'),
@@ -239,7 +250,7 @@ it('分岐APIでも認証を通し、所有者・権利の内部ヘッダーを�
   expect(response.status).toBe(200);
   const result = await response.json() as any;
   expect(result.owner).toBe(stub.id.toString()); expect(result.paid).toBe('0'); expect(result.auth).toBe(null);
-  expect(result.path).toBe('/v1/realtime'); expect(result.slot).toMatch(/^slot-[01]$/);
+  expect(result.path).toBe('/v1/realtime'); expect(result.slot).toBe(result.owner);
   expect(result.hash).toBe(hash); expect(result.devEntitlement).toBe('0'); expect(result.config).toBe(null);
   expect(result.body).toBe(body);
   for (const value of [...Object.values(secrets), token]) expect(JSON.stringify([result.headers, result.body])).not.toContain(value);

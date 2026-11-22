@@ -4,7 +4,7 @@ export const MONTHLY_MS = 300 * 60_000;
 export const MAX_REALTIME_SEARCH_MS = 60_000;
 export interface RealtimeBackend {
   analyze(input: Input, session: string, sequence: number, round: number, movetimeMs: number, signal: AbortSignal): Promise<Response>;
-  stop(): Promise<void>;
+  stop(session: string): Promise<void>;
   schedule(when: number): Promise<void>;
 }
 export async function fetchRealtimeAnalysis(fetch: (url: string, init: RequestInit) => Promise<Response>,
@@ -97,7 +97,7 @@ export class RealtimeSessions {
     this.sql.exec('UPDATE rt_sessions SET status=?,error=? WHERE owner=?', status, error, session.owner);
     this.stopping = (async () => {
       // SIGKILL/destroy の完了まで課金。停止に失敗した場合は貸与も集計も解除しない。
-      await this.backend.stop();
+      await this.backend.stop(session.id);
       this.account(this.now());
       this.sql.exec('UPDATE rt_sessions SET charged=NULL WHERE owner=?', session.owner);
     })();
