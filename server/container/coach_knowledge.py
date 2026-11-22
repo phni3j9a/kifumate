@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """将棋の短い知識集。記述はすべて独自の要約。"""
+from collections import defaultdict, deque
 from functools import cache
 import json
 from pathlib import Path
@@ -49,6 +50,8 @@ DB_PATH = Path(__file__).with_name('knowledge') / 'knowledge.json'
 DB_LOCK = Lock()
 MAX_DB_BYTES = 16 * 1024 * 1024
 INVALID_DB = 'coach_knowledge: invalid knowledge database; ignored'
+MIN_FULL_PLIES = 10
+MIN_FORMATION_MOVES = 5
 NO_MATCH = {'状態': '一致なし'}
 ROTATE_MOVE = str.maketrans('123456789abcdefghi', '987654321ihgfedcba')
 FILES = '123456789１２３４５６７８９'
@@ -118,6 +121,128 @@ def check_moves(board, moves, *, line=False):
             board.push(move)
 
 
+def layout(board, side):
+    return bytes(p if p // 16 == side else 0 for p in board.pieces)
+
+
+def formation_index(table):
+    # 共有序盤はv1では一章にしか属さない。合流・循環も含め、子孫の所属を親へ伝播する。
+    parents, children = defaultdict(set), defaultdict(dict)
+    membership = {key: {row['strategy']} for key, row in table.items()}
+    for key, row in table.items():
+        b = sh.Board(key + ' 1')
+        for move in row['moves']:
+            b.push_usi(move)
+            child = position_key(b)
+            b.pop()
+            if child in table:
+                parents[child].add(key)
+                children[key][move] = child
+            else:
+                membership.setdefault(child, set()).add(row['strategy'])
+    queue = deque(table)
+    while queue:
+        child = queue.popleft()
+        for parent in parents[child]:
+            if not membership[child] <= membership[parent]:
+                membership[parent].update(membership[child])
+                queue.append(parent)
+    index = defaultdict(list)
+    for key in membership:
+        for oriented, turned in ((key, False), (rotated_key(key), True)):
+            b = sh.Board(oriented + ' 1')
+            for side in (sh.BLACK, sh.WHITE):
+                sources = [key] if b.turn == side and key in table else children[key].values()
+                index[side, layout(b, side)].append((key, turned, sources))
+    return index, membership, children
+
+
+def strategy_tags_by_side(game):
+    # Worker の classificationCatalog で区別した戦法だけを使い、囲いや大分類は数えない。
+    raw = game.get('tags')
+    sides = raw.get('対局側') if isinstance(raw, dict) else None
+    if not isinstance(sides, dict):
+        return {}
+    return {name: {tag['名前'] for tag in side['戦法'] if isinstance(tag, dict) and isinstance(tag.get('名前'), str)}
+            for name, side in sides.items() if name in ('先手', '後手') and isinstance(side, dict) and isinstance(side.get('戦法'), list)}
+
+
+def strategy_plans(ids, strategies, by_side, selected):
+    plans = []
+    for id_ in dict.fromkeys(ids):
+        if not id_ or (selected is not None and id_ not in selected):
+            continue
+        row = strategies[id_]
+        owners = [side for side, tags in by_side.items() if row['tags'] and row['tags'][0] in tags]
+        turned = owners[0] == '後手' if len(owners) == 1 else None
+        if turned is None and ORIENTED_TEXT.search(row['title'] + ' ' + row['text']):
+            continue
+        plans.append({**description(row, turned), '先後反転': turned})
+        if len(plans) == 2:
+            break
+    return plans
+
+
+def selected_strategies(by_side, strategies):
+    tags = set().union(*by_side.values())
+    if not tags:
+        return None
+    scores = {id_: len(tags.intersection(row['tags'])) for id_, row in strategies.items()}
+    best = max(scores.values(), default=0)
+    return {id_ for id_, score in scores.items() if score == best and best}
+
+
+def formation(game, boards):
+    strategies, table, _, indexed = database()
+    view = game['perspective']
+    if view == 'observer' or not table:
+        return None
+    index, membership, children = indexed
+    by_side = strategy_tags_by_side(game)
+    selected = selected_strategies(by_side, strategies)
+    side = sh.BLACK if view == 'sente' else sh.WHITE
+    run, last = 0, None
+    moves = game['moves']
+    for ply, (sfen, _) in enumerate(boards):
+        b = sh.Board(sfen)
+        rows = [r for r in index.get((side, layout(b, side)), ()) if selected is None or selected & membership[r[0]]]
+        if not rows:
+            run = 0
+            continue
+        if ply and b.turn != side:
+            run += 1
+        if run >= MIN_FORMATION_MOVES:
+            # 相手の応手の後も陣形が一致した場合だけ、自分の次の手と比較する。
+            last = (ply, run, rows) if b.turn == side else None
+    if not last or last[0] >= len(moves):
+        return None
+    ply, run, rows = last
+    sfen, prev = boards[ply]
+    b = sh.Board(sfen)
+    legal = {sh.move_to_usi(m) for m in b.legal_moves}
+    choices, topics, notes = {}, {}, {}
+    for key, turned, sources in rows:
+        for source in sources:
+            for move in table[source]['moves']:
+                child = children[source].get(move)
+                belongs = membership[child] if child else {table[source]['strategy']}
+                if selected is not None and not selected & belongs:
+                    continue
+                usi = move.translate(ROTATE_MOVE) if turned else move
+                if usi == moves[ply]:
+                    return None  # 実戦手も本の手なら逸脱ではない。表示上限より先に調べる。
+                if usi in legal and usi not in choices and len(choices) < 8:
+                    choices[usi] = {**book_move(move_fact(b.copy(), usi, prev, view)[0]), '先後反転': turned}
+        row = table.get(key, {})  # 末端には着手や注記の行がない。
+        topics.update(dict.fromkeys((row.get('strategy'), *sorted(membership[key]))))
+        if (note := row.get('note')) and len(notes) < 2 and (selected is None or row['strategy'] in selected):
+            text = oriented_text(note['text'], 240, turned)
+            notes[text] = {'説明': text, '先後反転': turned}
+    return {'一致した自分の手数': run, '手数': ply + 1, '参照': f'{ply}:position',
+            '実戦手': move_fact(b, moves[ply], prev, view)[0]['表記'], '定跡の手': list(choices.values()),
+            '方針': strategy_plans(topics, strategies, by_side, selected), '注記': list(notes.values())}
+
+
 def parse_database(raw):
     require(type(raw['version']) is int and raw['version'] == 1)
     require(isinstance(raw['strategies'], list) and isinstance(raw['tesuji'], list) and isinstance(raw['joseki'], dict))
@@ -133,6 +258,9 @@ def parse_database(raw):
         ids.add(row['id'])
         b = normalized_board(row['sfen'])
         key = position_key(b)
+        if 'accept' in row:
+            check_moves(b, row['accept'])
+            require(len(set(row['accept'])) == len(row['accept']) and row['answer'][0] not in row['accept'])
         check_moves(b, row['answer'], line=True)
         tesuji.setdefault(key, []).append(row)
     for sfen, row in raw['joseki'].items():
@@ -145,7 +273,7 @@ def parse_database(raw):
             require(valid_text(row['note']['text']))
             check_sources(row['note'])
         joseki[key] = row
-    return strategies, joseki, tesuji
+    return strategies, joseki, tesuji, formation_index(joseki)
 
 
 @cache
@@ -159,7 +287,7 @@ def load_database(path):
         pass
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError):
         print(INVALID_DB, file=sys.stderr)
-    return {}, {}, {}
+    return {}, {}, {}, {}
 
 
 def database():
@@ -194,7 +322,7 @@ def lookup(query):
         score = sum(3 if w in name else 1 if w in tags else 0 for w in words)
         if score or not words:
             hits.append((score, {'項目': name, '説明': text, **({'出典': RULE_SOURCE} if name in ('入玉宣言', '持将棋') else {})}))
-    strategies, _, tesuji = database()
+    strategies, _, tesuji, _ = database()
     for row in [*strategies.values(), *(r for rows in tesuji.values() for r in rows)]:
         title, tags, text = (unicodedata.normalize('NFKC', s) for s in (row['title'], ' '.join(row['tags']), row['text']))
         if score := sum(3 if w in title else 2 if w in tags else 1 if w in text else 0 for w in words):
@@ -204,43 +332,50 @@ def lookup(query):
 
 
 def book(game):
-    strategies, joseki, tesuji = database()
-    if not (joseki or tesuji):
+    strategies, joseki, tesuji, _ = database()
+    if not strategies and not tesuji:
         return NO_MATCH.copy()
     view, moves, initial = game['perspective'], game['moves'], game['initial']
     b = sh.Board() if initial == 'startpos' else sh.Board(initial)
     prev = last = last_departure = None
-    tactics, notes, topics = [], [], []
+    last_run = 0
+    tactics, notes, topics, boards = [], [], [], []
+    by_side = strategy_tags_by_side(game)
+    selected = selected_strategies(by_side, strategies)
+    matched_plies = 0
     for ply in range(len(moves) + 1):
+        boards.append((b.sfen(), prev))
         actual = moves[ply] if ply < len(moves) else None
         ref = {'手数': ply, '参照': f'{ply}:position'}
         key = position_key(b)
         book_moves = {}
         for key_, turned in ((key, False), (rotated_key(key), True)):
             if row := joseki.get(key_):
-                topics.append((ply, row['strategy'], turned))
+                topics.append((ply, row['strategy']))
                 if note := row.get('note'):
                     notes.append((ply, {**ref, '説明': oriented_text(note['text'], 240, turned), '先後反転': turned}))
                 for move in row['moves']:
                     book_moves.setdefault(move.translate(ROTATE_MOVE) if turned else move, turned)
             for row in tesuji.get(key_, ()):
                 if strategy := row.get('strategy'):
-                    topics.append((ply, strategy, turned))
+                    topics.append((ply, strategy))
                 if len(tactics) < 3:
-                    answer = row['answer'][0]
+                    answers = [row['answer'][0], *row.get('accept', [])]
                     if turned:
-                        answer = answer.translate(ROTATE_MOVE)
-                    fact, _ = move_fact(b.copy(), answer, prev, view)
-                    tactics.append({**ref, **description(row, turned), '正解': book_move(fact), '先後反転': turned,
-                                    '実戦で正解': None if actual is None else actual == answer})
+                        answers = [m.translate(ROTATE_MOVE) for m in answers]
+                    first, *alternates = [book_move(move_fact(b.copy(), m, prev, view)[0]) for m in answers]
+                    tactics.append({**ref, **description(row, turned), '正解': first, '先後反転': turned,
+                                    **({'別解': alternates} if alternates else {}),
+                                    '実戦で正解': None if actual is None else actual in answers})
         if book_moves:
             # 再合流したら、それ以前に一時的に外れた着手は取り消す。
             last = {**ref, '先後反転': key not in joseki}
-            last_departure = (b.copy(), prev, book_moves) if actual is not None else None
+            last_run = matched_plies
+            last_departure = (b.copy(), prev, book_moves) if actual is not None and matched_plies >= MIN_FULL_PLIES else None
+        matched_plies = matched_plies + 1 if actual in book_moves else 0
         if actual is not None:
             _, prev = move_fact(b, actual, prev, view)
-    if last is None and not tactics:
-        return NO_MATCH.copy()
+    fork = formation(game, boards)
     departure = None
     if last_departure is not None:
         board, previous, book_moves = last_departure
@@ -249,12 +384,19 @@ def book(game):
         departure = {'参照': last['参照'], '手数': ply + 1, '指した側': fact['指した側'], '実戦手': fact['表記'],
                      '本の手': [{**book_move(move_fact(board.copy(), move, previous, view)[0]), '先後反転': turned}
                                for move, turned in list(book_moves.items())[:8]]}
-    near = last['手数'] if last else tactics[0]['手数']
+    near = last['手数'] if last else tactics[0]['手数'] if tactics else 0
     closest = lambda item: (abs(item[0] - near), item[0])
-    topic_turns = {}
-    for _, id_, turned in sorted(topics, key=closest):
-        topic_turns.setdefault(id_, turned)
-    return {'状態': '一致あり', '最後の一致': last, '最初に外れた手': departure,
-            '方針': [{**description(strategies[id_], turned), '先後反転': turned}
-                   for id_, turned in list(topic_turns.items())[:2]],
-            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]], '手筋': tactics}
+    topic_ids = [id_ for _, id_ in sorted(topics, key=closest)]
+    if selected:
+        classified = set().union(*by_side.values())
+        topic_ids.extend(id_ for id_, row in strategies.items()
+                         if id_ in selected and row['tags'] and row['tags'][0] in classified)
+    plans = fork['方針'] if fork else strategy_plans(topic_ids, strategies, by_side, selected)
+    # 序盤数手だけの一致は戦型が違う対局でも起きるため、出力では外れた手と同じく連続一致の手数で抑える。
+    shown = last if last and last_run >= MIN_FULL_PLIES else None
+    if not (shown or tactics or fork or plans):
+        return NO_MATCH.copy()
+    return {'状態': '一致あり' if shown or tactics or fork else '方針のみ', '最後の一致': shown, '最初に外れた手': departure,
+            **({'駒組みの分岐点': fork} if fork else {}),
+            '方針': plans,
+            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]] if shown else [], '手筋': tactics}

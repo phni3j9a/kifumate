@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { Coach, messages, parseCoach, references, signAnalysis, validateOutput } from '../src/coach';
-import { contradicts, type CoachFacts } from '../src/coach-facts';
+import { contradicts, notationIssue, type CoachFacts } from '../src/coach-facts';
 import { Device } from '../src/index';
 
 const analysis = {initial: 'startpos', moves: ['7g7f'], mode: 'precise' as const,
@@ -27,6 +27,47 @@ async function fixture(callback: (state: DurableObjectState) => Promise<void>) {
 }
 
 describe('日本語事実の矛盾検査', () => {
+  it('定跡の手は着手前の参照だけで使え、移動方向も検査する', () => {
+    const evidence: CoachFacts = {...facts, 実戦手: [[1, '▲2六歩(27)', '判定なし', '互角', '前進']], 要所: [{手数: 1, 実戦手: {表記: '▲7六歩(77)'}, 指す前の参照: '0:position',
+      定跡の手: [{表記: '▲2六歩(27)', 移動: '前進'}]}], 参照: [{id: '0:position'}, ...facts.参照]};
+    const quote = (text: string, id: string) => ({sections: [{...section(text).sections[0], refs: [id]}]});
+    expect(() => validateOutput(quote('定跡では▲2六歩と前進します。', '0:position'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(quote('定跡では▲2六歩と後退します。', '0:position'), refs, evidence)).toThrow();
+    for (const claim of ['定跡では▲2六歩です。', '定跡の手は▲2六歩です。', '本の手順は▲2六歩です。']) {
+      expect(() => validateOutput(quote(claim, '1:position'), refs, evidence)).toThrow();
+    }
+    expect(() => validateOutput(quote('▲2六歩が定跡の手です。', '1:position'), refs, evidence)).toThrow();
+    expect(() => validateOutput(quote('定跡では▲2六歩(37)です。', '0:position'), refs, evidence)).toThrow();
+    expect(() => validateOutput(quote('実戦では▲2六歩です。', '1:position'), refs, evidence)).not.toThrow();
+  });
+  it('定跡への帰属は語に隣接する符号だけ（game03）', () => {
+    const evidence: CoachFacts = {...facts, 実戦手: [
+      [15, '▲9六歩(97)', '判定なし', '互角', '前進'], [19, '▲6八玉(59)', '判定なし', '互角', '前進'],
+      [21, '▲4五歩(46)', '判定なし', '互角', '前進'],
+    ], 要所: [{手数: 15, 実戦手: {表記: '▲9六歩(97)'}, 定跡の手: [{表記: '▲6八玉(59)', 移動: '前進'}]}]};
+    const check = (text: string, ply: number) => notationIssue(text, evidence, 'facts', [`${ply}:position`]);
+    // 定跡の語と隣り合い、その文・節が言い切りで終わる符号だけを定跡の手と照合する。
+    for (const text of ['定跡では▲6八玉ですが、あなたは▲9六歩を選びました。', '定跡では▲6八玉、実戦は▲9六歩でした。',
+      '定跡では、「▲6八玉」です。', '『▲6八玉』が定跡です', '▲6八玉が定跡です。', '▲6八玉が本の手です。',
+      '▲6八玉も本の手順に当たります。']) {
+      expect(check(text, 14)).toBeUndefined();
+      expect(check(text, 0)).toBe('unknown_book_move');
+    }
+    // 列挙・続く文・疑問・否定は帰属させず、一般の符号検査だけにする（言い換えの誤帰属は既知の限界）。
+    for (const text of ['定跡では▲6八玉や▲4五歩が候補です。', '定跡では、▲6八玉で玉を固めます', '定跡では 「▲6八玉」ですか？',
+      '定跡では▲6八玉ですか？', '▲9六歩が定跡だろうか。', '▲9六歩が定跡であるとは言えません。',
+      '定跡では、▲9六歩とせずに▲6八玉を選びます。', '定跡では▲9六歩でなく▲6八玉です。']) {
+      expect(check(text, 14)).toBeUndefined();
+      expect(check(text, 0)).toBeUndefined();
+    }
+    for (const boundary of ['。', '、', 'が、', 'ですが', 'けれど', '一方', 'しかし']) {
+      expect(check(`定跡の手は別${boundary}実戦は▲9六歩でした。`, 0)).toBeUndefined();
+    }
+    expect(check('定跡の手と違って実戦では▲9六歩を選びました', 14)).toBeUndefined();
+    expect(check('▲6八玉が定跡の手とは限りません。', 0)).toBeUndefined();
+    expect(check('▲6八玉が定跡ですか？', 0)).toBeUndefined();
+    expect(check('定跡では▲6八玉や▲5六歩が候補です。', 14)).toBe('unknown_move');
+  });
   const correct = ['相手が有利です。', 'あなたは金を動かしました。', '相手が勝ちました。', 'あなたは負けました。', '相手は宣言可能です。', 'あなたは詰まされる側です。', 'あなたは先手です。', '第一歩は、次の一手を盤上で確認することです。', '一段と玉を安全にする練習をしましょう。', '相手が金を取った飛車を桂で取り返す形を検討しましょう。', 'あなたが金を動かした局面では相手が有利です。'];
   const wrong = ['あなたが有利です。', '相手は金を動かしました。', 'あなたは玉を動かしました。', 'あなたが勝ちました。', '相手は負けました。', 'あなたは宣言可能です。', '相手は詰まされる側です。', 'あなたは後手です。'];
   it.each(correct)('正しい文・通常表現を誤って拒否しない: %s', text => {

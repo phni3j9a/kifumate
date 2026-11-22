@@ -55,14 +55,34 @@ function linesFor(facts: CoachFacts | undefined, ids: string[]) {
   })) ?? [];
 }
 
+function keypointBookMoves(facts: CoachFacts | undefined, ids: string[]) {
+  return (facts?.要所 ?? []).filter(k => ids.includes(`${k.手数 - 1}:position`) || ids.includes(k.指す前の参照))
+    .flatMap(k => k.定跡の手 ?? []);
+}
+
 function variations(facts: CoachFacts | undefined, ids: string[]) {
   if (!facts) return [];
   const shown = facts.参照.filter(r => /^(\d+)(?::deep)?:(?:mate|candidate:\d+)$/.test(r.id) &&
     (ids.includes(r.id) || ids.includes(r.id.replace(/:(?:mate|candidate:\d+)$/, ':position'))));
   return [
     ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
+    ...keypointBookMoves(facts, ids),
     ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),
   ];
+}
+
+const BOOK_PREFIX = /(?:定跡(?:では?|なら|は|の(?:手順?|候補)(?:では?|は)?|上は?)|(?<!基)本(?:では?|の(?:手順?|候補)(?:では?|は)?))[、,\s「『]*$/;
+// 断定の語の直後で文・節が終わる場合だけを断定とみなす（「だろうか」「であるとは言えない」「ですか」は除く）。
+const BOOK_END = '(?:が|けれど|けど)?(?:[。、,！!]|$)';
+const BOOK_POSTFIX = new RegExp(`^[」』]?(?:が|は|も)(?:定跡(?:の手)?|本の手(?:順)?)(?:です|だ|である|に当た(?:る|ります))${BOOK_END}`);
+// 前置形も、符号の直後で文・節が終わる場合だけ（「▲9六歩とせずに」「▲9六歩でなく」は帰属させない）。
+const BOOK_PREFIX_TAIL = new RegExp(`^[」』]?(?:です|だ|である)?${BOOK_END}`);
+
+// shortcut: 定跡の語と符号が隣り合い、その文・節が言い切りで終わる場合だけを検査する。言い換えまで区別するなら構造化した出典が必要。
+function attributedBookMoves(text: string) {
+  return [...text.matchAll(new RegExp(KIF, 'g'))].filter(move =>
+    (BOOK_PREFIX.test(text.slice(0, move.index)) && BOOK_PREFIX_TAIL.test(text.slice(move.index + move[0].length))) ||
+    BOOK_POSTFIX.test(text.slice(move.index + move[0].length)));
 }
 
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts', ids: string[] = []): string | undefined {
@@ -70,6 +90,14 @@ export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 
   if (USI.test(text)) return 'usi';
   if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
+  // 定跡を明示した符号には、本譜全体やエンジンの候補ではなく着手前の定跡資料が必要。
+  const attributed = attributedBookMoves(text);
+  if (attributed.length) {
+    const book = [...keypointBookMoves(facts, ids), ...(facts?.仮の手順 ?? []).filter(line => line.定跡 &&
+      ids.some(id => id === `${line.手数}:position` || id === `${line.手数}:deep:position`)).flatMap(line => line[PV])];
+    if (attributed.some(move => !book.some(source => matchesMove(move, source.表記) &&
+      (!move[5] || source.表記.endsWith(`(${move[5]})`))))) return 'unknown_book_move';
+  }
   if (kind === 'facts') {
     const proven = [...played.map(r => r[1]), ...variations(facts, ids).map(m => m.表記)];
     const move = new RegExp(KIF, 'g');
@@ -203,18 +231,23 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
   }
   if (name === 'play_line' && result.参照) (facts.仮の手順 ??= []).push(result.参照);
   if (name === 'book') {
-    const saveMoves = (id: unknown, moves: ({表記?: unknown; 移動?: unknown} | null | undefined)[]) => {
+    const saveMoves = (id: unknown, moves: ({表記?: unknown; 移動?: unknown} | null | undefined)[], joseki = false) => {
       const origin = typeof id === 'string' && /^(\d+):position$/.exec(id);
       if (!origin || !hasFactReference(origin[0], facts)) return;
       // 本の選択肢は連続した手順ではなく、起点が同じ別々の候補。
       for (const move of moves) {
         if (typeof move?.表記 !== 'string' || typeof move.移動 !== 'string' || !['前進', '後退', '横移動', '打つ'].includes(move.移動)) continue;
-        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), [PV]: [{表記: move.表記, 移動: move.移動}]});
+        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), ...(joseki ? {定跡: true} : {}), [PV]: [{表記: move.表記, 移動: move.移動}]});
       }
     };
     const first = result.最初に外れた手;
-    if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手);
-    if (Array.isArray(result.手筋)) for (const item of result.手筋) saveMoves(item?.参照, [item?.正解]);
+    if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手, true);
+    const fork = result.駒組みの分岐点;
+    if (Array.isArray(fork?.定跡の手)) saveMoves(fork.参照, fork.定跡の手, true);
+    if (Array.isArray(result.手筋)) for (const item of result.手筋) {
+      saveMoves(item?.参照, [item?.正解]);
+      if (Array.isArray(item?.別解)) saveMoves(item.参照, item.別解);
+    }
   }
   if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {
     const moves: string[] = [...(result.分岐 ?? []), ...result.手順];

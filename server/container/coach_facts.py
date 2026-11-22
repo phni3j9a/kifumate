@@ -244,6 +244,13 @@ def build_facts(data, *, include_mate_replies=False):
         alternatives = [n for n in range(1, len(moves) + 1) if (c := best(pair(n)[0])) and c['pv'][0] != moves[n-1]]
         key_plies = sorted(alternatives, key=lambda n: -losses.get(n, 0))[:1]
 
+    from coach_knowledge import formation  # move_fact は知識DBでも共用する。
+    fork = formation(data, boards)
+    if fork and not fork['定跡の手']:
+        fork = None  # 比較できる合法な本の手がない場合は要所にしない。
+    if fork and fork['手数'] not in key_plies:
+        key_plies.append(fork['手数'])
+
     refs = {p['id']: p for p in (positions[0], final)}
 
     def position_ref(row):
@@ -289,6 +296,9 @@ def build_facts(data, *, include_mate_replies=False):
             key['指した後の詰みの参照'] = branch(a)
         if n in missed:
             key['詰みの見逃し'] = True
+        if fork and fork['手数'] == n:
+            key['駒組みの分岐点'] = True
+            key.update({k: fork[k] for k in ('一致した自分の手数', '定跡の手', '方針', '注記')})
         keypoints.append(key)
 
     # 要所以外の詰みは最初と最後の証明を代表例にする。実戦手ゼロの解析局面にも対応。
