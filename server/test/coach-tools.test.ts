@@ -56,7 +56,10 @@ describe('Responsesの道具ループ', () => {
       requests.push(b);
       expect(b).toMatchObject({store: false, include: ['reasoning.encrypted_content'], reasoning: {effort: 'high'}, model: 'gpt-6.1-terra', max_output_tokens: 4200});
       expect(b).not.toHaveProperty('previous_response_id');
-      expect(b.tools).toHaveLength(17);
+      expect(b.tools).toHaveLength(18);
+      expect(b.tools).toContainEqual(expect.objectContaining({name: 'book', parameters: {
+        type: 'object', properties: {}, required: [], additionalProperties: false,
+      }}));
       if (requests.length === 1) {
         expect(b.input.map((i: {role: string}) => i.role)).toEqual(['system', 'user']);
         const first = JSON.parse(b.input[1].content);
@@ -306,6 +309,22 @@ describe('Responsesの道具ループ', () => {
     expect(() => validateOutput(quote(matching.id), signed, evidence)).not.toThrow();
     expect(() => validateOutput(quote('0:position'), signed, evidence)).not.toThrow();
     expect(validateOutput(quote(deepPosition.id), signed, evidence).sections[0].references.map(r => r.id)).toEqual([deepPosition.id]);
+  });
+
+  it('本の手と手筋は各起点の facts でだけ使え、資料外の符号は拒否する', async () => {
+    const evidence = facts();
+    const section = (text: string, id: string) => ({sections: [{...safe.sections[0], text, refs: [id]}]});
+    const wanted = section('本では▲2六歩や▲5六歩が候補です。', '0:position');
+    const result = {状態: '一致あり',
+      最初に外れた手: {手数: 1, 参照: '0:position', 実戦手: '▲7六歩(77)', 本の手: ['▲2六歩(27)', '▲5六歩(57)']},
+      手筋: [{手数: 1, 参照: '1:position', 正解: '△3四歩(33)'}]};
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done(wanted));
+    await expect(completeWith(send, async () => [result], undefined, evidence)).resolves.toEqual(wanted);
+    expect(validateOutput(wanted, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput(section('手筋の正解は△3四歩です。', '1:position'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('手筋の正解は△3四歩です。', '0:position'), refs, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(section('本では▲2六歩が候補です。', '1:position'), refs, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(section('本では▲9六歩が候補です。', '0:position'), refs, evidence)).toThrow('invalid_output');
   });
 
   it('mateが証明した手順を起点局面で照合し、公開mate参照は増やさない', async () => {

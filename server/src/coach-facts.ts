@@ -196,6 +196,19 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
     if (ref) save({...ref, 局面: result.盤面});
   }
   if (name === 'play_line' && result.参照) (facts.仮の手順 ??= []).push(result.参照);
+  if (name === 'book') {
+    const saveMoves = (id: unknown, moves: unknown[]) => {
+      const origin = typeof id === 'string' && /^(\d+):position$/.exec(id);
+      if (!origin || !hasFactReference(origin[0], facts)) return;
+      // 本の選択肢は連続した手順ではなく、起点が同じ別々の候補。
+      for (const 表記 of moves) if (typeof 表記 === 'string') {
+        (facts.仮の手順 ??= []).push({手数: Number(origin[1]), [PV]: [{表記}]});
+      }
+    };
+    const first = result.最初に外れた手;
+    if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手);
+    if (Array.isArray(result.手筋)) for (const item of result.手筋) saveMoves(item?.参照, [item?.正解]);
+  }
   if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {
     const moves: string[] = [...(result.分岐 ?? []), ...result.手順];
     (facts.仮の手順 ??= []).push({手数: args.position.ply, [PV]: moves.map(表記 => ({表記}))});

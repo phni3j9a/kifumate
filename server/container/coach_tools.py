@@ -10,11 +10,11 @@ import unicodedata
 import cshogi as sh
 
 from coach_facts import RANKS, build_facts, deep_result, evaluation, label, move_fact, piece_name, position_fact, preferred_result, result_id
-from coach_knowledge import lookup
+from coach_knowledge import book, lookup
+from shogi_input import MOVE
 
 PIECES = tuple(map(piece_name, sh.PIECE_JAPANESE_SYMBOLS))
 ALIASES = {'飛車': '飛', '角行': '角', '王': '玉', '竜': '龍', 'と金': 'と', '杏': '成香', '圭': '成桂', '全': '成銀'}
-USI = re.compile(r'(?:[1-9][a-i][1-9][a-i]\+?|[PLNSGBR]\*[1-9][a-i])')
 KIF = re.compile(r'([▲△☗☖])?([1-9一二三四五六七八九]{2}|同)(' + '|'.join(sorted(set(PIECES[1:]) | ALIASES.keys(), key=lambda s: (-len(s), s))) + r')([右左直上引寄]*)(不成|成|打)?(?:\(([1-9]{2})\))?')
 DIGITS = str.maketrans(RANKS, '123456789')
 
@@ -44,7 +44,7 @@ def move_details(b, move, prev, view):
 
 def resolve(b, notation, prev=None):
     s = re.sub(r'\s+', '', unicodedata.normalize('NFKC', notation))
-    if USI.fullmatch(s):
+    if MOVE.fullmatch(s):
         move = b.move_from_usi(s)
         if move and b.is_legal(move):
             return move
@@ -324,6 +324,8 @@ def call(game, name, args, *, facts=None, draft=None, search=mate):
     try:
         if name == 'knowledge':
             return {'知識': lookup(args['query'])}
+        if name == 'book':
+            return book(game)
         if name == 'game_tags':
             return {'盤面からの分類（未分類は不明）': game.get('tags') or '未分類'}
         if name == 'check_draft':

@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 import bridge
+import coach_knowledge
 from test_coach_facts import CYCLE, KINGS, data
 
 
@@ -52,6 +53,13 @@ def test_ordered_batch_and_isolated_failures(api):
     assert all('エラー' in v for v in values[1:7] + values[8:])
     assert values[7]['知識'][0]['項目'] == '入玉宣言'
     assert bridge.engine is None
+
+
+def test_book_schema_accepts_only_empty_object(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(coach_knowledge, 'DB_PATH', tmp_path / 'missing.json')
+    status, output = api(data(['7g7f']), [call('book'), call('book', ply=0)])
+    assert status == 200
+    assert output['results'] == [{'状態': '一致なし'}, {'エラー': '道具の引数が不正です'}]
 
 
 def test_saved_analysis_and_claims_follow_keypoint_stage(api):
