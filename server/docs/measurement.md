@@ -1,5 +1,21 @@
 # staging実測と費用見積もり
 
+## 請求の元になる使用量との照合（2026-11-22）
+
+請求APIはBilling Read権限のAPIトークンが必要で、OAuthでは読めない（403）。そのため、請求の元になる使用量を、GraphQL Analyticsの `containersUsageAdaptiveGroups`（`cpuTimeSec`・`allocatedMemory`・`allocatedDisk`、単位はバイト秒）、`durableObjectsPeriodicGroups`、`durableObjectsInvocationsAdaptiveGroups`、`workersInvocationsAdaptive` から取り出し、公式の単価で換算した。請求書の金額そのものとは照合していない。
+
+**本番の確認（#77切り替え時、14:53–15:00 UTC）の1回ずつ**
+
+| 処理 | 課金された稼働秒 | CPU秒 | 使用量からの金額 | 保守的な見積もり | 比 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| std 85手 | 51.35 | 23.77 | $0.000675 | $0.001544 | 44% |
+| precise 85手＋コーチのfacts/tools | 208.19 | 252.78 | $0.005865 | $0.007369＋コーチ分 | 80%以下 |
+| realtime 1セッション | 67.42 | 66.02 | $0.00158（稼働1分あたり$0.00141） | 1分あたり$0.00143 | 99% |
+
+stdは、待機中や起動前後にCPUを使わない分だけ、見積もりの半分以下だった。preciseとrealtimeはCPUをほぼ使い切るため、見積もりに近い。
+
+**11月1日〜22日16時（UTC）のアカウント全体**（同じアカウントのmeeshogi・agent-relayを含む）：Containersは CPU 116 vCPU分（含まれる量375）・メモリ15.0 GiB時（25）・ディスク27.6 GB時（200）。DOのリクエストは4.2万（100万）、稼働は3,153 GB秒（40万）、行の書き込みは4.1万。Workersのリクエストは2.5万。すべて月$5のWorkers Paidに含まれる範囲で、超過額は0。Containersの使用量を単価で換算すると$0.28。メモリの大部分は、旧方式（6〜8 GiB）でのstagingの計測で使ったもの。
+
 ## 解析ごとの専用コンテナ（Issue #77、2026-11-22）
 
 ### 本文受信中のdrainとrealtimeの終了競合（現行staging）

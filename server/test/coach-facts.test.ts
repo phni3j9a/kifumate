@@ -338,7 +338,7 @@ describe('実APIの接続', () => {
       instance.env.COACH_API_KEY = 'test-secret';
       instance.env.COACH_PRICES_USD_PER_MILLION = prices;
       let received = false;
-      instance.env.PRECISE = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
+      instance.env.PRECISE_JOB = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
         expect(url).toBe('http://container/coach-facts');
         const body = JSON.parse(init.body as string);
         expect(body.initial).toBe('startpos'); expect(body.perspective).toBe('sente');

@@ -90,7 +90,7 @@ export class RealtimeEngine extends StandardJob {
   async alarm() {
     const run = this.run;
     if (run?.ended === undefined || run.stopping) return;
-    const accounts = (this.env as Env).RT_ACCOUNTS!;
+    const accounts = (this.env as Env).RT_ACCOUNTS;
     await accounts.get(accounts.idFromString(run.account)).engineExited(run.session, run.generation, run.ended);
   }
   async fetch(request: Request) {

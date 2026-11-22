@@ -10,9 +10,6 @@
     "test:python": "container/.venv/bin/python -m pytest container/tests scripts/test_compare_coach.py -q"
   },
   "license": "UNLICENSED",
-  "dependencies": {
-    "@cloudflare/containers": "^0.3.7"
-  },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
     "@cloudflare/workers-types": "^5.20261118.1",

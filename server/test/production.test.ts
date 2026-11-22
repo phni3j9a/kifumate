@@ -6,7 +6,7 @@ import { complete } from '../src/coach';
 import { sha256 } from '../src/model';
 
 const config = JSON.parse(configuration), production = config.env.production;
-it('productionは専用Worker・ドメイン・DO・新旧の解析Containerを持ち、stagingと同じTerra道具方式を使う', () => {
+it('productionは専用Worker・ドメイン・DO・専用解析Containerを持ち、stagingと同じTerra道具方式を使う', () => {
   expect(production.name).not.toBe(config.env.staging.name);
   expect(production.workers_dev).toBe(false); expect(production.preview_urls).toBe(false);
   expect(production.routes).toEqual([{pattern: 'kifumate-api.quarterlambda.com', custom_domain: true}]);
@@ -20,10 +20,11 @@ it('productionは専用Worker・ドメイン・DO・新旧の解析Containerを�
   expect(production.vars).not.toHaveProperty('COACH_SIGNING_KEY');
   expect(production.durable_objects.bindings).toEqual(config.env.staging.durable_objects.bindings);
   expect(production.containers).toEqual(config.env.staging.containers);
-  expect((production.migrations ?? config.migrations).at(-1).tag).toBe('v4');
-  expect((config.env.staging.migrations ?? config.migrations).at(-1).tag).toBe('v4');
-  expect(config.migrations.at(-1)).toEqual({tag: 'v4', new_sqlite_classes: ['StandardJob', 'PreciseJob', 'RealtimeEngine', 'RealtimeAccount']});
-  expect(config.env.staging.containers.slice(3).every((c: any) => c.scheduling_policy === 'durable_object' && !('max_instances' in c))).toBe(true);
+  expect((production.migrations ?? config.migrations).at(-1).tag).toBe('v5');
+  expect((config.env.staging.migrations ?? config.migrations).at(-1).tag).toBe('v5');
+  expect(config.migrations.at(-1)).toEqual({tag: 'v5', deleted_classes: ['StandardContainer', 'PreciseContainer', 'RealtimeContainer']});
+  expect(production.containers.map((c: any) => c.class_name)).toEqual(['StandardJob', 'PreciseJob', 'RealtimeEngine']);
+  expect(production.containers.every((c: any) => c.scheduling_policy === 'durable_object' && !('max_instances' in c))).toBe(true);
   expect(new Set([...production.ratelimits, ...config.env.staging.ratelimits].map((x: any) => x.namespace_id)).size).toBe(8);
   expect(production.observability.logs.invocation_logs).toBe(false);
 });

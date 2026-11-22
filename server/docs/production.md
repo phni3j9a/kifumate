@@ -2,6 +2,17 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
+## #80・#83：コンテナ障害ログの整理と旧方式の削除（2026-11-22 UTC）
+
+- **#80**（PR #84）：準備待ち・世代更新・停止による打ち切りを `container_failure` から除いた。stagingで正常なstd・precise・コーチ・realtime（休止→hold→停止）を流した区間（15:19:45–15:23:57）と、本番へ反映（15:25:33、Version `07d4b106`）した後の端末発行・std 1局の区間で、Main がWorkers Observabilityで照合し、`container_failure` はどちらも0件だった（反映前の#77の確認では14件）。
+- **#83**：旧方式（`default` policyの StandardContainer・PreciseContainer・RealtimeContainer）を削除した。手順は両環境とも次のとおり。staging（中間版 `2d08ce15`、最終 `2f2ceac4`）で確認してから本番に適用した。
+  1. 旧経路と旧containersの設定だけを外した中間版をデプロイする（旧DOクラスはまだ残す）。本番では15:39:17に `a51d34b0`。
+  2. 旧3アプリが `active=0 / assigned=0` であることを確認し、`wrangler containers delete` で手動で削除する。本番では15:39:20に削除し、一覧から消えたことを確認した。
+  3. v5 migration（`deleted_classes`）で旧DOクラスとbindingを削除する。本番の最終版は `e065b9c1`。旧RealtimeContainerにあった11月の切り替え前のrealtime利用時間も、ここで消えた。
+  4. 旧3アプリ専用のレジストリのイメージを削除する（staging 36タグ、本番18タグ）。残ったリポジトリとタグは、削除前の新方式の分と一致した。
+- 本番の確認（15:41:52–15:45:39）：std 4手（5/5局面）、precise 85手（サーバー137.934秒、深読み8/8、署名あり）、realtime（休止→hold再開で深さ35→停止、使用74.310秒）。確認後に招待を取り消して `paid:false` を確認した。Main がObservabilityで照合した結果、engine_startは4件すべてAVX2（std 1/1、precise 2/2、realtimeは開始とhold再開の各1/1）、`container_failure` は0件。
+- **現在の構成**：両環境とも新方式の3アプリ（standardjob・precisejob・realtimeengine）だけ。**旧方式へ切り戻す手段はない。**
+
 ## #77：本番を解析単位の専用コンテナへ切替（2026-11-22 UTC/JST）
 
 ユーザーの承認によりJST月初を待たず切替。11月のrealtime利用時間は新しい端末別台帳で0から開始し、旧台帳は移行・削除していない。全局ジョブ・週枠・署名・招待のDO／secretは維持した。一般公開の条件 #74 と、旧applicationの削除承認は別。

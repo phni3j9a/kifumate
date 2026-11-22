@@ -379,7 +379,7 @@ describe('Responsesの道具ループ', () => {
 });
 
 describe('非同期・期限・精密コンテナ', () => {
-  it('実Device経由で同じ精密slotを使い、alarmの成功だけを計上する', async () => {
+  it('実Device経由で同じコーチ用コンテナを使い、alarmの成功だけを計上する', async () => {
     const stub = device();
     await stub.fetch('https://device/register?hash=' + 'a'.repeat(64), {method: 'POST'});
     await runInDurableObject(stub, async (instance: any) => {
@@ -398,7 +398,7 @@ describe('非同期・期限・精密コンテナ', () => {
         return Response.json({results: [{状態: '一致なし'}]});
       });
       const getByName = vi.fn(() => ({fetch: container}));
-      instance.env.PRECISE = {getByName};
+      instance.env.PRECISE_JOB = {getByName};
       const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('book', 'book', '{}')))
         .mockResolvedValueOnce(Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, usage}))
         .mockResolvedValueOnce(done());
@@ -409,8 +409,8 @@ describe('非同期・期限・精密コンテナ', () => {
         await instance.alarm(); await instance.alarm();
         const current = await instance.fetch(new Request(url + '/' + payload.requestId, {headers: {'X-Dev-Paid': '1'}}));
         expect(await current.json()).toMatchObject({status: 'completed', sections: [{references: [refs[0]]}], quota: {remainingRatio: (500_000_000 - 5_115_000) / 500_000_000}});
-        const slot = 'slot-' + parseInt(instance.ctx.id.toString().slice(0, 8), 16) % 2;
-        expect(getByName.mock.calls).toEqual([[slot], [slot]]);
+        const name = 'coach-' + instance.ctx.id.toString();
+        expect(getByName.mock.calls).toEqual([[name], [name]]);
         expect(container).toHaveBeenCalledTimes(2);
         expect(send).toHaveBeenCalledTimes(3);
       } finally { send.mockRestore(); }

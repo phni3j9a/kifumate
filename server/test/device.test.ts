@@ -21,7 +21,7 @@ async function setup(paid = false) {
       const data = JSON.parse(init.body as string);
       return Response.json({ply: data.ply, score: {kind: 'cp', value: 10}, candidates: [], mate: null});
     }})};
-    instance.env.STD = mock; instance.env.PRECISE = mock;
+    instance.env.STD_JOB = mock; instance.env.PRECISE_JOB = mock;
   });
   return stub;
 }
@@ -40,16 +40,11 @@ it('全局の新bindingは端末IDでなく受理したジョブIDを選ぶ', as
   const stub = await setup();
   const {data: job} = await request(stub, '/v1/jobs', 'POST', base);
   await runInDurableObject(stub, async (instance: any) => {
-    const names: string[] = [];
-    instance.env.STD_JOB = {getByName: (name: string) => {
-      names.push(name); return instance.env.STD.getByName(name);
-    }};
+    const mock = vi.spyOn(instance.env.STD_JOB, 'getByName');
     try {
-      await instance.alarm();
-      instance.env.USE_LEGACY_ANALYSIS = 'true';
-      await instance.alarm();
-      expect(names).toEqual([job.id]);
-    } finally { delete instance.env.STD_JOB; delete instance.env.USE_LEGACY_ANALYSIS; }
+      await instance.alarm(); await instance.alarm();
+      expect(mock.mock.calls).toEqual([[job.id], [job.id]]);
+    } finally { mock.mockRestore(); }
   });
 });
 
@@ -135,7 +130,7 @@ describe('永続ジョブと回数', () => {
       let started!: () => void; let release!: () => void;
       const called = new Promise<void>(resolve => {started = resolve;});
       const gate = new Promise<void>(resolve => {release = resolve;});
-      instance.env.STD = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
+      instance.env.STD_JOB = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
         started(); await gate;
         return Response.json({ply: JSON.parse(init.body as string).ply, score: {kind: 'cp', value: 0}, candidates: [], mate: null});
       }})};
@@ -161,7 +156,7 @@ describe('永続ジョブと回数', () => {
     expect((await request(stub, '/v1/quota')).data.totalRemaining).toBe(1);
     const retry = await request(stub, '/v1/jobs', 'POST', base);
     await runInDurableObject(stub, (instance: any) => {
-      instance.env.STD = {getByName: () => ({fetch: async () => new Response('', {status: 503})})};
+      instance.env.STD_JOB = {getByName: () => ({fetch: async () => new Response('', {status: 503})})};
     });
     for (let i = 0; i < 5; i++) await tick(stub);
     const failed = await request(stub, `/v1/jobs/${retry.data.id}`);
@@ -185,7 +180,7 @@ describe('永続ジョブと回数', () => {
     await tick(stub);
     await runInDurableObject(stub, (instance: any) => {
       let failed = false;
-      instance.env.STD = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
+      instance.env.STD_JOB = {getByName: () => ({fetch: async (_url: string, init: RequestInit) => {
         if (!failed) {failed = true; throw new Error('stopped');}
         return Response.json({ply: JSON.parse(init.body as string).ply, score: {kind: 'cp', value: 20}, candidates: [], mate: null});
       }})};
@@ -233,7 +228,7 @@ describe('永続ジョブと回数', () => {
     const stub = await setup();
     const a = await request(stub, '/v1/jobs', 'POST', {...base, moves: ['7g7e']});
     await runInDurableObject(stub, (instance: any) => {
-      instance.env.STD = {getByName: () => ({fetch: async () => new Response('', {status: 422})})};
+      instance.env.STD_JOB = {getByName: () => ({fetch: async () => new Response('', {status: 422})})};
     });
     await tick(stub);
     const failed = await request(stub, `/v1/jobs/${a.data.id}`);
@@ -293,7 +288,7 @@ describe('精密の2段目', () => {
   async function engine(stub: any, deep: (ply: number) => Response | Promise<Response>) {
     return runInDurableObject(stub, (instance: any) => {
       instance.env.COACH_SIGNING_KEY = 'deep-device-test-key';
-      instance.env.PRECISE = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
+      instance.env.PRECISE_JOB = {getByName: () => ({fetch: async (url: string, init: RequestInit) => {
         const payload = JSON.parse(init.body as string);
         expect(payload).toEqual({...input, ply: payload.ply});
         if (url.endsWith('/analyze/deep')) return deep(payload.ply);
