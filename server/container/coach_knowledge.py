@@ -1,6 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """将棋の短い知識集。記述はすべて独自の要約。"""
+from functools import cache
+import json
+from pathlib import Path
+import re
+import sys
+from threading import Lock
 import unicodedata
+
+import cshogi as sh
+
+from coach_facts import RANKS, move_fact
+from shogi_input import MOVE, validate_sfen
 
 
 KNOWLEDGE = {
@@ -34,6 +45,148 @@ KNOWLEDGE = {
 RULE_SOURCE = 'https://www.shogi.or.jp/faq/rules/'  # 2026-11-20 確認
 
 
+DB_PATH = Path(__file__).with_name('knowledge') / 'knowledge.json'
+DB_LOCK = Lock()
+MAX_DB_BYTES = 16 * 1024 * 1024
+INVALID_DB = 'coach_knowledge: invalid knowledge database; ignored'
+NO_MATCH = {'状態': '一致なし'}
+ROTATE_MOVE = str.maketrans('123456789abcdefghi', '987654321ihgfedcba')
+FILES = '123456789１２３４５６７８９'
+ROTATE_TEXT = str.maketrans(FILES + RANKS + '右左▲☗△☖', '987654321９８７６５４３２１' + RANKS[::-1] + '左右△☖▲☗')
+SWAP_SIDE = {'先手': '後手', '後手': '先手'}
+ORIENTED_TEXT = re.compile(rf'(?<![0-9０-９])[{FILES}][{RANKS}筋]|先手|後手|[右左](?![銀桂金香飛角玉四美])|[▲☗△☖]')
+
+
+def require(condition):
+    if not condition:
+        raise ValueError('invalid knowledge database')
+
+
+def valid_text(s):
+    # JSON のエスケープから入る不正なサロゲートや空白以外の制御文字も拒否する。
+    return isinstance(s, str) and bool(s.strip()) and all(c.isprintable() or c.isspace() for c in s)
+
+
+def check_sources(row):
+    sources = row['sources']
+    require(isinstance(sources, list) and sources)
+    for source in sources:
+        require(valid_text(source['book']) and valid_text(source['pages']))
+
+
+def check_item(row):
+    require(re.fullmatch(r'[a-z0-9.-]+', row['id']))
+    require(valid_text(row['title']) and valid_text(row['text']))
+    require(isinstance(row['tags'], list) and all(map(valid_text, row['tags'])))
+    require(row['status'] in ('AI抽出・未監修', 'AI照合済み', '監修済み'))
+    check_sources(row)
+
+
+def normalized_board(sfen):
+    position, turn, hands = sfen.split()
+    initial = f'{position} {turn} {hands} 1'
+    validate_sfen(initial)
+    b = sh.Board(initial)
+    # is_ok() は不正局面の盤面を出力するので、相手玉の王手だけを黙って検査する。
+    a, z = (divmod(b.king_square(side), 9) for side in (sh.BLACK, sh.WHITE))
+    require(max(abs(a[0] - z[0]), abs(a[1] - z[1])) > 1)
+    opposite = 'w' if turn == 'b' else 'b'
+    require(not sh.Board(f'{position} {opposite} {hands} 1').is_check())
+    return b
+
+
+def position_key(board):
+    return board.sfen().rsplit(' ', 1)[0]
+
+
+def rotated_key(key):
+    position, turn, hands = key.split(' ')
+    ranks = [''.join(re.findall(r'\+?.', row)[::-1]).swapcase() for row in reversed(position.split('/'))]
+    hand_tokens = re.findall(r'[0-9]*[A-Za-z]', hands)
+    # cshogi の持駒の並びは先手→後手、駒種の順序は色を替えても同じ。
+    hands = ''.join(sorted(hand_tokens, key=lambda token: token[-1].isupper())).swapcase() or '-'
+    return f'{"/".join(ranks)} {"w" if turn == "b" else "b"} {hands}'
+
+
+def check_moves(board, moves, *, line=False):
+    require(isinstance(moves, list) and moves)
+    for usi in moves:
+        require(MOVE.fullmatch(usi))
+        move = board.move_from_usi(usi)
+        require(move and board.is_legal(move))
+        if line:
+            board.push(move)
+
+
+def parse_database(raw):
+    require(type(raw['version']) is int and raw['version'] == 1)
+    require(isinstance(raw['strategies'], list) and isinstance(raw['tesuji'], list) and isinstance(raw['joseki'], dict))
+    strategies, joseki, tesuji, ids = {}, {}, {}, set()
+    for row in raw['strategies']:
+        check_item(row)
+        require(row['id'] not in ids)
+        strategies[row['id']] = row
+        ids.add(row['id'])
+    for row in raw['tesuji']:
+        check_item(row)
+        require(row['id'] not in ids and ('strategy' not in row or row['strategy'] in strategies))
+        ids.add(row['id'])
+        b = normalized_board(row['sfen'])
+        key = position_key(b)
+        check_moves(b, row['answer'], line=True)
+        tesuji.setdefault(key, []).append(row)
+    for sfen, row in raw['joseki'].items():
+        b = normalized_board(sfen)
+        key = position_key(b)
+        require(key not in joseki and row['strategy'] in strategies)
+        check_moves(b, row['moves'])
+        require(len(row['moves']) == len(set(row['moves'])))
+        if 'note' in row:
+            require(valid_text(row['note']['text']))
+            check_sources(row['note'])
+        joseki[key] = row
+    return strategies, joseki, tesuji
+
+
+@cache
+def load_database(path):
+    try:
+        with path.open('rb') as f:
+            data = f.read(MAX_DB_BYTES + 1)
+        require(len(data) <= MAX_DB_BYTES)
+        return parse_database(json.loads(data.decode('utf-8')))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError):
+        print(INVALID_DB, file=sys.stderr)
+    return {}, {}, {}
+
+
+def database():
+    # 同時に初回を迎えてもファイルを二度読まず、診断も一度だけにする。
+    with DB_LOCK:
+        return load_database(DB_PATH)
+
+
+def short(text, limit):
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def oriented_text(text, limit, turned):
+    # shortcut: 明示された座標・左右・先後・符号だけを置換。文脈に依存する説明は別途確認する。
+    if turned:
+        text = ORIENTED_TEXT.sub(lambda m: SWAP_SIDE.get(m[0], m[0].translate(ROTATE_TEXT)), text)
+    return short(text, limit)
+
+
+def description(row, turned=False):
+    return {'題': oriented_text(row['title'], 80, turned), '説明': oriented_text(row['text'], 400, turned)}
+
+
+def book_move(fact):
+    return {'表記': fact['表記'], '移動': fact['移動']}
+
+
 def lookup(query):
     words = unicodedata.normalize('NFKC', query).split()
     hits = []
@@ -41,4 +194,67 @@ def lookup(query):
         score = sum(3 if w in name else 1 if w in tags else 0 for w in words)
         if score or not words:
             hits.append((score, {'項目': name, '説明': text, **({'出典': RULE_SOURCE} if name in ('入玉宣言', '持将棋') else {})}))
+    strategies, _, tesuji = database()
+    for row in [*strategies.values(), *(r for rows in tesuji.values() for r in rows)]:
+        title, tags, text = (unicodedata.normalize('NFKC', s) for s in (row['title'], ' '.join(row['tags']), row['text']))
+        if score := sum(3 if w in title else 2 if w in tags else 1 if w in text else 0 for w in words):
+            hit = description(row)
+            hits.append((score, {'項目': hit['題'], '説明': hit['説明']}))
     return [item for _, item in sorted(hits, key=lambda h: -h[0])[:8]]
+
+
+def book(game):
+    strategies, joseki, tesuji = database()
+    if not (joseki or tesuji):
+        return NO_MATCH.copy()
+    view, moves, initial = game['perspective'], game['moves'], game['initial']
+    b = sh.Board() if initial == 'startpos' else sh.Board(initial)
+    prev = last = last_departure = None
+    tactics, notes, topics = [], [], []
+    for ply in range(len(moves) + 1):
+        actual = moves[ply] if ply < len(moves) else None
+        ref = {'手数': ply, '参照': f'{ply}:position'}
+        key = position_key(b)
+        book_moves = {}
+        for key_, turned in ((key, False), (rotated_key(key), True)):
+            if row := joseki.get(key_):
+                topics.append((ply, row['strategy'], turned))
+                if note := row.get('note'):
+                    notes.append((ply, {**ref, '説明': oriented_text(note['text'], 240, turned), '先後反転': turned}))
+                for move in row['moves']:
+                    book_moves.setdefault(move.translate(ROTATE_MOVE) if turned else move, turned)
+            for row in tesuji.get(key_, ()):
+                if strategy := row.get('strategy'):
+                    topics.append((ply, strategy, turned))
+                if len(tactics) < 3:
+                    answer = row['answer'][0]
+                    if turned:
+                        answer = answer.translate(ROTATE_MOVE)
+                    fact, _ = move_fact(b.copy(), answer, prev, view)
+                    tactics.append({**ref, **description(row, turned), '正解': book_move(fact), '先後反転': turned,
+                                    '実戦で正解': None if actual is None else actual == answer})
+        if book_moves:
+            # 再合流したら、それ以前に一時的に外れた着手は取り消す。
+            last = {**ref, '先後反転': key not in joseki}
+            last_departure = (b.copy(), prev, book_moves) if actual is not None else None
+        if actual is not None:
+            _, prev = move_fact(b, actual, prev, view)
+    if last is None and not tactics:
+        return NO_MATCH.copy()
+    departure = None
+    if last_departure is not None:
+        board, previous, book_moves = last_departure
+        ply = last['手数']
+        fact, _ = move_fact(board.copy(), moves[ply], previous, view)
+        departure = {'参照': last['参照'], '手数': ply + 1, '指した側': fact['指した側'], '実戦手': fact['表記'],
+                     '本の手': [{**book_move(move_fact(board.copy(), move, previous, view)[0]), '先後反転': turned}
+                               for move, turned in list(book_moves.items())[:8]]}
+    near = last['手数'] if last else tactics[0]['手数']
+    closest = lambda item: (abs(item[0] - near), item[0])
+    topic_turns = {}
+    for _, id_, turned in sorted(topics, key=closest):
+        topic_turns.setdefault(id_, turned)
+    return {'状態': '一致あり', '最後の一致': last, '最初に外れた手': departure,
+            '方針': [{**description(strategies[id_], turned), '先後反転': turned}
+                   for id_, turned in list(topic_turns.items())[:2]],
+            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]], '手筋': tactics}

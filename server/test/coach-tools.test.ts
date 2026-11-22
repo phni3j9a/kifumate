@@ -56,7 +56,10 @@ describe('Responsesの道具ループ', () => {
       requests.push(b);
       expect(b).toMatchObject({store: false, include: ['reasoning.encrypted_content'], reasoning: {effort: 'high'}, model: 'gpt-6.1-terra', max_output_tokens: 4200});
       expect(b).not.toHaveProperty('previous_response_id');
-      expect(b.tools).toHaveLength(17);
+      expect(b.tools).toHaveLength(18);
+      expect(b.tools).toContainEqual(expect.objectContaining({name: 'book', parameters: {
+        type: 'object', properties: {}, required: [], additionalProperties: false,
+      }}));
       if (requests.length === 1) {
         expect(b.input.map((i: {role: string}) => i.role)).toEqual(['system', 'user']);
         const first = JSON.parse(b.input[1].content);
@@ -306,6 +309,59 @@ describe('Responsesの道具ループ', () => {
     expect(() => validateOutput(quote(matching.id), signed, evidence)).not.toThrow();
     expect(() => validateOutput(quote('0:position'), signed, evidence)).not.toThrow();
     expect(validateOutput(quote(deepPosition.id), signed, evidence).sections[0].references.map(r => r.id)).toEqual([deepPosition.id]);
+  });
+
+  it('本の手と手筋は各起点の facts でだけ使え、資料外の符号は拒否する', async () => {
+    const evidence = facts();
+    const section = (text: string, id: string) => ({sections: [{...safe.sections[0], text, refs: [id]}]});
+    const wanted = section('本では▲2六歩や▲5六歩が候補です。', '0:position');
+    const result = {状態: '一致あり',
+      最初に外れた手: {手数: 1, 参照: '0:position', 実戦手: '▲7六歩(77)', 本の手: [
+        {表記: '▲2六歩(27)', 移動: '前進'}, {表記: '▲5六歩(57)', 移動: '前進'},
+      ]},
+      手筋: [{手数: 1, 参照: '1:position', 正解: {表記: '△3四歩(33)', 移動: '前進'}}]};
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done(wanted));
+    await expect(completeWith(send, async () => [result], undefined, evidence)).resolves.toEqual(wanted);
+    expect(validateOutput(wanted, refs, evidence).sections[0].references).toEqual([refs[0]]);
+    expect(() => validateOutput(section('手筋の正解は△3四歩です。', '1:position'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('手筋の正解は△3四歩です。', '0:position'), refs, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(section('本では▲2六歩が候補です。', '1:position'), refs, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(section('本では▲9六歩が候補です。', '0:position'), refs, evidence)).toThrow('invalid_output');
+  });
+
+  it('bookの本の手や手筋が既知の移動方向の矛盾を隠さない', async () => {
+    const moves = ['2g2f', '3c3d', '7g7f'];
+    const game = {...analysis, moves, results: [...analysis.results, ...[2, 3].map(ply => ({...analysis.results[0], ply}))]};
+    const signed = references(game.results);
+    const evidence = {...facts(), 実戦手: ['▲2六歩(27)', '△3四歩(33)', '▲7六歩(77)'].map((表記, i): CoachFacts['実戦手'][number] =>
+      [i + 1, 表記, '判定なし', '不明', '前進'])};
+    const bad = ['▲7六歩と引きます。', '実戦では▲7六歩と引いた手が敗着でした。',
+      'ここで▲7六歩と引いたと分かります。', '▲7六歩と引いた歩'];
+    const section = (text: string) => ({sections: [{...safe.sections[0], text}]});
+    for (const text of bad) expect(() => validateOutput(section(text), signed, evidence), text).toThrow('invalid_output');
+
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done());
+    const pawn = {表記: '▲7六歩(77)', 移動: '前進'};
+    const runTools = async () => [{状態: '一致あり', 最初に外れた手: {手数: 1, 参照: '0:position', 本の手: [pawn]},
+      手筋: [{手数: 0, 参照: '0:position', 正解: pawn}]}];
+    await complete(config, parseCoach({...payload, analysis: game}), signed, new AbortController().signal, send, evidence, runTools);
+    expect(evidence.仮の手順).toEqual(Array.from({length: 2}, () => ({手数: 0, '仮の読み筋（実戦とは別）': [pawn]})));
+    for (const text of bad) expect(() => validateOutput(section(text), signed, evidence), text).toThrow('invalid_output');
+    expect(() => validateOutput(section('▲7六歩と前進します。'), signed, evidence)).not.toThrow();
+    expect(() => validateOutput(section('▲7六歩と引いた金の手を比較します。'), signed, evidence)).not.toThrow();
+    expect(() => validateOutput(section('▲7六歩と引いたと金の手を比較します。'), signed, evidence)).not.toThrow();
+  });
+
+  it('反転手筋の符号と別の駒を比較しても方向の矛盾としない', async () => {
+    const evidence = facts();
+    const section = (text: string) => ({sections: [{...safe.sections[0], text}]});
+    const wanted = section('△8五桂と後退する銀の手を比較します。');
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(turn(call('b', 'book', '{}'))).mockResolvedValueOnce(done(wanted));
+    const book = async () => [{状態: '一致あり', 手筋: [{手数: 0, 参照: '0:position', 先後反転: true,
+      正解: {表記: '△8五桂(73)', 移動: '前進'}}]}];
+    await expect(completeWith(send, book, undefined, evidence)).resolves.toEqual(wanted);
+    expect(() => validateOutput(section('△8五桂と引いた手を比較します。'), refs, evidence)).toThrow('invalid_output');
+    expect(() => validateOutput(section('△8五桂と後退します。'), refs, evidence)).toThrow('invalid_output');
   });
 
   it('mateが証明した手順を起点局面で照合し、公開mate参照は増やさない', async () => {

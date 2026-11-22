@@ -4,10 +4,11 @@ node_modules/
 .env*
 !.env.example
 server/container/eval/
+server/container/knowledge/*.json
 nn.bin
 server/container/engine
 server/container/YaneuraOu*
-server/container/.venv/
+server/container/.venv
 __pycache__/
 .pytest_cache/
 *.pyc
