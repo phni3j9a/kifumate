@@ -57,7 +57,7 @@ it('productionでも有効な招待は使え、期限・取消が開発フラグ
   await registry.create(codeHash, 1, null); await registry.redeem(hash, codeHash);
   await bindings.DEVICES.getByName(hash).fetch('https://device/register?hash=' + hash, {method: 'POST'});
   const request = () => new Request('https://api/v1/entitlements', {headers: {Authorization: 'Bearer ' + token}});
-  const configuration = {...bindings, ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false', ANALYSIS_DRAIN: 'false', PAUSE_FREE_ANALYSIS: 'false'};
+  const configuration = {...bindings, ENVIRONMENT: 'production', ALLOW_DEV_PAID: 'false'};
   expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(true);
   await registry.revoke(codeHash);
   expect((await (await worker.fetch(request(), configuration)).json() as any).paid).toBe(false);

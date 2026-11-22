@@ -2,6 +2,41 @@
 
 現在のAPI・上限・管理操作・デプロイ手順は [README](../README.md) が正本です。
 
+## #77：本番を解析単位の専用コンテナへ切替（2026-11-22 UTC/JST）
+
+ユーザーの承認によりJST月初を待たず切替。11月のrealtime利用時間は新しい端末別台帳で0から開始し、旧台帳は移行・削除していない。全局ジョブ・週枠・署名・招待のDO／secretは維持した。一般公開の条件 #74 と、旧applicationの削除承認は別。
+
+| 本番操作（UTC、100%配信確認時点） | Worker Version | 確認 |
+| --- | --- | --- |
+| 14:39:55 旧ルートv3、受付遮断 | `1a236185-759e-4e90-94d3-f9a627d1319a` | 360秒待ち、14:46:01–10／14:46:39–47／14:47:16–24に旧3アプリがいずれもactive=0・すべてinactive。承認された時間・稼働数によるdrain判定。全DeviceのSQLiteを走査したわけではない。 |
+| 14:48:02 遮断のまま新ルートv4 | `5fb4664f-d793-4fd5-a0f6-4d69fa7d0680` | 300秒待ち、14:53:09–18に旧3アプリactive=0を再確認。 |
+| 14:53:40 受付再開 | `f8acd874-00da-4d8f-b1b2-bcc9504a0d89` | `ANALYSIS_DRAIN=false`。旧bindingと3つの旧applicationは残した。 |
+
+DNSはMainが直前にCustom Domain由来AAAA `100::` 1件・本番Workerとの紐付けを確認。ビルド前に知識DB `c47df8b2…` とnn.bin `a78b7f88…` を照合。`--secrets-file` なし、secret名3件は前後同一。型検査、Vitest 245件、pytest 123件成功。
+
+| 本番検証 | 開始–終了（UTC） | 結果 | engine_startの実測 |
+| --- | --- | --- | --- |
+| 端末発行・OPTIONS | 14:53:41 | 201／403、CORS許可ヘッダーなし | — |
+| std 85手 | 14:53:41.812–14:54:22.730 | DO 39.468秒／観測40.821秒、86/86局面、候補1位depth中央値14 | 14:53:47.826 AVX2、processors/nproc 1/1 |
+| precise 85手 | 14:54:22.852–14:56:44.767 | DO 140.193秒／観測141.849秒、86/86局面、深読み8/8、署名・全件再送・枠加算成功。depth中央値14／深読み14.5 | 14:54:24.765 AVX2、2/2 |
+| AIコーチ1件 | 14:56:44.767–14:57:03.595 | 観測18.830秒、参照4件。新preciseのfacts/tools経路。`coach_responses_tools` status 200、3ターン・6呼出、入出力15,007/728 tokens、提供元16.086秒、`coach_completed` 17.990秒、failed 0 | facts/toolsはエンジンを起動せず、期間中0件 |
+| realtime 1セッション | 14:57:03.607–14:58:25.365 | 初回5.890秒、depth 15→18→20、30秒休止→hold再開4.986秒、35.126秒でdepth 34、明示停止後の追加計上なし。使用75.639秒 | 14:57:05.473、hold再開14:57:49.777、ともにAVX2・1/1 |
+
+MainがWorkers Observabilityの固定フィールドを照合。`engine_start` は4件すべて `/app/engine-avx2`・`avx2Usable=true`・AMD EPYC 7713 64-Core。1時間・1端末の確認招待を14:58:26に取消後 `paid:false`。確認端末トークンと招待ファイルは削除。15:01:55–15:03:12に本番の新旧6アプリで `active=0`・全履歴inactive（新std 1／precise 2／realtime 1、旧は各2）。stagingは変更なし、14:42:20–40に6アプリすべてactive=0・全履歴inactiveを確認。
+
+**最終構成**：下表のapplication名は両環境で `kifumate-analysis-<環境>-<クラス名小文字>-<環境>`。サイズはvCPU／メモリ／ディスク。旧アプリは切り戻し用で、削除は観察後の別承認。
+
+| クラス名小文字 | policy | サイズ | 用途 | 状態（本番・staging共通） |
+| --- | --- | --- | --- | --- |
+| standardjob | durable_object | 1／1536 MiB／2000 MB | stdジョブ別 | 現用・確認時停止 |
+| precisejob | durable_object | 2／1536 MiB／2000 MB | preciseジョブ別・コーチfacts/tools | 現用・確認時停止 |
+| realtimeengine | durable_object | 1／1536 MiB／2000 MB | realtimeセッション別 | 現用・確認時停止 |
+| standardcontainer | default | 1／6 GiB／12 GB | 旧std固定2枠 | 停止・削除待ち |
+| precisecontainer | default | 2／8 GiB／16 GB | 旧precise固定2枠 | 停止・削除待ち |
+| realtimecontainer | default | 1／6 GiB／12 GB | 旧realtime固定2枠 | 停止・削除待ち |
+
+**残事項 [#80](https://github.com/phni3j9a/kifumate/issues/80)**：14:53:30–15:00 UTCの `container_failure` は14件。readinessのError 5件（起動後196–4541ms、その後準備完了）、realtime局面更新中のforward 409が7件、forwardのErrorが2件（14:57:44・14:58:23、休止・停止と整合）。いずれも今回の利用者操作は成功した。正常系のログと障害を区別する改善は今回の本番反映に含めない。
+
 ## #69・#71：知識DBと駒組みの分岐点の本番反映（2026-11-22）
 
 - `main` の `c275802`（PR #70・#72）と、非公開リポジトリの `main`（`3da763c`）から `npm run build` した知識DB（全7章・定跡1839局面・方針34件・手筋100問、SHA-256 `c47df8b2…`）を `server/container/knowledge/knowledge.json` に置いて反映。DBはGit管理外で、コンテナイメージにだけ同梱。反映前にVitest 230件・型検査・pytest 111件が通過。アプリとのAPI契約は変更なし。
