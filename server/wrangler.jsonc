@@ -75,25 +75,27 @@
     },
     "production": {
       "name": "kifumate-analysis-production",
-      "migrations": [
-        {"tag": "v1", "new_sqlite_classes": ["Device", "StandardContainer", "PreciseContainer"]},
-        {"tag": "v2", "new_sqlite_classes": ["RealtimeContainer"]},
-        {"tag": "v3", "new_sqlite_classes": ["Invitations"]}
-      ],
-      "vars": {"ENVIRONMENT": "production", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000", "REALTIME_HOLD_IDLE_MS": "300000", "COACH_WEEKLY_BUDGET_USD": "0.5", "COACH_MAX_TOKENS": "5400", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-responses-tools", "COACH_BASE_URL": "https://api.openai.com/v1", "COACH_MODEL": "gpt-6.1-terra", "COACH_PRICES_USD_PER_MILLION": "{\"openai-responses-tools/gpt-6.1-terra\":{\"input\":1,\"cacheRead\":0.05,\"cacheWrite\":2.5,\"output\":5}}", "COACH_REASONING_EFFORT": "high"},
+      "vars": {"ENVIRONMENT": "production", "ANALYSIS_DRAIN": "false", "PAUSE_FREE_ANALYSIS": "false", "ALLOW_DEV_PAID": "false", "REALTIME_IDLE_MS": "30000", "REALTIME_HOLD_IDLE_MS": "300000", "COACH_WEEKLY_BUDGET_USD": "0.5", "COACH_MAX_TOKENS": "5400", "COACH_TIMEOUT_MS": "240000", "COACH_PROVIDER": "openai-responses-tools", "COACH_BASE_URL": "https://api.openai.com/v1", "COACH_MODEL": "gpt-6.1-terra", "COACH_PRICES_USD_PER_MILLION": "{\"openai-responses-tools/gpt-6.1-terra\":{\"input\":1,\"cacheRead\":0.05,\"cacheWrite\":2.5,\"output\":5}}", "COACH_REASONING_EFFORT": "high"},
       "durable_objects": {
         "bindings": [
           {"name": "DEVICES", "class_name": "Device"},
           {"name": "STD", "class_name": "StandardContainer"},
           {"name": "PRECISE", "class_name": "PreciseContainer"},
           {"name": "REALTIME", "class_name": "RealtimeContainer"},
+          {"name": "STD_JOB", "class_name": "StandardJob"},
+          {"name": "PRECISE_JOB", "class_name": "PreciseJob"},
+          {"name": "RT_ENGINE", "class_name": "RealtimeEngine"},
+          {"name": "RT_ACCOUNTS", "class_name": "RealtimeAccount"},
           {"name": "INVITATIONS", "class_name": "Invitations"}
         ]
       },
       "containers": [
         {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
         {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
-        {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2}
+        {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
+        {"class_name": "StandardJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
+        {"class_name": "PreciseJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
+        {"class_name": "RealtimeEngine", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}}
       ],
       "workers_dev": false,
       "preview_urls": false,
