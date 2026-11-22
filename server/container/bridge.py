@@ -434,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
     def respond(self, status, data):
         body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
         self.send_response(status)
+        self.send_header("Connection", "close")  # HTTP/1.0: health直後のPOSTにも新しい接続を使わせる。
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

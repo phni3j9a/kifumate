@@ -1,3 +1,4 @@
+from http.client import HTTPConnection
 import json
 from pathlib import Path
 import sys
@@ -107,6 +108,24 @@ def test_proven_one_and_three_ply_mate():
             assert copy.is_check() and not list(copy.legal_moves)
     assert found == {1, 3}
     assert bridge.mate_proof(cshogi.Board()) is None
+
+
+def test_health_then_post_never_advertises_a_reusable_connection():
+    with bridge.ThreadingHTTPServer(('127.0.0.1', 0), bridge.Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        conn = HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+        try:
+            for method, path, body, status in [('GET', '/health', None, 200), ('POST', '/analyze', '{}', 422)]:
+                conn.request(method, path, body)
+                reply = conn.getresponse()
+                assert reply.status == status
+                assert reply.getheader('Connection') == 'close'
+                reply.read()
+        finally:
+            conn.close()
+            server.shutdown()
+            thread.join()
 
 
 def test_http_rejects_private_fields_and_masks_engine_errors(monkeypatch):
