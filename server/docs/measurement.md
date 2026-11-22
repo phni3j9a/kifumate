@@ -2,7 +2,7 @@
 
 ## 予約メモリ・ディスクの縮小（Issue #75、2026-11-22）
 
-**固定2枠とvCPUは維持し、std／realtimeを 1 vCPU・3 GiB・2 GB、preciseを 2 vCPU・6 GiB・2 GB にする。** `wrangler.jsonc` の全環境をそろえ、反映はstagingのみ。本番は従来の standard-2／standard-3 のまま。
+**`default` policyの下限の検証結果**：固定2枠・同じvCPUでstd／realtimeは 1 vCPU・3 GiB・2 GB、preciseは 2 vCPU・6 GiB・2 GB で完走した。このサイズ変更は採用せず、stagingはmainのコード・standard-2／standard-3へ復元。本番は未変更。本線は [`durable_object` policyと解析単位の並列化（#77）](https://github.com/phni3j9a/kifumate/issues/77) に移す。
 
 ### 85手1局・稼働1分の費用
 
@@ -38,7 +38,7 @@
 
 realtimeの中盤35手目は旧約27.90M／25.89M nodes（深さ31／33）、1 GiBで28.08M／26.04M（31／32）。人工512手目は深さ36で早期終了しnodesが大きくばらついたため、別の512手（不成・非捕獲・王手なしで生成）でも確認。実時間61.2秒／60.0秒の2探索で旧23.96M／22.96M（深さ23／21）、1 GiBで24.03M／22.93M（23／20）。メモリ制限による系統的な劣化は見えないが、ホスト負荷・探索自体の揺れを含む。
 
-### staging
+### staging：初回（過去実測との比較）
 
 Worker `ee108ddc-93ca-4bef-9072-115a9e115a53`。全3アプリのrollout完了・実効 `vcpu / memory_mib / disk.size_mb` 確認後、期限付き招待の新規1端末で `measure.py --modes std precise --expect-deep` と `measure_realtime.py` を各1回実行。
 
@@ -48,9 +48,36 @@ Worker `ee108ddc-93ca-4bef-9072-115a9e115a53`。全3アプリのrollout完了・
 | precise | DO 142.614 → **141.272秒**、クライアント144.503 → **143.325秒** | 1段目101.219秒＋深読み42.106秒、86/86・深読み8/8、署名あり。旧AVX2の1段目中央値16 → **14**、今回の深読み中央値15 |
 | realtime | 初回3.619 → **4.210秒**、同局面の次2更新5.034／5.803秒 | 深さ16→20→24 が今回16→18→21。以後5局面0.639〜0.735秒。30秒休止、hold再開後35.194秒で深さ32（旧35）、DELETE後停止、計75,478ms |
 
-今回のDO秒＋30秒に新単価を掛けるとstd **$0.002032/局**、precise **$0.009444/局**。起動・ポーリング・配置のばらつきを含む各1回で、stdは遅く、depthも同値ではない。旧depthは保存済みのAVX2版サンプル（候補のある局面）の値で、#56の深読み結果と同一回ではない。APIはnodesを返さず、stagingで探索量が不変とは断定できない。ローカルの実プロセスは `/app/engine-avx2`。stagingの稼働中preciseへのWrangler SSHはWebSocket 400で、今回のCPU選択は未確認（診断入口は作らず、過去のAVX2確認を今回の証拠にはしない）。
+今回のDO秒＋30秒に新単価を掛けるとstd **$0.002032/局**、precise **$0.009444/局**。起動・ポーリング・配置のばらつきを含む各1回で、stdは遅く、depthも同値ではない。旧depthは保存済みのAVX2版サンプル（候補のある局面）の値で、#56の深読み結果と同一回ではない。APIはnodesを返さず、stagingで探索量が不変とは断定できない。ローカルの実プロセスは `/app/engine-avx2`。stagingの稼働中preciseへのWrangler SSHはWebSocket 400で、初回のCPU選択は未確認。以下の追加比較では実際のプロセスを確認した。
 
 招待を取り消して `paid: false` を確認。12:49 UTC、std/precise/realtime各2枠とも `inactive`、全アプリ `active=0 / assigned=0`。共有secret・本番は変更していない。
+
+### staging：同時間帯の新 → 旧 → 新
+
+2026-11-22 13時台（UTC）。各回、新規の招待済み端末で同じ85手をstd→preciseの順に1回ずつ解析（合計6局）。同じ診断付きWorkerコード・イメージ `sha256:cb20e7ac194bc3dc40b04b663db199bf4fdae32227e197c1c0fcdf877ae1fb91`・探索設定で、対象アプリのrollout完了と実効サイズを確認してから開始。各モード86/86局面、preciseは全回同じ8局面の深読みと完了署名を確認。realtimeは追加計測していない。
+
+| モード・指標 | 新①（A） | 旧（B） | 新②（C） |
+| --- | ---: | ---: | ---: |
+| std DO所要秒 | 39.442 | 38.358 | 37.920 |
+| std depth中央値［第1–第3四分位］ | 15［13–17］ | 15［14–17］ | 14［13–15］ |
+| precise DO所要秒（深読み込み） | 139.969 | 144.338 | 146.096 |
+| precise 1段目depth中央値［第1–第3四分位］ | 14［12–17］ | 16［14–19］ | 16［14–20］ |
+| precise 深読みdepth中央値（8局面） | 15 | 16 | 16.5 |
+| 実行拠点（std / precise） | hkg12 / kix03 | hkg12 / hkg12 | kix03 / hkg12 |
+
+候補1位のある同じ85局面（終端1局面は候補なし）で `新 − 旧` を対にして集計した。各セルは **差の中央値；浅い／同じ／深い局面数**。
+
+| 対象 | 新① − 旧 | 新② − 旧 |
+| --- | ---: | ---: |
+| std | 0；22／40／23 | −1；58／19／8 |
+| precise 1段目 | −1；66／15／4 | 0；21／31／33 |
+| precise 深読み | −1；7／0／1 | +0.5；1／3／4 |
+
+**エンジンとCPU：** 6局すべて実プロセスは `/app/engine-avx2`、`avx2Usable=true`、モデル表示は `AMD EPYC`。CPU affinity数（nproc相当）／`/proc/cpuinfo` のprocessor数は全回std 1/1、precise 2/2。[公式FAQ](https://developers.cloudflare.com/containers/faq/#how-do-container-logs-work)のとおりObservabilityは有効だが、既存OAuthでの[ログ検索](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/)は403。権限は広げず、staging限定・専用secret保護の固定診断を使い、各局の完了直後・停止前に使用枠の `/proc/*/exe` とCPUを読んだ。起動時の診断ログはエンジンの自動選択とCPU情報だけを1行にし、棋譜・トークンは出力しない。
+
+**判断：** 旧サイズ比でstdは+1.084／−0.438秒、preciseは−4.369／+1.758秒。初回のstd約+10秒は再現せず、互換版へのフォールバック・可視CPU数減少もなかった。各モードとも新の一方が浅いが、もう一方は旧と同程度。今回浅い回はいずれもkix03で、サイズだけでの一貫した低下ではない。旧は1回・1拠点のみで、サイズと配置の効果を分離できず、CPU世代・クロック・ホスト負荷・実効CPU時間も不明。#77で異なるpolicy・並列度に、この結果をそのまま外挿しない。
+
+**復元：** 専用招待を取消し、3端末すべて `paid: false`。最終stagingは `origin/main`（`886e586`）のコードとstandard-2／standard-3／standard-2。復元デプロイ `3c98eea9-bf8e-42f8-8b3c-14a9c5adb1ba`、専用secret削除後の稼働Worker Version **`de78a041-6a10-4ac6-9a61-3b4b07a6a4a8`（100%）**。入口・RPC・起動ログを含まないmainに戻し、旧診断入口は全4パス404。13:25 UTCに3アプリの旧サイズ・mainイメージ（上記ローカル実測のdigest）・rollout完了・`active=0 / assigned=0`・全6枠 `inactive` を確認。共有secret・本番は未変更。
 
 ### 制約と、固定プールをやめる場合（調査のみ）
 

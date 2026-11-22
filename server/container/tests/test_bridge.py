@@ -144,6 +144,16 @@ def test_cpu_dispatch_requires_all_features_on_every_vcpu(monkeypatch):
     assert bridge.selected_engine() == '/app/engine-compatible'
 
 
+def test_engine_start_log_only_reports_dispatch_fields(monkeypatch, capsys):
+    monkeypatch.setattr(bridge.os, 'sched_getaffinity', lambda _: {0})
+    info = 'processor : 0\nmodel name : Test CPU\nflags : ' + ' '.join(bridge.AVX2_FLAGS) + '\n'
+    path = bridge.selected_engine(info, log=True)
+    assert json.loads(capsys.readouterr().out) == {
+        'event': 'engine_start', 'engine': path, 'models': ['Test CPU'],
+        'processors': 1, 'nproc': 1, 'avx2Usable': True,
+    }
+
+
 def test_benchmark_counts_cumulative_nodes_once_and_ignores_strings():
     from benchmark import search_stats
     assert search_stats([
