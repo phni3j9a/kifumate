@@ -335,3 +335,25 @@ def test_shallow_full_match_hides_last_match_and_notes(db_file):
     deep = call(data(line + ['1g1f']), 'book', {})
     assert deep['最後の一致']['手数'] == len(line) - 1
     assert deep['近くの注記']
+
+
+def test_last_match_needs_consecutive_book_moves(db_file):
+    # 局面番号ではなく、連続して本の手を指した手数で表示を決める。
+    line = OPENING + ['9g9f', '9c9d']
+    write(db_file, {key(line[:i]): joseki(line[i], note=NOTE) for i in range(len(line))})
+    joined = line[2:4] + line[:2] + line[4:]  # 手順前後で10手目に合流するが、合流前の手は表にない。
+    out = call(data(joined[:10] + ['1g1f']), 'book', {})
+    assert out.get('最後の一致') is None and out.get('近くの注記', []) == []
+
+
+def test_fork_without_deep_full_match_hides_shallow_notes(db_file):
+    # 分岐点には専用の注記があるので、浅い全局面一致の注記は出さない。
+    other = {**STRATEGY, 'id': 'other', 'tags': ['別戦法'], 'title': '別の方針'}
+    table = opening_table()
+    table[key(OPENING)]['strategy'] = 'other'
+    write(db_file, table, strategies=[{**STRATEGY, 'tags': ['試験戦法', '架空囲い']}, other])
+    moves = [*OPENING, '9g9f']
+    moves[1] = '1c1d'
+    result = call(tagged(data(moves), '別戦法'), 'book', {})
+    assert result['駒組みの分岐点']['参照'] == '10:position'
+    assert result['最後の一致'] is None and result['近くの注記'] == []

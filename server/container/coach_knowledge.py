@@ -338,6 +338,7 @@ def book(game):
     view, moves, initial = game['perspective'], game['moves'], game['initial']
     b = sh.Board() if initial == 'startpos' else sh.Board(initial)
     prev = last = last_departure = None
+    last_run = 0
     tactics, notes, topics, boards = [], [], [], []
     by_side = strategy_tags_by_side(game)
     selected = selected_strategies(by_side, strategies)
@@ -369,6 +370,7 @@ def book(game):
         if book_moves:
             # 再合流したら、それ以前に一時的に外れた着手は取り消す。
             last = {**ref, '先後反転': key not in joseki}
+            last_run = matched_plies
             last_departure = (b.copy(), prev, book_moves) if actual is not None and matched_plies >= MIN_FULL_PLIES else None
         matched_plies = matched_plies + 1 if actual in book_moves else 0
         if actual is not None:
@@ -390,11 +392,11 @@ def book(game):
         topic_ids.extend(id_ for id_, row in strategies.items()
                          if id_ in selected and row['tags'] and row['tags'][0] in classified)
     plans = fork['方針'] if fork else strategy_plans(topic_ids, strategies, by_side, selected)
-    # 序盤数手だけの一致は戦型が違う対局でも起きるため、出力では外れた手と同じしきい値で抑える。
-    shown = last if last and last['手数'] >= MIN_FULL_PLIES else None
+    # 序盤数手だけの一致は戦型が違う対局でも起きるため、出力では外れた手と同じく連続一致の手数で抑える。
+    shown = last if last and last_run >= MIN_FULL_PLIES else None
     if not (shown or tactics or fork or plans):
         return NO_MATCH.copy()
     return {'状態': '一致あり' if shown or tactics or fork else '方針のみ', '最後の一致': shown, '最初に外れた手': departure,
             **({'駒組みの分岐点': fork} if fork else {}),
             '方針': plans,
-            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]] if shown or fork else [], '手筋': tactics}
+            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]] if shown else [], '手筋': tactics}

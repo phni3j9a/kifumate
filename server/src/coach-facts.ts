@@ -72,12 +72,17 @@ function variations(facts: CoachFacts | undefined, ids: string[]) {
 }
 
 const BOOK_PREFIX = /(?:定跡(?:では?|なら|は|の(?:手順?|候補)(?:では?|は)?|上は?)|(?<!基)本(?:では?|の(?:手順?|候補)(?:では?|は)?))[、,\s「『]*$/;
-const BOOK_POSTFIX = /^[」』]?(?:が|は|も)(?:定跡(?:の手)?|本の手(?:順)?)(?:です|だ|である|に当た(?:る|ります))(?!か)/;
+// 断定の語の直後で文・節が終わる場合だけを断定とみなす（「だろうか」「であるとは言えない」「ですか」は除く）。
+const BOOK_END = '(?:が|けれど|けど)?(?:[。、,！!]|$)';
+const BOOK_POSTFIX = new RegExp(`^[」』]?(?:が|は|も)(?:定跡(?:の手)?|本の手(?:順)?)(?:です|だ|である|に当た(?:る|ります))${BOOK_END}`);
+// 前置形も、符号の直後で文・節が終わる場合だけ（「▲9六歩とせずに」「▲9六歩でなく」は帰属させない）。
+const BOOK_PREFIX_TAIL = new RegExp(`^[」』]?(?:です|だ|である)?${BOOK_END}`);
 
-// shortcut: 定跡の語と符号が隣り合う場合だけを検査する。言い換えまで区別するなら構造化した出典が必要。
+// shortcut: 定跡の語と符号が隣り合い、その文・節が言い切りで終わる場合だけを検査する。言い換えまで区別するなら構造化した出典が必要。
 function attributedBookMoves(text: string) {
   return [...text.matchAll(new RegExp(KIF, 'g'))].filter(move =>
-    BOOK_PREFIX.test(text.slice(0, move.index)) || BOOK_POSTFIX.test(text.slice(move.index + move[0].length)));
+    (BOOK_PREFIX.test(text.slice(0, move.index)) && BOOK_PREFIX_TAIL.test(text.slice(move.index + move[0].length))) ||
+    BOOK_POSTFIX.test(text.slice(move.index + move[0].length)));
 }
 
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts', ids: string[] = []): string | undefined {
