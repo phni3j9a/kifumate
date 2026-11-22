@@ -383,16 +383,19 @@ describe('非同期・期限・精密コンテナ', () => {
       const container = vi.fn(async (path: string, init: RequestInit) => {
         const body = bodyOf(init);
         expect(init.signal).toBeInstanceOf(AbortSignal);
-        if (path.endsWith('/coach-facts')) return Response.json(facts());
+        if (path.endsWith('/coach-facts')) {
+          expect(body.tags).toMatchObject({対局側: {先手: {大分類: '未分類'}}});
+          return Response.json(facts());
+        }
         expect(path).toBe('http://container/coach-tools');
-        expect(body.calls).toEqual([{name: 'game_tags', arguments: '{}'}]);
+        expect(body.calls).toEqual([{name: 'book', arguments: '{}'}]);
         expect(body.game).toMatchObject({initial: analysis.initial, moves: analysis.moves, question: payload.question, tags: {対局側: {先手: {大分類: '未分類'}}}});
         expect(JSON.stringify(body)).not.toMatch(/test-key|四間飛車|参考文/);
-        return Response.json({results: [{盤面からの分類: '未分類'}]});
+        return Response.json({results: [{状態: '一致なし'}]});
       });
       const getByName = vi.fn(() => ({fetch: container}));
       instance.env.PRECISE = {getByName};
-      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('tags', 'game_tags', '{}')))
+      const send = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(turn(call('book', 'book', '{}')))
         .mockResolvedValueOnce(Response.json({status: 'incomplete', incomplete_details: {reason: 'max_output_tokens'}, usage}))
         .mockResolvedValueOnce(done());
       try {

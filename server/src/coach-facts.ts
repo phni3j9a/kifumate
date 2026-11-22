@@ -61,6 +61,8 @@ function variations(facts: CoachFacts | undefined, ids: string[]) {
     (ids.includes(r.id) || ids.includes(r.id.replace(/:(?:mate|candidate:\d+)$/, ':position'))));
   return [
     ...shown.flatMap(r => [...(r[PV] ?? []), ...(facts.詰みの別応手?.[r.id] ?? []).flat()]),
+    ...(facts.要所 ?? []).filter(k => ids.includes(`${k.手数 - 1}:position`) || ids.includes(k.指す前の参照))
+      .flatMap(k => k.定跡の手 ?? []),
     ...linesFor(facts, ids).flatMap(r => r[PV] ?? []),
   ];
 }
@@ -214,6 +216,8 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
     };
     const first = result.最初に外れた手;
     if (Array.isArray(first?.本の手)) saveMoves(first.参照, first.本の手);
+    const fork = result.駒組みの分岐点;
+    if (Array.isArray(fork?.定跡の手)) saveMoves(fork.参照, fork.定跡の手);
     if (Array.isArray(result.手筋)) for (const item of result.手筋) saveMoves(item?.参照, [item?.正解]);
   }
   if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {

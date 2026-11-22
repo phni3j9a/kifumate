@@ -100,20 +100,20 @@ export class Device extends DurableObject<Env> {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data), signal,
       });
     };
-    const game = (input: ReturnType<typeof parseCoach>) => ({initial: input.input.initial, moves: input.input.moves,
-      results: input.results, perspective: input.perspective, question: input.question});
+    type Input = ReturnType<typeof parseCoach>;
+    const classified = new WeakMap<Input, Promise<Awaited<ReturnType<typeof coachTags>> | undefined>>();
+    const game = async (input: Input) => {
+      if (!classified.has(input)) classified.set(input, coachTags(input.input.initial, input.input.moves).catch(() => undefined));
+      return {initial: input.input.initial, moves: input.input.moves, results: input.results,
+        perspective: input.perspective, question: input.question, tags: await classified.get(input)};
+    };
     this.coach = new Coach(ctx.storage, env, ctx.id.toString(), () => this.paid(), async (input, signal) => {
       if (env.COACH_PROVIDER === 'fake') return undefined;
-      const response = await coachContainer('coach-facts', game(input), signal);
+      const response = await coachContainer('coach-facts', await game(input), signal);
       if (!response.ok) throw new ApiError(502, 'facts_unavailable');
       return await response.json();
     }, () => this.refreshEntitlement(), async (input, calls, signal) => {
-      const data = game(input);
-      let tags;
-      if (calls.some(call => call.name === 'game_tags')) {
-        try { tags = await coachTags(data.initial, data.moves); } catch { /* 分類未確認 */ }
-      }
-      const response = await coachContainer('coach-tools', {game: {...data, tags}, calls}, signal);
+      const response = await coachContainer('coach-tools', {game: await game(input), calls}, signal);
       if (!response.ok) {
         void response.body?.cancel().catch(() => {});
         throw new ApiError(502, 'tools_unavailable');

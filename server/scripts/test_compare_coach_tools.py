@@ -43,6 +43,13 @@ def synthetic(provider, turn):
 
 
 class LoopTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = patch('coach_knowledge.DB_PATH', Path(tmp.name) / 'absent.json')
+        db.start()
+        self.addCleanup(db.stop)
+
     def test_both_protocols_full_replay_and_forced_final(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / 'budget.jsonl'

@@ -1,6 +1,6 @@
 import schema from '../container/coach_tools_schema.json';
 import { ApiError } from './model';
-import { classifyUsiAsync } from '../../app/src/core/classify';
+import { classificationCatalog, classifyUsiAsync } from '../../app/src/core/classify';
 import { rememberToolEvidence, type CoachFacts } from './coach-facts';
 
 const tools = schema.map(tool => ({...tool, type: 'function', strict: false}));
@@ -53,7 +53,7 @@ export async function coachTags(initial: string, moves: string[]) {
   const c = await classifyUsiAsync(initial === 'startpos' ? start : initial, moves);
   const list = (xs: {name: string; ply: number}[]) => xs.map(x => ({名前: x.name, 確認手数: x.ply}));
   return {'居飛車・振り飛車の組合せ': list(c.relationships), 対局側: Object.fromEntries(Object.entries(c.sides).map(([key, side]) =>
-    [key === 'black' ? '先手' : '後手', {大分類: side.family, 戦法: list(side.strategies), 囲い: list(side.castles)}]))};
+    [key === 'black' ? '先手' : '後手', {大分類: side.family, 戦法: list(side.strategies.filter(s => classificationCatalog.strategies.some(t => t.id === s.id))), 囲い: list(side.castles)}]))};
 }
 
 function object(value: unknown): value is Record<string, any> {
