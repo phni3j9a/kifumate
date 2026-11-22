@@ -22,6 +22,7 @@ export function EvalGraph({
   onPly,
   phases = [],
   labels = ["あなた", "相手"],
+  own = true,
   branch,
 }: {
   ply: number;
@@ -30,6 +31,8 @@ export function EvalGraph({
   sign?: number;
   onPly?: (ply: number) => void;
   labels?: string[];
+  /** 自分の対局。相手の印を小さくして、自分の手の印を主役にする */
+  own?: boolean;
   branch?: { base: number; at: number; value: number | null };
   phases?: { name: string; a: number; b: number }[];
 }) {
@@ -294,8 +297,15 @@ export function EvalGraph({
                       opacity={0.4}
                     />
                   )}
-                  <G scale={!branch && i === ply ? 1.3 : 1}>
-                    <GraphMark kind={p.mate ? "詰みあり" : p.mark!} />
+                  <G
+                    scale={
+                      !branch && i === ply ? 1.3 : own && !p.self ? 0.86 : 1
+                    }
+                  >
+                    <GraphMark
+                      kind={p.mate ? "詰みあり" : p.mark!}
+                      side={p.self ? colors.you : colors.opp}
+                    />
                   </G>
                 </G>,
               ];

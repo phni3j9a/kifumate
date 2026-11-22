@@ -3,8 +3,12 @@ import type { Mark } from "../analysis/display";
 import { colors, fonts } from "./theme";
 
 type Kind = Mark | "詰みあり";
-export function GraphMark({ kind }: { kind: Kind }) {
+/** side（手番の色）を渡すと、印を0.8倍にして外側に手番色の輪を付ける。全体の径は16 */
+export function GraphMark({ kind, side }: { kind: Kind; side?: string }) {
   const ink = { stroke: colors.ink, strokeWidth: 1.5 };
+  // 輪を細い墨の縁で囲む。手番色と同系のグラフの塗りの上でも輪郭が消えない
+  const ring = side ? { fill: side, ...ink, strokeWidth: 1 } : null;
+  const scale = side ? 0.8 : 1;
   const glyph = {
     ...ink,
     strokeWidth: 1.6,
@@ -14,7 +18,10 @@ export function GraphMark({ kind }: { kind: Kind }) {
   } as const;
   if (kind === "詰みあり")
     return (
-      <G>
+      <G scale={scale}>
+        {ring && (
+          <Rect x={-9.5} y={-9.5} width={19} height={19} rx={5.8} {...ring} />
+        )}
         <Rect
           x={-6.5}
           y={-6.5}
@@ -26,9 +33,9 @@ export function GraphMark({ kind }: { kind: Kind }) {
         />
         <Text
           textAnchor="middle"
-          y={3.1}
+          y={side ? 3.6 : 3.1}
           fontFamily={fonts[900]}
-          fontSize={8.5}
+          fontSize={side ? 10 : 8.5}
           fill={colors.ink}
         >
           詰
@@ -36,7 +43,8 @@ export function GraphMark({ kind }: { kind: Kind }) {
       </G>
     );
   return (
-    <G>
+    <G scale={scale}>
+      {ring && <Circle r={9.5} {...ring} />}
       <Circle
         r={6.3}
         fill={

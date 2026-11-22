@@ -1099,6 +1099,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
             sign={self === Color.BLACK ? 1 : -1}
             phases={phases}
             labels={own ? ["あなた", "相手"] : ["先手", "後手"]}
+            own={own}
             branch={
               branch ? { base: branch.base, at: branch.at, value } : undefined
             }
