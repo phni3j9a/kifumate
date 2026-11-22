@@ -390,9 +390,11 @@ def book(game):
         topic_ids.extend(id_ for id_, row in strategies.items()
                          if id_ in selected and row['tags'] and row['tags'][0] in classified)
     plans = fork['方針'] if fork else strategy_plans(topic_ids, strategies, by_side, selected)
-    if not (last or tactics or fork or plans):
+    # 序盤数手だけの一致は戦型が違う対局でも起きるため、出力では外れた手と同じしきい値で抑える。
+    shown = last if last and last['手数'] >= MIN_FULL_PLIES else None
+    if not (shown or tactics or fork or plans):
         return NO_MATCH.copy()
-    return {'状態': '一致あり' if last or tactics or fork else '方針のみ', '最後の一致': last, '最初に外れた手': departure,
+    return {'状態': '一致あり' if shown or tactics or fork else '方針のみ', '最後の一致': shown, '最初に外れた手': departure,
             **({'駒組みの分岐点': fork} if fork else {}),
             '方針': plans,
-            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]], '手筋': tactics}
+            '近くの注記': [note for _, note in sorted(notes, key=closest)[:2]] if shown or fork else [], '手筋': tactics}

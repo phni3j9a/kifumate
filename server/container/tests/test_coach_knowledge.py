@@ -114,7 +114,8 @@ def test_rotated_board_turn_hands_and_moves(db_file, monkeypatch):
     assert call(data(['9a9b'], initial=rotated, perspective='sente'), 'book', {})['最初に外れた手']['指した側'] == '相手'
 
 
-def test_rotated_prose_keeps_width_and_matches_answer(db_file):
+def test_rotated_prose_keeps_width_and_matches_answer(db_file, monkeypatch):
+    monkeypatch.setattr(coach_knowledge, 'MIN_FULL_PLIES', 0)
     pos = 'k8/9/6b2/9/9/9/6N2/9/8K b -'
     title = '３三角に狙いをつける2五桂'
     text = ('先手は９筋の右辺から、後手は2筋の左側から。右辺と右端、右側と玉の右にも注目。'
@@ -301,7 +302,8 @@ def test_invalid_tesuji_accept(db_file, bad):
     assert call(data(), 'book', {}) == {'状態': '一致なし'}
 
 
-def test_game10_observer_strategy_owner_overrides_shared_opening(db_file):
+def test_game10_observer_strategy_owner_overrides_shared_opening(db_file, monkeypatch):
+    monkeypatch.setattr(coach_knowledge, 'MIN_FULL_PLIES', 0)
     game10 = Path(__file__).resolve().parents[2] / 'scripts/games/game10.kif'
     moves = [sh.move_to_usi(m) for m in KIF.Parser.parse_str(game10.read_text()).moves]
     row = {**STRATEGY, 'tags': ['右四間飛車', '四間飛車'], 'text': '先手の２筋に注目。'}
@@ -322,3 +324,14 @@ def test_neutral_tag_only_plan_requires_primary_strategy(db_file):
     assert call(game, 'book', {}) == {'状態': '一致なし'}
     game['tags']['対局側']['後手'] = {'戦法': [{'名前': '主戦法'}]}
     assert call(game, 'book', {})['方針'][0]['先後反転'] is True
+
+
+def test_shallow_full_match_hides_last_match_and_notes(db_file):
+    # 10手未満の一致は戦型違いでも起きるので出さず、10手以上なら出す。
+    line = OPENING + ['9g9f', '9c9d']
+    write(db_file, {key(line[:i]): joseki(line[i], **({'note': NOTE} if i == 1 else {})) for i in range(len(line))})
+    shallow = call(data(line[:2] + ['5g5f']), 'book', {})
+    assert shallow.get('最後の一致') is None and shallow.get('近くの注記', []) == []
+    deep = call(data(line + ['1g1f']), 'book', {})
+    assert deep['最後の一致']['手数'] == len(line) - 1
+    assert deep['近くの注記']
