@@ -44,8 +44,12 @@ it('全局の新bindingは端末IDでなく受理したジョブIDを選ぶ', as
     instance.env.STD_JOB = {getByName: (name: string) => {
       names.push(name); return instance.env.STD.getByName(name);
     }};
-    try { await instance.alarm(); expect(names).toEqual([job.id]); }
-    finally { delete instance.env.STD_JOB; }
+    try {
+      await instance.alarm();
+      instance.env.USE_LEGACY_ANALYSIS = 'true';
+      await instance.alarm();
+      expect(names).toEqual([job.id]);
+    } finally { delete instance.env.STD_JOB; delete instance.env.USE_LEGACY_ANALYSIS; }
   });
 });
 

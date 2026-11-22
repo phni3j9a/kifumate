@@ -20,6 +20,7 @@ export interface Env extends CoachEnv {
   PRECISE_JOB?: DurableObjectNamespace<PreciseJob>;
   RT_ENGINE?: DurableObjectNamespace<RealtimeEngine>;
   RT_ACCOUNTS?: DurableObjectNamespace<RealtimeAccount>;
+  USE_LEGACY_ANALYSIS?: string;
   PAUSE_FREE_ANALYSIS?: string;
   INVITATIONS: DurableObjectNamespace<Invitations>;
   INVITE_ADMIN_KEY?: string;
@@ -123,7 +124,8 @@ export class Device extends DurableObject<Env> {
     const coachContainer = (path: 'coach-facts' | 'coach-tools', data: unknown, signal: AbortSignal) => {
       signal.throwIfAborted();
       const slot = parseInt(ctx.id.toString().slice(0, 8), 16) % 2;
-      return (env.PRECISE_JOB?.getByName('coach-' + ctx.id.toString()) ?? env.PRECISE.getByName('slot-' + slot)).fetch('http://container/' + path, {
+      const jobs = env.USE_LEGACY_ANALYSIS === 'true' ? undefined : env.PRECISE_JOB;
+      return (jobs?.getByName('coach-' + ctx.id.toString()) ?? env.PRECISE.getByName('slot-' + slot)).fetch('http://container/' + path, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data), signal,
       });
     };
@@ -256,7 +258,7 @@ export class Device extends DurableObject<Env> {
         headers.set('X-Dev-Paid', this.paid() ? '1' : '0');
         headers.set('X-Dev-Entitlement', this.devPaid() ? '1' : '0');
         headers.set('X-Device-Hash', this.rows<{value: string}>("SELECT value FROM meta WHERE key='hash'")[0].value);
-        if (this.env.RT_ACCOUNTS) return await this.env.RT_ACCOUNTS.getByName(this.ctx.id.toString()).fetch(new Request(request, {headers}));
+        if (this.env.USE_LEGACY_ANALYSIS !== 'true' && this.env.RT_ACCOUNTS) return await this.env.RT_ACCOUNTS.getByName(this.ctx.id.toString()).fetch(new Request(request, {headers}));
         // 切り戻し先の旧プール。
         const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
         return await this.env.REALTIME.getByName('slot-' + slot).fetch(new Request(request, {headers}));
@@ -310,7 +312,7 @@ export class Device extends DurableObject<Env> {
   }
   private async analyze(id: string, input: Input, ply: number, deep = false): Promise<PositionResult> {
     const namespace = input.mode === 'std' ? this.env.STD : this.env.PRECISE;
-    const jobs = input.mode === 'std' ? this.env.STD_JOB : this.env.PRECISE_JOB;
+    const jobs = this.env.USE_LEGACY_ANALYSIS === 'true' ? undefined : input.mode === 'std' ? this.env.STD_JOB : this.env.PRECISE_JOB;
     const slot = parseInt(this.ctx.id.toString().slice(0, 8), 16) % 2;
     const response = await (jobs?.getByName(id) ?? namespace.getByName('slot-' + slot)).fetch(deep ? 'http://container/analyze/deep' : 'http://container/analyze', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
