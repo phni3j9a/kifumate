@@ -1,5 +1,65 @@
 # staging実測と費用見積もり
 
+## 予約メモリ・ディスクの縮小（Issue #75、2026-11-22）
+
+**固定2枠とvCPUは維持し、std／realtimeを 1 vCPU・3 GiB・2 GB、preciseを 2 vCPU・6 GiB・2 GB にする。** `wrangler.jsonc` の全環境をそろえ、反映はstagingのみ。本番は従来の standard-2／standard-3 のまま。
+
+### 85手1局・稼働1分の費用
+
+[公式料金](https://developers.cloudflare.com/containers/platform/pricing/)で予約量だけを変えた比較。stdは従来のAVX2実測33.034秒、preciseは#56の深読み込み142.614秒にそれぞれ待機30秒を加えた。全時間でCPU上限を使う保守モデル（実請求ではなく、無料枠・Workers・DO・通信は含まない）。
+
+| モード | 比較時間 | 旧 → 新（USD） | 削減幅 |
+| --- | ---: | ---: | ---: |
+| std（85手） | 63.034秒 | 0.002259 → 0.001742 | **0.000517/局（22.9%）** |
+| precise（85手＋深読み8局面） | 172.614秒 | 0.010550 → 0.009518 | **0.001032/局（9.8%）** |
+| realtime | 60秒 | 0.0021504 → 0.0016584 | **0.000492/分（22.9%）** |
+
+### ローカル実測
+
+`886e586` の `server/container/Dockerfile`（linux/amd64、manifest `sha256:3f3dd8e18df6788a5f6dbd450e317280d170b00c5e21a7b61ec58533ca945924`、stagingと同じ）をビルド。i5-8500B、Docker/cgroup v2、`--cpus 1/2/1`（std/precise/realtime）、swapなし、モードごとに旧上限6/8/6 GiBと **1 GiB** を比較。実HTTP中継とAVX2エンジンを使用し、ローカル限定の観測でUSIのnodes/depthを収集（探索条件・ハッシュ128 MBは未変更）。85手と、cshogiで既出局面を除き合法手を `random.Random(1).shuffle` 順に選んだ人工512手を順に使用。全局解析は開始局面を含む86＋513局面。preciseは `deepPositions` が選ぶ勝負所を各5秒追加。realtimeは詰んだ85手目の終局確認後、中盤35手目と人工512手目で各2回 `movetimeMs=60000`、同じプロセス・ハッシュを再利用（詰み読み等で早期終了あり）。
+
+| モード | 1 GiB全局／継続 `memory.peak` | 1 GiB冷間 `memory.peak` | 冷間RSS / anon / file（各最大） |
+| --- | ---: | ---: | ---: |
+| std | 654.4 MiB | **783.4 MiB** | 659.6 / 634.9 / 129.2 MiB |
+| precise | 762.8 MiB | **890.7 MiB** | 771.7 / 746.9 / 129.2 MiB |
+| realtime | 654.4 MiB | **784.1 MiB** | 623.7 / 596.9 / 129.2 MiB |
+
+全局・継続探索の `memory.peak` はホストの共有ページキャッシュが温かい状態。`memory.stat:file` は当該cgroupに課金されたキャッシュだけで、`nn.bin` を全く読まなかった意味ではない。別に同じ評価ファイルの専用コピーだけを `fsync`＋`POSIX_FADV_DONTNEED` して読み込ませた（ホスト全体のcacheは操作していない）。表の冷間はこの初回探索（std 250ms／precise 5000ms／realtime 60秒）。RSSはPython＋エンジンの合計で共有分の重複があり、RSSとfileを足してpeakとはしない。RSS/anon/fileはサンプリング最大（冷間20ms、全局250ms）、`memory.peak` はカーネルの記録。1 GiBはこの条件での実験値で、メモリに余裕の少ない本番推奨値ではない。
+
+ディスクは3モードとも共通。`docker image inspect .Size` **743,330,011 B**（イメージ格納量）、起動中の `docker inspect --size` はrootfs **537,456,640 B**、書込層 **159,744 B**（各棋譜の区切りでも同値）。`du -sx -B1 /` は約389 MB。レイヤーの累計と展開後の可視ファイルは別で、ホスト全体の `df` は比較対象にしない。2 GBに収まり、棋譜長に比例した書込みは観測せず。一時書込みの瞬間最大やCloudflareの内部FSは未計測。
+
+旧上限 → 1 GiBでの **nodes / depth の中央値**（探索結果のある局面、1条件1回）。両上限で全局完走し、`memory.events` の `max/oom/oom_kill` はすべて0。固定時間探索のため同じnodes・depthを保証する比較ではない。
+
+| モード | 85手 | 512手 |
+| --- | --- | --- |
+| std | 121,572 / 15 → 124,149 / 15 | 88,416 / 14 → 89,828 / 14 |
+| precise 1段目 | 756,960 / 15 → 755,347 / 15 | 809,776 / 15 → 796,121 / 15 |
+| precise 深読み | 2,903,090 / 15.5 → 3,193,606 / 15（8局面） | 4,332,487 / 18 → 4,294,497 / 18（51局面） |
+
+realtimeの中盤35手目は旧約27.90M／25.89M nodes（深さ31／33）、1 GiBで28.08M／26.04M（31／32）。人工512手目は深さ36で早期終了しnodesが大きくばらついたため、別の512手（不成・非捕獲・王手なしで生成）でも確認。実時間61.2秒／60.0秒の2探索で旧23.96M／22.96M（深さ23／21）、1 GiBで24.03M／22.93M（23／20）。メモリ制限による系統的な劣化は見えないが、ホスト負荷・探索自体の揺れを含む。
+
+### staging
+
+Worker `ee108ddc-93ca-4bef-9072-115a9e115a53`。全3アプリのrollout完了・実効 `vcpu / memory_mib / disk.size_mb` 確認後、期限付き招待の新規1端末で `measure.py --modes std precise --expect-deep` と `measure_realtime.py` を各1回実行。
+
+| モード | 旧 → 今回（85手） | 完了・探索の比較 |
+| --- | --- | --- |
+| std | DO 33.034 → **43.514秒**（+10.480秒）、今回クライアント44.497秒 | 86/86、詰み3局面。候補1位depth中央値15 → **14** |
+| precise | DO 142.614 → **141.272秒**、クライアント144.503 → **143.325秒** | 1段目101.219秒＋深読み42.106秒、86/86・深読み8/8、署名あり。旧AVX2の1段目中央値16 → **14**、今回の深読み中央値15 |
+| realtime | 初回3.619 → **4.210秒**、同局面の次2更新5.034／5.803秒 | 深さ16→20→24 が今回16→18→21。以後5局面0.639〜0.735秒。30秒休止、hold再開後35.194秒で深さ32（旧35）、DELETE後停止、計75,478ms |
+
+今回のDO秒＋30秒に新単価を掛けるとstd **$0.002032/局**、precise **$0.009444/局**。起動・ポーリング・配置のばらつきを含む各1回で、stdは遅く、depthも同値ではない。旧depthは保存済みのAVX2版サンプル（候補のある局面）の値で、#56の深読み結果と同一回ではない。APIはnodesを返さず、stagingで探索量が不変とは断定できない。ローカルの実プロセスは `/app/engine-avx2`。stagingの稼働中preciseへのWrangler SSHはWebSocket 400で、今回のCPU選択は未確認（診断入口は作らず、過去のAVX2確認を今回の証拠にはしない）。
+
+招待を取り消して `paid: false` を確認。12:49 UTC、std/precise/realtime各2枠とも `inactive`、全アプリ `active=0 / assigned=0`。共有secret・本番は変更していない。
+
+### 制約と、固定プールをやめる場合（調査のみ）
+
+- [Wrangler設定](https://developers.cloudflare.com/workers/wrangler/configuration/#custom-instance-types)の `vcpu` / `memory_mib` / `disk_mb` は `default` 用。省略時の値と、受理される最小構成は別。[現行Limits](https://developers.cloudflare.com/containers/platform/limits/#custom-instance-types)の **1/16 vCPU・256 MiB・2000 MBは `durable_object` 用**。[公式の旧Limits表](https://github.com/cloudflare/cloudflare-docs/blob/4a3816d25087/src/content/docs/containers/platform/limits.mdx#custom-instance-types)と[書換理由](https://github.com/cloudflare/cloudflare-docs/pull/35101)によると、legacyのカスタムは1〜4 vCPU、**最低3 GiB/vCPU**（上限12 GiB・20 GB）。[旧ディスク対メモリ比は撤廃](https://github.com/cloudflare/cloudflare-docs/pull/33713)。stagingで今回の2 GBを受理し、実行できた。これより小さいディスクの可否は試していない。
+- [`default` は非推奨、`durable_object` はpublic beta](https://developers.cloudflare.com/containers/configuration/scheduling-policy/)。policyは変更不可。[移行](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-scheduling-policy/)には新しいContainerアプリ／DOクラスを並行作成・切替・旧アプリを排出する必要がある。既存 `Container` ヘルパーをそのまま使えず、`ctx.container.start({image,instance:{vcpu,memoryMib,diskMb}})`、ポート準備・プロキシ・停止・画像更新を自前で管理。利用者DOの棋譜は残し、固定プールのままでも移行できる。
+- [1つの名前付きDOに1インスタンス](https://developers.cloudflare.com/containers/configuration/scaling-and-routing/)。ジョブID／realtimeセッションID単位で起動は可能で、1手ごとに作り直す必要はない。[#2](https://github.com/phni3j9a/kifumate/issues/2)／[PR #3の修正](https://github.com/phni3j9a/kifumate/commit/afa68743b1762accac85f685486ffde78e1dbb61)前は端末DOのIDをContainer名にし、端末を増やすたび別の割当が必要だった。`max_instances=2` と割当要求数が連動していない設計を固定名2つに変更。割当失敗と修正は記録があるが、当時の同時実行数やCloudflare内部のエラー原因までは確定できない。`max_instances` は待ち行列ではない。
+- 新規IDは毎回コールドスタート。[FAQ](https://developers.cloudflare.com/containers/faq/#what-are-cold-starts-how-fast-are-they)は多くの場合1〜3秒、当地の過去の初回**応答**は通常約4〜5秒・初配置19.187秒（通信・探索込み）。起動要求からsleepまで課金、例えば起動3秒は新単価でstd約$0.000083、precise約$0.000165（CPU上限）。全局の `sleepAfter=10s` の待機だけでもメモリ＋ディスクで各$0.0000764／$0.0001514、実使用CPUは別。realtimeは `sleepAfter=60s` のほか通常30秒／hold 5分の休止と明示停止があり、継続探索はCPUも使う。新規起動・終了の反復で固定枠の温まったプロセス・ハッシュ共有の利点を失う。
+- defaultなら現行のアプリ別 `max_instances=2` を維持し、満杯時はアプリ側で待機・取消。`durable_object` では **`max_instances` 非対応**。アカウントの公称同時上限（15,000 vCPU・60 TiB・300 TB、他アプリと共有）は予算管理に使えない。ジョブ単位方式なら、起動前にモード横断または各モードの枠を原子的に確保し、再試行の二重起動を避け、停止確認・期限付き貸与・障害回収を設計する。並列上限だけでは月額上限にはならず、現行の回数・時間制限も必要。移行・多端末負荷試験は今回行っていない。
+
 ## 精密全局解析＋勝負所の深読み（Issue #56、2026-11-21 JST）
 
 stagingのWorker `04e1626e-a921-43e4-9e6e-19d7900501d5`（`38e73ee`、共通イメージ `sha256:e9cab030f72da8c864bca387389c78b15c464da738299c2a578509d7336bd018`）で、期限付き招待の新規端末を使い、[measure.py](../scripts/measure.py) の `--modes precise --expect-deep` でサンプル棋譜85手を1回計測しました。
