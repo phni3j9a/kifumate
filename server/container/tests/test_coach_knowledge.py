@@ -313,3 +313,12 @@ def test_game10_observer_strategy_owner_overrides_shared_opening(db_file):
     assert [(p['先後反転'], p['説明']) for p in out['方針']] == [(True, '後手の８筋に注目。')] * 2
     game['tags']['対局側']['先手'] = game['tags']['対局側']['後手']
     assert call(game, 'book', {})['方針'] == []
+
+
+def test_neutral_tag_only_plan_requires_primary_strategy(db_file):
+    row = {**STRATEGY, 'tags': ['主戦法', '相手戦法']}
+    write(db_file, {}, strategies=[row])
+    game = tagged(data(), '相手戦法')
+    assert call(game, 'book', {}) == {'状態': '一致なし'}
+    game['tags']['対局側']['後手'] = {'戦法': [{'名前': '主戦法'}]}
+    assert call(game, 'book', {})['方針'][0]['先後反転'] is True

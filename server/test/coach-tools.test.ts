@@ -325,7 +325,7 @@ describe('Responsesの道具ループ', () => {
     expect(validateOutput(wanted, refs, evidence).sections[0].references).toEqual([refs[0]]);
     expect(() => validateOutput(section('別解は△8四歩です。', '1:position'), refs, evidence)).not.toThrow();
     expect(() => validateOutput(section('別解は△8四歩です。', '0:position'), refs, evidence)).toThrow();
-    expect(() => validateOutput(section('定跡では△8四歩です。', '1:position'), refs, evidence)).not.toThrow();
+    expect(() => validateOutput(section('定跡では△8四歩です。', '1:position'), refs, evidence)).toThrow();
     expect(() => validateOutput(section('定跡では△8四歩です。', '0:position'), refs, evidence)).toThrow();
     expect(() => validateOutput(section('手筋の正解は△3四歩です。', '1:position'), refs, evidence)).not.toThrow();
     expect(() => validateOutput(section('手筋の正解は△3四歩です。', '0:position'), refs, evidence)).toThrow('invalid_output');

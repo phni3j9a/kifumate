@@ -386,7 +386,9 @@ def book(game):
     closest = lambda item: (abs(item[0] - near), item[0])
     topic_ids = [id_ for _, id_ in sorted(topics, key=closest)]
     if selected:
-        topic_ids.extend(id_ for id_ in strategies if id_ in selected)
+        classified = set().union(*by_side.values())
+        topic_ids.extend(id_ for id_, row in strategies.items()
+                         if id_ in selected and row['tags'] and row['tags'][0] in classified)
     plans = fork['方針'] if fork else strategy_plans(topic_ids, strategies, by_side, selected)
     if not (last or tactics or fork or plans):
         return NO_MATCH.copy()

@@ -71,19 +71,13 @@ function variations(facts: CoachFacts | undefined, ids: string[]) {
   ];
 }
 
-// 同じ節の前置語は次の一手だけに掛かる。後置語は符号の直後の断定に限る。
-function* attributedBookMoves(text: string) {
-  const prefix = /定跡(?:では?|なら|は|の(?:手|候補)|上は?)|(?<!基)本(?:では?|の(?:手|候補))/;
-  const assertion = /^\s*(?:が|は|も)(?:定跡(?:の手)?|本の手(?:順)?)(?:です|でした|だった|だ(?!ろう)|に当た(?:る|ります))(?!か|[?？])/;
-  for (const clause of text.split(/[。、,！!;\n]|(?<=[?？])|(?<=です|ます|だ)が|けれど(?:も)?|一方|しかし/)) {
-    let start = 0;
-    for (const move of clause.matchAll(new RegExp(KIF, 'g'))) {
-      const end = move.index + move[0].length;
-      const postfix = assertion.exec(clause.slice(end));
-      if (postfix || prefix.test(clause.slice(start, move.index))) yield move;
-      start = end + (postfix?.[0].length ?? 0);
-    }
-  }
+const BOOK_PREFIX = /(?:定跡(?:では?|なら|は|の(?:手順?|候補)(?:では?|は)?|上は?)|(?<!基)本(?:では?|の(?:手順?|候補)(?:では?|は)?))[、,\s「『]*$/;
+const BOOK_POSTFIX = /^[」』]?(?:が|は|も)(?:定跡(?:の手)?|本の手(?:順)?)(?:です|だ|である|に当た(?:る|ります))(?!か)/;
+
+// shortcut: 定跡の語と符号が隣り合う場合だけを検査する。言い換えまで区別するなら構造化した出典が必要。
+function attributedBookMoves(text: string) {
+  return [...text.matchAll(new RegExp(KIF, 'g'))].filter(move =>
+    BOOK_PREFIX.test(text.slice(0, move.index)) || BOOK_POSTFIX.test(text.slice(move.index + move[0].length)));
 }
 
 export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 'advice' = 'facts', ids: string[] = []): string | undefined {
@@ -92,7 +86,7 @@ export function notationIssue(text: string, facts?: CoachFacts, kind: 'facts' | 
   if (/[+−‒–-]\s*[0-9一二三四五六七八九十百千万]/.test(text) || /評価値\s*(?:は|が|[:=])?\s*[0-9]/.test(text)) return 'numeric_evaluation';
   const played = facts?.実戦手 ?? [];
   // 定跡を明示した符号には、本譜全体やエンジンの候補ではなく着手前の定跡資料が必要。
-  const attributed = [...attributedBookMoves(text)];
+  const attributed = attributedBookMoves(text);
   if (attributed.length) {
     const book = [...keypointBookMoves(facts, ids), ...(facts?.仮の手順 ?? []).filter(line => line.定跡 &&
       ids.some(id => id === `${line.手数}:position` || id === `${line.手数}:deep:position`)).flatMap(line => line[PV])];
@@ -247,7 +241,7 @@ export function rememberToolEvidence(facts: CoachFacts, name: string, args: Reco
     if (Array.isArray(fork?.定跡の手)) saveMoves(fork.参照, fork.定跡の手, true);
     if (Array.isArray(result.手筋)) for (const item of result.手筋) {
       saveMoves(item?.参照, [item?.正解]);
-      if (Array.isArray(item?.別解)) saveMoves(item.参照, item.別解, true);
+      if (Array.isArray(item?.別解)) saveMoves(item.参照, item.別解);
     }
   }
   if (name === 'mate' && result.状態 === '詰みを証明' && Number.isInteger(args.position?.ply) && Array.isArray(result.手順)) {
