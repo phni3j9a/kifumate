@@ -1,5 +1,27 @@
 # staging実測と費用見積もり
 
+## 解析ごとの専用コンテナ（Issue #77、2026-11-22）
+
+stagingのみ。新3クラス・applicationで [durable_object policy](https://developers.cloudflare.com/containers/configuration/scheduling-policy/) を使用。下表は起動時指定で、全モード **1536 MiB・2000 MB**、std/realtime **1 vCPU**、precise **2 vCPU**。#75の冷間最大891 MiBに645 MiB以上の余裕があり、743 MBのイメージも最小ディスクに収まる。探索条件は不変。
+
+| モード | 初回結果観測 | 所要秒（DO／クライアント） | depth | 計算資源の概算 |
+| --- | ---: | ---: | --- | ---: |
+| std・85手 | 4.411秒 | 34.623／35.879 | 1位中央値15 | $0.001544/局 |
+| precise・85手 | 4.435秒 | 137.902／148.816 | 1段目16・深読み16（各中央値） | $0.007369/局 |
+| realtime | 3.832秒 | 課金対象75.378秒（通常休止・hold再開・明示停止） | 初回16 → 20 → 21、hold 35.065秒で36 | $0.001433/分 |
+
+`measure.py`（preciseは `--expect-deep`）と `measure_realtime.py`。全局は86/86局面、精密は深読み8/8・全件再送・署名・回数更新を確認。初回は全局がDO作成時刻から先頭結果を別途ポーリングするまで、realtimeが要求送信から観測まで。いずれもVMだけの起動時間ではない。#75の旧サイズ同時間帯の1回はstd 38.358秒／depth 15、precise 144.338秒／16・深読み16、#75のrealtime初回4.210秒／16。今回は各1回、配置・通信・負荷を固定しておらず、短縮や性能同等を保証しない。
+
+[公式単価](https://developers.cloudflare.com/containers/platform/pricing/)で CPU 上限×$0.000020＋1.5 GiB×$0.0000025＋2 GB×$0.00000007＝std/realtime **$0.00002389/秒**、precise **$0.00004389/秒**。全局は下の既存モデルどおりDO秒＋30秒（64.623／167.902秒）。realtimeは実行時間だけで見積もり、今回の75.378秒は約$0.001801。無料枠控除前、DO・Worker・ログ等は別、請求実績ではない。
+
+**並列・再検証の経緯：** 新規9端末からstd 5局＋precise 2局＋realtime 2セッションを同時送信。各全局モードの1局だけ85手、他は12手。全局7局とも専用IDで完走（旧2枠超え）、realtimeも両方初回結果を取得し枠衝突はなかった。ただし初版では全局85手が86.691／197.790秒、realtimeは両方とも継続探索で `analysis_unavailable` に終わり、9件すべての成功ではない。毎局面のhealth照会をやめ、起動完了をインスタンス内で再利用した。初版realtimeの障害原因自体は特定できていない。
+
+修正後（Version `396f171e-40d4-4c3a-a3d6-92b00f1a46b2`）は上表の85手2局と別々の2セッションを並列実行。4件すべて成功。第2セッションは6.469秒でdepth 15を確認してDELETE。長い方は局面更新5回0.520〜0.699秒、連続更新で古い結果を破棄、30秒休止、hold再開3.719秒、最後の停止後は使用時間が増えなかった。同じ端末の別セッションで月間利用時間が減らないことも確認。費用を抑え、修正後に9件の全シナリオは繰り返していない。
+
+**非常停止とCPU：** `PAUSE_FREE_ANALYSIS=true` のstagingで無料の新規局が503、有料はstd・precise・realtimeが完走。診断時だけ同一の `engine_start` の固定フィールドを内部中継→Worker tailへ転送（外部APIやsecretを追加せず、トークン・棋譜は記録しない）。3モードとも `/app/engine-avx2`、affinity/processor は1/1・2/2・1/1。これは短い別実行での実測で、表の全局のホストを直接照合したものではない。診断転送を外し、無料受付を戻した後の値が上表。
+
+**後片付け：** 期限付き招待を取消し、使用4端末がすべて `paid:false`。診断なし・新方式有効の最終staging Version `6eae0050-1bf0-4629-9d0f-cb64bbaa619f`（最後の変更は旧ルート選択用varのみ、未指定）。13:44 UTC、新3アプリは `active=starting=0`、std 7・precise 4・realtime 5件の履歴がすべてinactive。旧3アプリも `active=assigned=0`、各2枠inactive。旧applicationは削除せず、production・共有secretは未変更。JST月初の切替とロールバックは [運用手順](../README.md#受付停止と本番切り替え77) を参照。
+
 ## 予約メモリ・ディスクの縮小（Issue #75、2026-11-22）
 
 **`default` policyの下限の検証結果**：固定2枠・同じvCPUでstd／realtimeは 1 vCPU・3 GiB・2 GB、preciseは 2 vCPU・6 GiB・2 GB で完走した。このサイズ変更は採用せず、stagingはmainのコード・standard-2／standard-3へ復元。本番は未変更。本線は [`durable_object` policyと解析単位の並列化（#77）](https://github.com/phni3j9a/kifumate/issues/77) に移す。
