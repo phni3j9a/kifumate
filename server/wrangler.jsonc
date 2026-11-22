@@ -26,9 +26,6 @@
     {"tag": "v4", "new_sqlite_classes": ["StandardJob", "PreciseJob", "RealtimeEngine", "RealtimeAccount"]}
   ],
   "containers": [
-    {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
-    {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
-    {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
     {"class_name": "StandardJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
     {"class_name": "PreciseJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
     {"class_name": "RealtimeEngine", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}}
@@ -51,9 +48,6 @@
         ]
       },
       "containers": [
-        {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
-        {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
-        {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
         {"class_name": "StandardJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
         {"class_name": "PreciseJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
         {"class_name": "RealtimeEngine", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}}
@@ -90,9 +84,6 @@
         ]
       },
       "containers": [
-        {"class_name": "StandardContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
-        {"class_name": "PreciseContainer", "image": "./container/Dockerfile", "instance_type": "standard-3", "max_instances": 2},
-        {"class_name": "RealtimeContainer", "image": "./container/Dockerfile", "instance_type": "standard-2", "max_instances": 2},
         {"class_name": "StandardJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
         {"class_name": "PreciseJob", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}},
         {"class_name": "RealtimeEngine", "scheduling_policy": "durable_object", "images": {"base": {"dockerfile": "./container/Dockerfile"}}}

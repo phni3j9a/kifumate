@@ -41,7 +41,7 @@ describe('精密結果の署名', () => {
     await stub.fetch('https://device/register?hash=' + 'a'.repeat(64), {method: 'POST'});
     await runInDurableObject(stub, async (instance: any) => {
       instance.env.COACH_SIGNING_KEY = 'test-key';
-      instance.env.PRECISE = {getByName: () => ({fetch: async (_: unknown, init: RequestInit) => Response.json(results[JSON.parse(init.body as string).ply])})};
+      instance.env.PRECISE_JOB = {getByName: () => ({fetch: async (_: unknown, init: RequestInit) => Response.json(results[JSON.parse(init.body as string).ply])})};
       const create = await instance.fetch(new Request('https://device/v1/jobs', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dev-Paid': '1'}, body: JSON.stringify(input)}));
       const job = await create.json(); expect(job.coachProof).toBeNull();
       await instance.alarm(); await instance.alarm();
