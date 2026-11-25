@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../../analysis/environment";
 import { useCoach } from "../../coach/provider";
 import { useCallback, useRef, useState, type ComponentRef } from "react";
 import { ScrollView } from "react-native";
@@ -17,7 +18,7 @@ export default function Settings() {
   useFocusEffect(
     useCallback(() => {
       void controller.sync();
-      void coach.sync();
+      if (COACH_ENABLED) void coach.sync();
       listAliases(db)
         .then((a) => setNames(a.map((n) => n.name).join("、")))
         .catch(() => setNames(""));
@@ -45,7 +46,7 @@ export default function Settings() {
             onPress={() => router.push("/invitation")}
           />
         </Card>
-        <SectionTitle>対局と解説</SectionTitle>
+        <SectionTitle>{COACH_ENABLED ? "対局と解説" : "対局"}</SectionTitle>
         <Card>
           <Row
             first
@@ -54,12 +55,14 @@ export default function Settings() {
             sub={names || "未登録"}
             onPress={() => router.push("/names")}
           />
-          <Row
-            icon="flag"
-            title="学習プロフィール"
-            sub={`練習中の戦法：${profile.practice.join("・") || "なし"}`}
-            onPress={() => router.push("/profile")}
-          />
+          {COACH_ENABLED && (
+            <Row
+              icon="flag"
+              title="学習プロフィール"
+              sub={`練習中の戦法：${profile.practice.join("・") || "なし"}`}
+              onPress={() => router.push("/profile")}
+            />
+          )}
         </Card>
         <SectionTitle>データ</SectionTitle>
         <Card>

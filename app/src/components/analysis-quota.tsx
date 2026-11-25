@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../analysis/environment";
 import { useEntitlements } from "../entitlements/provider";
 import { router } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
@@ -81,7 +82,7 @@ export function AnalysisQuota() {
           通信できません。残り回数は最後に確認したものです。
         </Text>
       )}
-      {entitlement.paid && (
+      {COACH_ENABLED && entitlement.paid && (
         <View style={{ gap: 5, marginTop: 12 }}>
           <View
             style={{ flexDirection: "row", justifyContent: "space-between" }}

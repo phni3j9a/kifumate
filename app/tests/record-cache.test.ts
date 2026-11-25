@@ -6,8 +6,15 @@ import * as kif from "../src/core/kif";
 import type { Game } from "../src/storage/repository";
 import { loadWithMocks } from "./helpers/load-with-mocks";
 
-for (const screen of ["info", "game/[id]"]) {
-  test(`${screen}：分類の更新だけでは同じKIFを再解析せず、本文の変更では読み直す`, () => {
+for (const [screen, coachEnabled] of [
+  ["info", true],
+  ["game/[id]", true],
+  ["game/[id]", false],
+] as const) {
+  const title = coachEnabled
+    ? `${screen}：分類の更新だけでは同じKIFを再解析せず、本文の変更では読み直す`
+    : "ストア版：?coach=1 でもコーチを開かず、削除確認も解析のみ";
+  test(title, () => {
     const text = readFileSync("tests/fixtures/standard.kif", "utf8");
     let game = {
       id: "a",
@@ -19,6 +26,7 @@ for (const screen of ["info", "game/[id]"]) {
       result: "win",
       self_side: "black",
     } as Game;
+    let dialog = "";
     let reads = 0,
       cursor = 0;
     const memos: { dependencies: unknown[]; value: unknown }[] = [];
@@ -59,7 +67,10 @@ for (const screen of ["info", "game/[id]"]) {
         },
         "react-native-svg": { default: "Svg", Line: "Line" },
         "expo-router": {
-          useLocalSearchParams: () => ({ id: "a" }),
+          useLocalSearchParams: () => ({
+            id: "a",
+            coach: coachEnabled ? undefined : "1",
+          }),
           useFocusEffect: () => {},
           useIsFocused: () => true,
           router: {},
@@ -67,6 +78,7 @@ for (const screen of ["info", "game/[id]"]) {
         "react-native-safe-area-context": {
           useSafeAreaInsets: () => ({ bottom: 0 }),
         },
+        [`${prefix}/analysis/environment`]: { COACH_ENABLED: coachEnabled },
         [`${prefix}/components/chance-bar`]: stub(["ChanceBar"]),
         [`${prefix}/components/evaluation-help`]: stub(["EvaluationHelp"]),
         [`${prefix}/components/use-game`]: {
@@ -87,12 +99,12 @@ for (const screen of ["info", "game/[id]"]) {
           "Underlined",
           "RoundButton",
         ]),
-        [`${prefix}/components/overlay`]: stub([
-          "Sheet",
-          "MenuRow",
-          "toast",
-          "ask",
-        ]),
+        [`${prefix}/components/overlay`]: {
+          ...stub(["Sheet", "MenuRow", "toast"]),
+          ask: (options: { text: string }) => {
+            dialog = options.text;
+          },
+        },
         [`${prefix}/components/classification-editor`]: stub([
           "ClassificationEditor",
         ]),
@@ -134,8 +146,28 @@ for (const screen of ["info", "game/[id]"]) {
       const element = module.default();
       // 対局画面のルートはidでキー付けしたGameViewを返す。
       if (typeof element.type === "function")
-        (element.type as (props: unknown) => unknown)(element.props);
+        return (element.type as (props: unknown) => ReactElement)(
+          element.props,
+        );
+      return element;
     };
+    if (!coachEnabled) {
+      const nodes = (e: any): any[] =>
+        Array.isArray(e)
+          ? e.flatMap(nodes)
+          : e?.props
+            ? [e, ...nodes(e.props.children)]
+            : [];
+      const tree = nodes(render());
+      assert(!tree.some((e) => e.type === "CoachSheet"));
+      const panel = tree.find((e) => e.type === "AnalysisPanel");
+      assert(panel);
+      assert.equal(panel.props.onCoach, undefined);
+      tree.find((e) => e.props.label === "この棋譜を削除").props.onPress();
+      assert.match(dialog, /解析結果/);
+      assert.doesNotMatch(dialog, /コーチ|解説/);
+      return;
+    }
     render();
     assert.equal(reads, 1);
     for (let i = 0; i < 5; i++) {

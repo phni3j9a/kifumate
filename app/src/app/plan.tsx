@@ -1,6 +1,6 @@
 import { Text, View } from "react-native";
 import { router } from "expo-router";
-import { DISTRIBUTION } from "../analysis/environment";
+import { COACH_ENABLED, DISTRIBUTION } from "../analysis/environment";
 import { colors, font, line, radius, shadow } from "../components/theme";
 import {
   Button,
@@ -24,7 +24,7 @@ const rows = [
   ],
   ["分岐して手を試す", "✓", "✓"],
   ["リアルタイム解析", "—", "✓"],
-  ["AIコーチ", "—", "解説と質問"],
+  ...(COACH_ENABLED ? [["AIコーチ", "—", "解説と質問"]] : []),
 ];
 export default function Plan() {
   const copy = planCopy(DISTRIBUTION);
@@ -46,7 +46,9 @@ export default function Plan() {
           <View style={{ flex: 1 }}>
             <Text style={font(900, 18, 1.2)}>{copy.heading}</Text>
             <Text style={[font(500, 11.5, 1.6, colors.ink2), { marginTop: 6 }]}>
-              精密解析、リアルタイム解析、AIコーチの解説と質問が使えます。
+              {COACH_ENABLED
+                ? "精密解析、リアルタイム解析、AIコーチの解説と質問が使えます。"
+                : "精密解析とリアルタイム解析が使えます。"}
             </Text>
           </View>
         </Card>
@@ -139,7 +141,9 @@ export default function Plan() {
           ))}
         </View>
         <Hint>
-          リアルタイム解析は月300分（解析が動いている間を数えます）、AIコーチには週ごとの利用枠があり、設定で残りを確認できます。残りが少なくなったら、お知らせします。
+          {COACH_ENABLED
+            ? "リアルタイム解析は月300分（解析が動いている間を数えます）、AIコーチには週ごとの利用枠があり、設定で残りを確認できます。残りが少なくなったら、お知らせします。"
+            : "リアルタイム解析は月300分（解析が動いている間を数えます）です。残りが少なくなったら、お知らせします。"}
         </Hint>
         <Button
           wide

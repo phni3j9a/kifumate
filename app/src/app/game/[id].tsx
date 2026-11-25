@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../../analysis/environment";
 import { CoachSheet } from "../../coach/sheet";
 import { useCoach } from "../../coach/provider";
 import type { Reference } from "../../coach/types";
@@ -120,7 +121,9 @@ function PlayerName({
 
 export default function GameScreen() {
   const { id, coach } = useLocalSearchParams<{ id: string; coach?: string }>();
-  return <GameView key={id} id={id} openCoach={coach === "1"} />;
+  return (
+    <GameView key={id} id={id} openCoach={COACH_ENABLED && coach === "1"} />
+  );
 }
 function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
   const [coachOpen, setCoachOpen] = useState(openCoach);
@@ -678,7 +681,9 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
     setSheet(null);
     ask({
       title: "この棋譜を削除しますか",
-      text: "解析結果と、AIコーチの解説・質問の履歴もいっしょに消えます。戦績からも外れます。元には戻せません。使った回数は戻りません。",
+      text: COACH_ENABLED
+        ? "解析結果と、AIコーチの解説・質問の履歴もいっしょに消えます。戦績からも外れます。元には戻せません。使った回数は戻りません。"
+        : "解析結果もいっしょに消えます。戦績からも外れます。元には戻せません。使った回数は戻りません。",
       ok: "削除する",
       danger: true,
       onOk: async () => {
@@ -956,11 +961,15 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         </View>
         <View style={s.sp} />
         <AnalysisPanel
-          onCoach={() => {
-            clear();
-            setCoachFull(false);
-            setCoachOpen(true);
-          }}
+          onCoach={
+            COACH_ENABLED
+              ? () => {
+                  clear();
+                  setCoachFull(false);
+                  setCoachOpen(true);
+                }
+              : undefined
+          }
           analysis={analysis}
           received={!!shown}
           branch={!!branch}
@@ -1108,7 +1117,7 @@ function GameView({ id, openCoach }: { id: string; openCoach: boolean }) {
         </View>
         <View style={s.spb} />
       </ScrollView>
-      {coachOpen && (
+      {COACH_ENABLED && coachOpen && (
         <CoachSheet
           game={game}
           onFullChange={setCoachFull}

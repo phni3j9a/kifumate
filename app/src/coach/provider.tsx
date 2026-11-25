@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../analysis/environment";
 import { useAppData } from "../components/data-provider";
 import { registerDataDrain } from "../storage/maintenance";
 import { useEntitlements } from "../entitlements/provider";
@@ -34,6 +35,7 @@ export function CoachProvider({
   );
   useEffect(() => registerDataDrain(() => controller.idle()), [controller]);
   useEffect(() => {
+    if (!COACH_ENABLED) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async (restore = false) => {
