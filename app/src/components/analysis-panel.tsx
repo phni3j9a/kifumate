@@ -402,33 +402,35 @@ export function AnalysisPanel({
             false,
             true,
           )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="AIに聞く"
-          onPress={onCoach}
-          style={({ pressed }) => [
-            {
-              marginLeft: "auto",
-              height: 25,
-              marginBottom: 4,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 4,
-              paddingLeft: 7,
-              paddingRight: 10,
-              borderWidth: line.ol,
-              borderColor: colors.ink,
-              borderRadius: radius.pill,
-              backgroundColor: quota?.paid ? colors.mint : colors.white,
-              boxShadow: shadow.small,
-            },
-            pressed && { transform: [{ translateY: 2 }], boxShadow: "none" },
-          ]}
-        >
-          <Icon name="spark" size={14} />
-          <Text style={font(900, 11)}>AIに聞く</Text>
-          {!quota?.paid && <Icon name="lock" size={12} />}
-        </Pressable>
+        {onCoach && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="AIに聞く"
+            onPress={onCoach}
+            style={({ pressed }) => [
+              {
+                marginLeft: "auto",
+                height: 25,
+                marginBottom: 4,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                paddingLeft: 7,
+                paddingRight: 10,
+                borderWidth: line.ol,
+                borderColor: colors.ink,
+                borderRadius: radius.pill,
+                backgroundColor: quota?.paid ? colors.mint : colors.white,
+                boxShadow: shadow.small,
+              },
+              pressed && { transform: [{ translateY: 2 }], boxShadow: "none" },
+            ]}
+          >
+            <Icon name="spark" size={14} />
+            <Text style={font(900, 11)}>AIに聞く</Text>
+            {!quota?.paid && <Icon name="lock" size={12} />}
+          </Pressable>
+        )}
       </View>
       <View
         style={[

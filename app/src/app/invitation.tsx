@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../analysis/environment";
 import { useRef, useState } from "react";
 import { Platform, Text, View } from "react-native";
 import { useAnalysis } from "../analysis/provider";
@@ -63,7 +64,9 @@ export default function Invitation() {
         </Card>
         <SectionTitle>コードを入力</SectionTitle>
         <Hint style={{ marginTop: 0 }}>
-          招待コードで、精密解析・リアルタイム解析・AIコーチが使えます。この端末で有効になります。
+          {COACH_ENABLED
+            ? "招待コードで、精密解析・リアルタイム解析・AIコーチが使えます。この端末で有効になります。"
+            : "招待コードで、精密解析・リアルタイム解析が使えます。この端末で有効になります。"}
         </Hint>
         <Input
           accessibilityLabel="招待コード"

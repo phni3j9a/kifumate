@@ -1,3 +1,5 @@
+import { COACH_ENABLED } from "../analysis/environment";
+import { Redirect } from "expo-router";
 import { Text, View } from "react-native";
 import { useCoach } from "../coach/provider";
 import { practices } from "../coach/types";
@@ -15,6 +17,7 @@ import { colors, font, line } from "../components/theme";
 import { toast } from "../components/overlay";
 export default function ProfileScreen() {
   const { profile, controller, overview } = useCoach();
+  if (!COACH_ENABLED) return <Redirect href="/settings" />;
   const save = (p: typeof profile) =>
     void controller
       .setProfile(p)

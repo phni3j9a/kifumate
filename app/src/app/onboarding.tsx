@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../analysis/environment";
 import { GraphMarkIcon } from "../components/graph-mark";
 import {
   useCallback,
@@ -67,6 +68,7 @@ const scenes = [
   ],
   ["さあ、はじめよう", "準備ができました。まずは1局、取り込んでみましょう。"],
 ] as const;
+const steps = COACH_ENABLED ? [0, 1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 6];
 export default function Onboarding() {
   const db = useSQLiteContext(),
     app = useAppData(),
@@ -123,7 +125,7 @@ export default function Onboarding() {
       if (saving) return;
       setScene((previous) => {
         const step = previous.step + direction;
-        return step < 0 || step >= scenes.length
+        return step < 0 || step >= steps.length
           ? previous
           : { step, direction };
       });
@@ -138,7 +140,7 @@ export default function Onboarding() {
     },
   });
   async function finish(toImport: boolean) {
-    if (saving || !coach.ready) return;
+    if (saving || (COACH_ENABLED && !coach.ready)) return;
     setSaving(true);
     try {
       const n = name.trim();
@@ -147,11 +149,12 @@ export default function Onboarding() {
           ...(await listAliases(db)).map((a) => a.name),
           n,
         ]);
-      await coach.controller.setProfile({
-        ...coach.profile,
-        practice,
-        goal: goal.trim(),
-      });
+      if (COACH_ENABLED)
+        await coach.controller.setProfile({
+          ...coach.profile,
+          practice,
+          goal: goal.trim(),
+        });
       await app.complete();
       if (replay && !toImport) router.back();
       else router.replace(toImport ? "/import" : "/");
@@ -173,9 +176,10 @@ export default function Onboarding() {
       return () => sub.remove();
     }, [step, saving, go]),
   );
-  const last = step === 6,
-    scene = scenes[step]!,
-    image = mascots[`onb-${step + 1}` as Mascot];
+  const sceneId = steps[step]!,
+    last = step === steps.length - 1,
+    scene = scenes[sceneId]!,
+    image = mascots[`onb-${sceneId + 1}` as Mascot];
   // 画像自体を contain 後の寸法にして、縦の余白を残さず底に揃える。
   const imageHeight = Math.max(
     0,
@@ -189,7 +193,7 @@ export default function Onboarding() {
       ? replay
         ? ""
         : "バックアップから復元する"
-      : step === 5
+      : sceneId === 5
         ? "あとで決める"
         : last
           ? replay
@@ -234,7 +238,7 @@ export default function Onboarding() {
           )}
         </View>
         <View
-          accessibilityLabel={`7枚中 ${step + 1}枚目`}
+          accessibilityLabel={`${steps.length}枚中 ${step + 1}枚目`}
           accessibilityRole="image"
           style={{
             flex: 1,
@@ -243,7 +247,7 @@ export default function Onboarding() {
             gap: 5,
           }}
         >
-          {scenes.map((_, i) => (
+          {steps.map((_, i) => (
             <View
               key={i}
               style={{
@@ -319,7 +323,7 @@ export default function Onboarding() {
                 borderRadius: 28,
                 boxShadow: shadow.card,
                 backgroundColor: [colors.sand, colors.mintSoft, colors.sky][
-                  step % 3
+                  sceneId % 3
                 ],
                 overflow: "hidden",
               }}
@@ -351,7 +355,7 @@ export default function Onboarding() {
             >
               {scene[1]}
             </Text>
-            {step === 1 && (
+            {sceneId === 1 && (
               <View style={{ marginTop: 12 }}>
                 <Text style={[font(700, 12, 1.5), { marginBottom: 6 }]}>
                   対局で使っている名前
@@ -370,7 +374,7 @@ export default function Onboarding() {
                 </Hint>
               </View>
             )}
-            {step === 2 && (
+            {sceneId === 2 && (
               <View
                 style={{
                   marginTop: 12,
@@ -396,7 +400,7 @@ export default function Onboarding() {
                 ))}
               </View>
             )}
-            {step === 4 && (
+            {sceneId === 4 && (
               <View
                 style={{
                   marginTop: 12,
@@ -417,7 +421,7 @@ export default function Onboarding() {
                 </Text>
               </View>
             )}
-            {step === 5 && (
+            {sceneId === 5 && (
               <View style={{ marginTop: 12 }}>
                 <Text style={[font(700, 12, 1.5), { marginBottom: 6 }]}>
                   練習中の戦法（いくつでも）
@@ -476,7 +480,7 @@ export default function Onboarding() {
         <Button
           kind="pri"
           wide
-          disabled={saving || !coach.ready}
+          disabled={saving || (COACH_ENABLED && !coach.ready)}
           onPress={() => (last ? void finish(true) : go(1))}
         >
           {step === 0

@@ -9,7 +9,7 @@ function elements(e: any): any[] {
     ? [e, ...elements(e.props.children)]
     : [];
 }
-function screen() {
+function screen(coachEnabled = true) {
   let index = 0;
   const ref = { current: false },
     deliveries: string[] = [];
@@ -57,6 +57,7 @@ function screen() {
         }),
       },
       "expo-crypto": { randomUUID: () => "uuid" },
+      "../analysis/environment": { COACH_ENABLED: coachEnabled },
       "../analysis/provider": {
         useAnalysis: () => ({ controller: { snapshot: { records: {} } } }),
       },
@@ -118,7 +119,7 @@ function screen() {
     assert(node, name);
     node.props.onPress();
   }
-  return { state, dialogs, writes, routes, press, deliveries };
+  return { render, state, dialogs, writes, routes, press, deliveries };
 }
 test("初回復元の成功は紹介を含む履歴全体を一覧へ置き換える", async () => {
   const h = screen();
@@ -156,4 +157,16 @@ test("OS選択とキャッシュ読み込みの待機中にも進行表示を出
   h.press("ファイルを選ぶ");
   assert.match(h.state[2], /読み込/);
   await setImmediate();
+});
+
+test("ストア版：書き出し・統合確認・完了の案内に解説やプロフィールを含めない", async () => {
+  const h = screen(false),
+    forbidden = /コーチ|プロフィール|解説|質問|目標/;
+  assert.doesNotMatch(JSON.stringify(h.render()), forbidden);
+  h.state[5] = { createdAt: new Date().toISOString(), games: 1 };
+  h.press("既存データと統合する");
+  assert.doesNotMatch(h.dialogs[0].text, forbidden);
+  h.dialogs[0].onOk();
+  await setImmediate();
+  assert.doesNotMatch(h.dialogs[1].text, forbidden);
 });

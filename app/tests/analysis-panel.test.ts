@@ -63,6 +63,7 @@ test("途中結果の未受信局面を候補なしや終局と表示しない",
     ending: "終局",
   });
   const text = JSON.stringify(tree);
+  assert.doesNotMatch(text, /AIに聞く/);
   assert.match(text, /この局面は未解析です/);
   assert.doesNotMatch(text, /この局面の候補手はありません/);
 });

@@ -4,5 +4,6 @@ export const API_URL = analysisUrl(
   process.env.EXPO_PUBLIC_ANALYSIS_URL,
 );
 export const ALLOW_DEVELOPMENT_ACCESS = __DEV__ && API_URL === STAGING_URL;
-// ストア配布時に切り替える。購入処理の実装は別途必要。
-export const DISTRIBUTION: "invite" | "store" = "invite";
+// ストア配布時に切り替える。AIコーチは招待版だけで提供する。購入処理の実装は別途必要。
+export const DISTRIBUTION = "invite" as "invite" | "store";
+export const COACH_ENABLED = DISTRIBUTION === "invite";

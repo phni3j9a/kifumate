@@ -1,3 +1,4 @@
+import { COACH_ENABLED } from "../analysis/environment";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -193,7 +194,7 @@ export default function Backup() {
       text:
         mode === "replace"
           ? `いまこの端末にある棋譜 ${count}局と設定は消えて、この内容に置きかわります。元には戻せません。`
-          : `棋譜 ${p.games}局を取り込みます。同じ開始局面・指し手の棋譜は重複として省き、この端末の修正・解析・解説を保ちます。登録名は追加し、設定・学習プロフィールはこの端末の内容を優先します。`,
+          : `棋譜 ${p.games}局を取り込みます。同じ開始局面・指し手の棋譜は重複として省き、この端末の修正・解析${COACH_ENABLED ? "・解説" : ""}を保ちます。登録名は追加し、設定${COACH_ENABLED ? "・学習プロフィール" : ""}はこの端末の内容を優先します。`,
       ok: mode === "replace" ? "置きかえる" : "統合する",
       image: "sys-backup",
       danger: mode === "replace",
@@ -209,7 +210,7 @@ export default function Backup() {
               coach.controller.busy
             )
               throw new Error(
-                "解析・AIコーチの依頼が残っています。完了か中止を確認してから復元してください。",
+                `${COACH_ENABLED ? "解析・AIコーチ" : "解析"}の依頼が残っています。完了か中止を確認してから復元してください。`,
               );
             return restoreBackup(db, p, mode, randomUUID, setProgress);
           },
@@ -227,7 +228,7 @@ export default function Backup() {
             });
             ask({
               title: "復元しました",
-              text: `棋譜 ${r.added}局を復元しました。同じ棋譜 ${r.skipped}局は省きました。\n招待コードの権利・購入情報は引き継がれません。精密解析の署名は保持しますが、端末が変わると新しいAI解説には精密解析のやり直しが必要です。保存済みの結果・解説は読めます。`,
+              text: `棋譜 ${r.added}局を復元しました。同じ棋譜 ${r.skipped}局は省きました。\n招待コードの権利・購入情報は引き継がれません。${COACH_ENABLED ? "精密解析の署名は保持しますが、端末が変わると新しいAI解説には精密解析のやり直しが必要です。保存済みの結果・解説は読めます。" : "保存済みの解析結果は読めます。"}`,
               ok: "OK",
               single: true,
               image: "sys-backup",
@@ -257,7 +258,9 @@ export default function Backup() {
             ]}
           >
             棋譜 {count}
-            局、解析結果、戦法と囲いの修正、AIコーチの解説と質問の履歴、学習プロフィール、設定を、1つのファイルにまとめます。
+            局、解析結果、戦法と囲いの修正、
+            {COACH_ENABLED && "AIコーチの解説と質問の履歴、学習プロフィール、"}
+            設定を、1つのファイルにまとめます。
           </Text>
           <Button
             kind="pri"
@@ -305,10 +308,13 @@ export default function Backup() {
           データはこの端末の中だけに保存されています。アカウント登録や自動の同期はありません。機種変更の前に、ここから書き出してください。
         </Hint>
         <Hint>
-          端末トークン、招待コードの権利、購入情報は、バックアップには入りません。招待コードは端末ごとです。保存した結果と解説は、復元後も通信なしで読めます。
+          端末トークン、招待コードの権利、購入情報は、バックアップには入りません。招待コードは端末ごとです。保存した
+          {COACH_ENABLED ? "結果と解説" : "解析結果"}
+          は、復元後も通信なしで読めます。
         </Hint>
         <Hint>
-          ファイルには対局者名・目標・質問などの個人情報が含まれます。安全な場所に保管してください。送信中の依頼は引き継がず、新しい端末で勝手に再送しません。
+          ファイルには対局者名{COACH_ENABLED && "・目標・質問"}
+          などの個人情報が含まれます。安全な場所に保管してください。送信中の依頼は引き継がず、新しい端末で勝手に再送しません。
         </Hint>
         {!!error && (
           <Text
