@@ -35,6 +35,7 @@ export function CoachProvider({
   );
   useEffect(() => registerDataDrain(() => controller.idle()), [controller]);
   useEffect(() => {
+    // shortcut: ストア版は招待版から持ち越した未完了の解説依頼を回収せず、削除・置換で破棄する。ストア版でコーチを再開するときに見直す。
     if (!COACH_ENABLED) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
